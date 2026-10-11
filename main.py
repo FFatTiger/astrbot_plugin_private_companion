@@ -6398,7 +6398,7 @@ class PrivateCompanionPlugin(
             return {"ok": False, "code": "scoped_projection_not_initialized", "scopes": []}
         synchronizer.mark_dirty()
         async with self._data_lock:
-            snapshots = self._req041_legacy_snapshots_locked()
+            snapshots = await asyncio.to_thread(self._req041_legacy_snapshots_locked)
         results: list[dict[str, Any]] = []
         for source_scope, snapshot in snapshots:
             results.append(await asyncio.to_thread(
@@ -8093,7 +8093,7 @@ class PrivateCompanionPlugin(
             if status.get("phase") in {"S3", "S4"}:
                 try:
                     async with self._data_lock:
-                        legacy_snapshots = self._req041_legacy_snapshots_locked()
+                        legacy_snapshots = await asyncio.to_thread(self._req041_legacy_snapshots_locked)
                     backfiller = await asyncio.to_thread(
                         MigrationBackfill,
                         coordinator=coordinator,
