@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .pytest_astrbot312/
+/.verify-shards/
+/.p4-tmp/
 
 # Local tooling artifacts
 *.orig
@@ -11,6 +13,14 @@ __pycache__/
 *.tmp
 *.bak
 /.zcode/
+/.workbuddy/
+/build/
+/RELEASE_FILES.json
+/docs/PROMPTS_INVENTORY_20261018.xlsx
+/pages/陪伴小屋/shell-preview*.html
+/pages/陪伴小屋/theme-preview.html
+/pages/陪伴小屋/v2-surface-preview.html
+/pages/陪伴小屋/_probe-timeline.html
 
 # AstrBot host runtime data must never be packaged with this plugin.
 /data/
