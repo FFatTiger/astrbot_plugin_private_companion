@@ -12,7 +12,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 const settle = async () => { for (let i = 0; i < 12; i += 1) await flush(); };
 
 function harness({status, responses = {}, targets = [], refreshedTargets = targets, bridgeResponses = {}, configEditorsAvailable = true,
-  confirmResult = true}) {
+  confirmResult = true, savedSessionValues = []}) {
   const calls = [];
   const bridgeCalls = [];
   const editorCalls = [];
@@ -22,7 +22,7 @@ function harness({status, responses = {}, targets = [], refreshedTargets = targe
   const listeners = {};
   const navigation = [];
   const prompts = [];
-  const sessionValues = new Map();
+  const sessionValues = new Map(savedSessionValues);
   let directoryRefreshes = 0;
   let currentTargets = targets;
   let html = '';
@@ -188,6 +188,16 @@ test('confirming the startup prompt prepares the legacy connection and opens mig
   ]);
   assert.equal(page.directoryRefreshes, 1);
   assert.deepEqual(page.navigation, [['manage', 'data', 'migration']]);
+});
+
+test('a restored installation is not hidden by an earlier browser-session dismissal', async () => {
+  const page = harness({status: {upgrade: {present: true, configured: false, can_prepare: true,
+    source_sha256: 'restored-legacy-config'}}, confirmResult: false,
+    savedSessionValues: [['companion-upgrade-guide:restored-legacy-config', 'shown']]});
+  assert.equal(await page.promptUpgradeAtStartup(() => assert.fail('dismissed prompt must not write')), true);
+  assert.equal(page.prompts.length, 1);
+  assert.equal(await page.promptUpgradeAtStartup(() => assert.fail('must not repeat in the same document')), false);
+  assert.equal(page.calls.filter(call => call.method === 'POST').length, 0);
 });
 
 test('startup upgrade preparation failure does not open migration', async () => {

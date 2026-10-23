@@ -129,6 +129,7 @@ window.CompanionSetup = (() => {
   let legacyImportGroupNetwork = false;
   let legacyImportWorldbook = false;
   let startupUpgradePrompt = null;
+  const startupUpgradeShown = new Set();
 
   async function promptUpgradeAtStartup(onContinue) {
     if (startupUpgradePrompt) return startupUpgradePrompt;
@@ -140,8 +141,9 @@ window.CompanionSetup = (() => {
       if (!upgrade?.present || upgrade.configured) return false;
       const fingerprint = typeof upgrade.source_sha256 === "string" && upgrade.source_sha256
         ? upgrade.source_sha256 : "detected";
-      const storageKey = `companion-upgrade-guide:${fingerprint}`;
-      try { if (sessionStorage.getItem(storageKey) === "shown") return false; } catch { /* Private browsing may disable storage. */ }
+      // Only suppress duplicate prompts in this document. A restored installation
+      // or a new page visit must not inherit an old browser-session dismissal.
+      if (startupUpgradeShown.has(fingerprint)) return false;
       if (typeof window.CompanionConfirm !== "function") return false;
       const message = upgrade.can_prepare
         ? "已识别到旧版账号、人格和模型配置。确认后会自动接续这些设置，并直接打开旧版资料迁入；旧版资料保持原样。"
@@ -152,11 +154,11 @@ window.CompanionSetup = (() => {
         confirmText: upgrade.can_prepare ? "接续配置并继续" : "前往账号与会话",
         cancelText: "稍后处理",
       });
-      try { sessionStorage.setItem(storageKey, "shown"); } catch { /* The current page still prevents duplicate prompts. */ }
+      startupUpgradeShown.add(fingerprint);
       if (accepted && typeof onContinue === "function") {
         try { await onContinue(upgrade); }
         catch (error) {
-          try { sessionStorage.removeItem(storageKey); } catch { /* Retry remains available after a page reload. */ }
+          startupUpgradeShown.delete(fingerprint);
           throw error;
         }
       }
