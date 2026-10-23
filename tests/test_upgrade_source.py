@@ -76,6 +76,13 @@ class UpgradeSourceTests(unittest.TestCase):
             )
             loaded = json.loads(preserved_configuration_path(config).read_text(encoding="utf-8"))
             self.assertEqual(loaded, complete)
+            runtime = config / "plugin_data" / "astrbot_plugin_private_companion" / "companion-7"
+            # The reader must honor the retained source even when the rewritten
+            # current file still looks like a legacy configuration.
+            with patch("astrbot_host.legacy_config._config_directories", return_value=(config,)):
+                decoded, selected, _ = read_v1_host_configuration(runtime)
+            self.assertEqual(selected, saved)
+            self.assertEqual(decoded, complete)
             # Keep the rejected later snapshot for diagnosis without pointing
             # the migration at it.
             self.assertEqual(len(list((config / ".private-companion-upgrade").glob("*.json"))), 3)

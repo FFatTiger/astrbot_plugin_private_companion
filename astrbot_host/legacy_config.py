@@ -67,6 +67,11 @@ def find_v1_data_root(data_root) -> tuple[Path, str]:
 def v1_host_config_path(data_root) -> Path | None:
     """Locate the V1 settings file beside this plugin's AstrBot data root."""
     for directory in _config_directories(data_root):
+        # The import-before-schema hook has already selected the complete source.
+        # A normalized live file may retain legacy marker keys while losing values.
+        preserved = preserved_configuration_path(directory)
+        if preserved is not None:
+            return preserved
         path = directory / V1_HOST_CONFIG_NAME
         if path.is_file():
             try:
@@ -77,9 +82,6 @@ def v1_host_config_path(data_root) -> Path | None:
                 return path
             if is_legacy_configuration(value):
                 return path
-        preserved = preserved_configuration_path(directory)
-        if preserved is not None:
-            return preserved
         if path.is_file():
             return path
     return None
