@@ -176,7 +176,7 @@ class PersonAcquaintance:
         if row is None or row["state"] != "active":
             return False
         document = json.loads(row["document_json"])
-        return bool(document.get("contexts", {}).get("private"))
+        return bool(document.get("contexts", {}).get("private") or document.get("legacy_private_contact"))
 
     # -- model tool ----------------------------------------------------------
 

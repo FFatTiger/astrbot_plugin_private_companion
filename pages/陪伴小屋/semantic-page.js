@@ -415,5 +415,14 @@ window.CompanionSemanticPage = (() => {
   /* 页面级未保存守卫（page-guards.js）：草稿存在就说明有未提交的改法。
      unmount 已经把 draft 之外的引用清掉，这里跟着 root 一起判断。 */
   function isDirty(){return !!draft&&!!root;}
-  return {mount,unmount,isDirty};
+  function changedFields(){return Object.keys(draft||{}).map(id=>
+    [...flags,...providerFields,...numberFields,...selectFields].find(item=>item[0]===id)?.[1]||id);}
+  async function saveBeforeLeave(){
+    if(!isDirty())return true;
+    if(busy)return {error:'语义配置正在处理，请稍后保存。'};
+    await run('configure',{changes:{...draft},revision:state.settings.revision});
+    return !isDirty()?true:{error:message||'语义配置未保存，草稿仍保留。'};
+  }
+  function discardChanges(){if(busy)return {error:'正在处理，请稍后切换。'};draft=null;conflict=false;return true;}
+  return {mount,unmount,isDirty,changedFields,saveBeforeLeave,discardChanges};
 })();

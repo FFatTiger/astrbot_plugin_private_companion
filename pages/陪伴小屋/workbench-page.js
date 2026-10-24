@@ -915,8 +915,8 @@ window.CompanionWorkbench = (() => {
       + legend + body
       + `<div class="wb-actions">`
       + `<button type="button" class="wb-save${s.busy ? " is-busy" : ""}${s.savedState || ""}"`
-      + ` data-wb-action="save"${s.locked() ? " disabled" : ""}>`
-      + `<span class="wb-save-label">${e(s.busy ? "保存中…" : "保存")}</span>`
+      + ` data-wb-action="save"${s.locked() || Object.keys(s.conflicts).length ? " disabled" : ""}>`
+      + `<span class="wb-save-label">${e(s.busy ? "保存中…" : s.stale ? "核对最新配置" : "保存")}</span>`
       + `<svg class="wb-ring" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7"></circle></svg>`
       + `<svg class="wb-check" viewBox="0 0 19 19" aria-hidden="true"><path d="M4 10l4 4 7-9"></path></svg>`
       + `</button>`
@@ -924,7 +924,7 @@ window.CompanionWorkbench = (() => {
       + (container.resettable
         ? `<button type="button" class="button" data-wb-action="inherit"${s.locked() ? " disabled" : ""}>全部恢复继承</button>`
         : "")
-      + `<span class="wb-actions-note">${e(s.dirty() ? "有未保存的改动" : "与已保存一致")}</span>`
+      + `<span class="wb-actions-note">${e(Object.keys(s.conflicts).length ? `${Object.keys(s.conflicts).length} 项修改待核对` : s.stale ? "改动已保留，待核对当前配置" : s.dirty() ? "有未保存的改动" : "与已保存一致")}</span>`
       + (journal && scopeLabel ? `<span class="wb-scope">${e(scopeLabel)}</span>` : "")
       + `</div></div></section>`;
   }
@@ -936,7 +936,9 @@ window.CompanionWorkbench = (() => {
     const tone = state.bad ? " is-error" : state.ok ? " is-ok" : "";
     return `<div class="wb-notice${tone}" role="status" aria-live="polite">`
       + `${icon(state.bad ? "alert-circle" : state.ok ? "check-circle-2" : "info")}`
-      + `<span>${e(state.notice)}</span></div>`;
+      + `<span>${e(state.notice)}</span>`
+      + (state.stale ? `<button type="button" class="button small" data-wb-action="reconcile"${state.busy || state.loading || state.pending ? " disabled" : ""}>核对最新配置</button>` : "")
+      + `</div>`;
   }
 
   /* === 实例 === */
@@ -970,7 +972,7 @@ window.CompanionWorkbench = (() => {
     const writeTokenKey = sendTokenKey || tokenKey;
     const state = {
        status: null, draft: null, base: null, pending: null, pendingReason: "",
-      busy: false, loading: false, denied: false, stale: false,
+      busy: false, loading: false, denied: false, stale: false, conflicts: {},
       notice: "", bad: false, ok: false, savedState: "", ticket: 0,
       drawRails: true, container: null, timer: null,
       instanceId: `wb-${++instanceSequence}`, activeGroupId: initialSection, resetFields: [],
@@ -984,7 +986,8 @@ window.CompanionWorkbench = (() => {
 
     const locked = () => state.busy || state.loading || !!state.pending || !state.status || state.denied;
     const dirty = () => !!state.draft && !!state.base
-      && Object.keys(state.draft).some(name => state.draft[name] !== state.base[name]);
+      && (resets_.length > 0 || Object.keys(state.conflicts).length > 0
+        || Object.keys(state.draft).some(name => state.draft[name] !== state.base[name]));
     state.locked = locked;
     state.dirty = dirty;
 
@@ -1257,7 +1260,7 @@ window.CompanionWorkbench = (() => {
       }
       const wasDrawing = state.drawRails;
       state.resetFields = resets_;
-      root.innerHTML = `<div class="wb">${noticeMarkup(state)}${cardMarkup(state, state.container, root.closest?.(".console-section, .decision-stage")?.querySelector?.(":scope > header h2")?.textContent?.trim())}</div>`;
+      root.innerHTML = `<div class="wb">${noticeMarkup(state)}${conflictMarkup()}${cardMarkup(state, state.container, root.closest?.(".console-section, .decision-stage")?.querySelector?.(":scope > header h2")?.textContent?.trim())}</div>`;
       /* 层轨绘制只做一次：重绘之后不再重播。 */
       if (wasDrawing && state.status) {
         state.drawRails = false;
@@ -1272,6 +1275,40 @@ window.CompanionWorkbench = (() => {
       wireFieldDescriptions(root);
       /* 台词气泡的 textarea 按内容自动长高；重绘后统一量一次。 */
       growQuotes(root);
+    }
+
+    function conflictMarkup() {
+      const names = Object.keys(state.conflicts);
+      if (!names.length) return "";
+      const text = (name, value) => {
+        const item = state.container?.fields[name];
+        if (value === undefined) return "此项已移除";
+        if (typeof value === "boolean") return value ? "已开启" : "已关闭";
+        if (value === "") return "未填写";
+        return String(item?.choices?.[value] ?? value);
+      };
+      return `<section class="wb-conflicts" aria-label="核对同时修改的配置">`
+        + `<p>这些设置也在其他页面改过，请逐项选择要保留的值。</p>`
+        + names.map(name => `<div class="wb-conflict"><strong>${e(labels[name] || name)}</strong>`
+          + `<div class="wb-conflict-values"><span>当前已保存：${e(text(name, state.base[name]))}</span>`
+          + `<span>我的修改：${e(resets_.includes(name) ? "恢复继承" : text(name, state.draft[name]))}</span></div>`
+          + `<div class="wb-conflict-actions"><button type="button" class="button small" data-wb-conflict="${e(name)}" data-wb-choice="current"${locked() ? " disabled" : ""}>使用当前值</button>`
+          + (state.container?.fields[name] ? `<button type="button" class="button small" data-wb-conflict="${e(name)}" data-wb-choice="draft"${locked() ? " disabled" : ""}>保留我的修改</button>` : "")
+          + `</div></div>`).join("") + `</section>`;
+    }
+
+    function resolveConflict(name, choice) {
+      if (locked() || !Object.hasOwn(state.conflicts, name)) return;
+      if (choice === "current") {
+        if (Object.hasOwn(state.base, name)) state.draft[name] = state.base[name];
+        else delete state.draft[name];
+        resets_ = resets_.filter(field => field !== name);
+      } else if (choice !== "draft" || !state.container?.fields[name]) return;
+      delete state.conflicts[name];
+      state.bad = Object.keys(state.conflicts).length > 0;
+      state.notice = state.bad ? "还有同时修改的设置需要核对。"
+        : dirty() ? "核对完成，保存后应用你的修改。" : "核对完成，已使用当前保存的配置。";
+      paint();
     }
 
     function focusSection(id) {
@@ -1577,6 +1614,8 @@ window.CompanionWorkbench = (() => {
     }
 
     function onClick(event) {
+      const conflict = event.target.closest("[data-wb-conflict]");
+      if (conflict) { resolveConflict(conflict.dataset.wbConflict, conflict.dataset.wbChoice); return; }
       const clearDate = event.target.closest("[data-wb-date-clear]");
       if (clearDate) { composeDateField(clearDate.dataset.wbDateClear, true); return; }
       const section = event.target.closest("[data-wb-section]");
@@ -1663,8 +1702,12 @@ window.CompanionWorkbench = (() => {
       if (!action) return;
       if (action === "save") { void save(false); return; }
       if (action === "retry") { void save(true); return; }
+      if (action === "reconcile") { void refresh(); return; }
       if (action === "reset") {
+        if (state.stale) { void refresh({discardDraft: true}); return; }
         state.draft = {...state.status.settings};
+        state.base = {...state.status.settings};
+        state.conflicts = {};
         resets_ = [];
         state.notice = "已恢复为当前已保存配置。";
         state.bad = false; state.ok = false;
@@ -2085,10 +2128,14 @@ window.CompanionWorkbench = (() => {
       paint();
     }
 
-    async function refresh() {
+    async function refresh(options = {}) {
       /* 已经有一次读取在途时不再叠加：挂载与显式刷新都会走到这里，
          而重复请求既浪费往返，也会让后到的旧快照覆盖新快照。 */
-      if (state.loading) return;
+      if (state.loading || state.busy || (state.pending && state.status)) return;
+      const previousBase = state.base;
+      const previousDraft = state.draft;
+      const previousConflicts = state.conflicts;
+      const keepDraft = !options?.discardDraft && dirty();
       const ticket = ++state.ticket;
       state.loading = true;
       state.notice = state.status ? state.notice : "";
@@ -2129,11 +2176,24 @@ window.CompanionWorkbench = (() => {
         const changed = state.status && state.status.edit_token !== value.edit_token;
         state.status = value;
         state.container = nextContainer;
-        if (!state.draft || changed) {
-          state.draft = {...value.settings};
-          state.base = {...value.settings};
-          /* 后端版本变了，之前标记的「恢复继承」所依赖的基线已不成立。 */
-          if (changed) resets_ = resets_.filter(name => name in state.draft);
+        state.base = {...value.settings};
+        state.draft = {...value.settings};
+        state.conflicts = {};
+        if (keepDraft) {
+          for (const [name, draftValue] of Object.entries(previousDraft)) {
+            if (draftValue === previousBase[name] && !resets_.includes(name)
+                && !Object.hasOwn(previousConflicts, name)) continue;
+            const prior = Object.hasOwn(previousConflicts, name)
+              ? previousConflicts[name].base : previousBase[name];
+            const reset = resets_.includes(name);
+            state.draft[name] = reset ? value.settings[name] : draftValue;
+            if (!Object.hasOwn(value.settings, name)
+                || (value.settings[name] !== prior && (reset || value.settings[name] !== draftValue))) {
+              state.conflicts[name] = {base: prior};
+            }
+          }
+        } else {
+          resets_ = [];
         }
         state.stale = false;
         let recoveredConflict = false;
@@ -2151,7 +2211,12 @@ window.CompanionWorkbench = (() => {
         if (recoveredConflict) {
           state.bad = true;
           state.notice = "上次保存遇到配置版本冲突，服务端没有写入；草稿已恢复，请核对后重新保存。";
-        } else if (changed) state.notice = "已读取最新配置。";
+        } else if (Object.keys(state.conflicts).length) {
+          state.bad = true;
+          state.notice = "当前配置已读取，请核对同时修改的设置。";
+        } else if (keepDraft) state.notice = dirty()
+          ? "已读取最新配置，你的改动已保留，保存后生效。" : "改动已与当前配置一致，无需再次保存。";
+        else if (changed) state.notice = "已读取最新配置。";
         else if (retried) state.notice = "";
         state.loading = false;
         paint();
@@ -2183,7 +2248,10 @@ window.CompanionWorkbench = (() => {
       if (state.busy || state.loading || state.denied) return;
        if (!retry) {
          if (state.pending) { state.notice = ""; state.bad = false; paint(); return; }
-        if (state.stale) { state.notice = "配置已更新，请先核对当前版本。"; paint(); return; }
+        if (state.stale) { await refresh(); return; }
+        if (Object.keys(state.conflicts).length) {
+          state.notice = "请先选择同时修改的设置要保留哪个值。"; state.bad = true; paint(); return;
+        }
         const invalidDate = mountPoint()?.querySelector('[data-wb-date-invalid="true"]');
         if (invalidDate) {
           invalidDate.querySelector("[data-wb-date-error]")?.focus?.();
@@ -2257,6 +2325,7 @@ window.CompanionWorkbench = (() => {
           throw error("invalid_response");
         }
          state.pending = null; state.pendingReason = ""; savePending();
+        resets_ = [];
         clearAutoRecovery(request.operation_key);
         /* 保存确认同样按分区包裹，取本分区那一片；缺失时保留原状态。
            读取侧与发送侧的值字段名可以不同（见 valuesKey），这里也要按同一个名字回填，
@@ -2273,6 +2342,8 @@ window.CompanionWorkbench = (() => {
           state.draft = {...fresh.settings};
           state.base = {...fresh.settings};
           state.stale = false;
+          state.conflicts = {};
+          resets_ = [];
           if (onStatus) onStatus(fresh);
         }
         state.busy = false;
@@ -2299,7 +2370,7 @@ window.CompanionWorkbench = (() => {
         if (problem.confirmed || problemCode === "configuration_revision_conflict") {
            state.pending = null; state.pendingReason = ""; savePending();
            clearAutoRecovery(request.operation_key);
-           state.stale = true;
+           state.stale = problemCode === "configuration_revision_conflict";
            state.notice = localized(problem, "保存未通过。请读取当前设置后核对。");
         } else {
            state.pendingReason = localized(problem, "连接没有返回保存确认。");
@@ -2319,7 +2390,7 @@ window.CompanionWorkbench = (() => {
       if (state.pending) return {state: "unknown", message: state.pendingReason || state.pending.pending_reason || ""};
       if (state.busy || state.loading || state.denied || !state.status) return {state: "unavailable"};
       if (!state.draft || !state.container?.fields[name]) return {state: "unavailable"};
-      if (state.stale) return {state: "conflict", message: state.notice || "配置已更新，请先核对当前版本。"};
+      if (state.stale || Object.keys(state.conflicts).length) return {state: "conflict", message: state.notice || "配置已更新，请先核对当前版本。"};
       const otherChanges = Object.keys(state.draft).some(field => field !== name && state.draft[field] !== state.base?.[field]);
       if (otherChanges || resets_.length) return {state: "dirty"};
       state.draft[name] = value;
@@ -2331,7 +2402,7 @@ window.CompanionWorkbench = (() => {
       await save();
       if (state.ok) return {state: "saved"};
       if (state.pending) return {state: "unknown", message: state.pendingReason || state.pending.pending_reason || ""};
-      if (state.stale) return {state: "conflict", message: state.notice || "配置已更新，请先核对当前版本。"};
+      if (state.stale || Object.keys(state.conflicts).length) return {state: "conflict", message: state.notice || "配置已更新，请先核对当前版本。"};
       if (state.bad) return {state: "rejected", message: state.notice || "设置未通过校验。"};
       return {state: "unchanged", message: state.notice || "设置没有变化。"};
     }
@@ -2390,18 +2461,52 @@ window.CompanionWorkbench = (() => {
        state.pendingReason = "";
       state.busy = false; state.loading = false; state.notice = ""; state.bad = false;
       state.ok = false; state.savedState = ""; state.drawRails = true;
+      state.stale = false; state.conflicts = {};
       state.visibleGroupIds = null;
       resets_ = [];
     }
 
+    function changedFields() {
+      return [...new Set([...Object.keys(state.draft || {}), ...Object.keys(state.conflicts)])]
+        .filter(name => state.draft[name] !== state.base?.[name] || Object.hasOwn(state.conflicts, name)
+        || resets_.includes(name)).map(name => (state.container?.fields[name]?.label || labels[name] || name)
+          + (resets_.includes(name) ? '（恢复继承）' : ''));
+    }
+
+    async function saveBeforeLeave() {
+      if (state.pending) return {error: '上次保存结果待核对，请回到这项配置核对原请求。'};
+      if (state.busy || state.loading) return {error: '这项配置正在处理，请稍后再保存。'};
+      await save(false);
+      return !dirty() && !state.pending ? true
+        : {error: state.notice || state.pendingReason || '保存尚未确认，改动已保留，请回到配置中检查。'};
+    }
+
+    function discard() {
+      if (state.busy) return {error: '正在保存，请等待保存结果后再切换。'};
+      state.draft = state.base ? {...state.base} : null;
+      resets_ = [];
+      state.conflicts = {}; state.stale = false;
+      // An unanswered request stays in sessionStorage for later reconciliation.
+      state.pending = null;
+      state.notice = ''; state.bad = false;
+      paint();
+      return true;
+    }
+
     /* 句柄不能叫 api：同一作用域里已有一个 async function api（桥调用）。 */
     const handle = {group, title, mount, attach, unmount, refresh, state, save, saveField, stop,
-      start: schedule, selectSection, setVisibleGroups, dirty};
+      start: schedule, selectSection, setVisibleGroups, dirty, changedFields, saveBeforeLeave, discard,
+      connected: () => { const root = mountPoint(); return !!root && root.isConnected !== false; }};
     return handle;
   }
 
   return {create, errors, LAYER_LABELS, contract, valid, toDisplay, fromDisplay, choiceText,
     /* 有草稿没保存的实例清单（含分区标题，用于提示语）。 */
-    dirtyEditors: () => [...LIVE].filter(entry => { try { return entry.dirty(); } catch { return false; } })
-      .map(entry => ({group: entry.group, title: entry.title || entry.group}))};
+    dirtyEditors: () => [...LIVE].flatMap(entry => {
+      try {
+        if (!entry.connected()) { entry.unmount(); return []; }
+        return entry.dirty() ? [{group: entry.group, title: entry.title || entry.group,
+          fields: entry.changedFields(), save: entry.saveBeforeLeave, discard: entry.discard}] : [];
+      } catch { return []; }
+    })};
 })();

@@ -8,6 +8,7 @@ const sourcePath = process.env.COMPANION_SETUP_GUIDE_SOURCE
   ? path.resolve(process.env.COMPANION_SETUP_GUIDE_SOURCE)
   : path.resolve(__dirname, '../pages/陪伴小屋/setup-guide.js');
 const source = fs.readFileSync(sourcePath, 'utf8');
+const migrationReviewSource = fs.readFileSync(path.join(path.dirname(sourcePath), 'migration-config-review.js'), 'utf8');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const settle = async () => { for (let i = 0; i < 12; i += 1) await flush(); };
 
@@ -19,6 +20,8 @@ function harness({status, responses = {}, targets = [], refreshedTargets = targe
   const editorStops = [];
   const replyMounts = [];
   const stateMounts = [];
+  const modelMounts = [];
+  let modelBusy = false;
   const listeners = {};
   const navigation = [];
   const prompts = [];
@@ -32,6 +35,7 @@ function harness({status, responses = {}, targets = [], refreshedTargets = targe
     '#setupQuickReplyHost': {},
     '#setupQuickDecisionHost': {},
     '#setupQuickStateHost': {},
+    '#setupLegacySettingsHost': {},
   };
   const node = {
     addEventListener: (name, fn) => { listeners[name] = fn; },
@@ -71,8 +75,8 @@ function harness({status, responses = {}, targets = [], refreshedTargets = targe
     const result = bridgeResponses[route];
     return Promise.resolve(typeof result === 'function' ? result(body) : result || {});
   }};
-  const configEditors = configEditorsAvailable ? {create(kinds, rootProvider, views) {
-    editorCalls.push({kinds: [...kinds], host: rootProvider(), views});
+  const configEditors = configEditorsAvailable ? {create(kinds, rootProvider, views, endpoint) {
+    editorCalls.push({kinds: [...kinds], host: rootProvider(), views, endpoint});
     return {restore() {}, paint() {}, read() {}, stop() { editorStops.push([...kinds]); }};
   }} : null;
   const sandbox = {window: {CompanionProduct: product, CompanionConfigEditors: configEditors,
@@ -84,6 +88,10 @@ function harness({status, responses = {}, targets = [], refreshedTargets = targe
     Number, Object, Array, RegExp, Error, Date, JSON, Math, setTimeout, clearTimeout,
     sessionStorage: {getItem: key => sessionValues.get(key) || null, setItem: (key, value) => sessionValues.set(key, value),
       removeItem: key => sessionValues.delete(key)}};
+  sandbox.window.CompanionModelsPage = {mount(element, options) { modelMounts.push({element, options}); }, unmount() {},
+    isDirty: () => false, isBusy: () => modelBusy};
+  vm.runInNewContext(fs.readFileSync(path.join(path.dirname(sourcePath), 'migration-config-review.js'), 'utf8'), sandbox);
+  vm.runInNewContext(fs.readFileSync(path.join(path.dirname(sourcePath), 'migration-config-table.js'), 'utf8'), sandbox);
   vm.runInNewContext(source, sandbox);
   return {
     calls,
@@ -131,9 +139,16 @@ function harness({status, responses = {}, targets = [], refreshedTargets = targe
       listeners.click({target: {closest: selector => selector === '[data-setup-legacy-wizard]'
         ? {dataset: {setupLegacyWizard: action}} : null}});
     },
+    input(value, dataset = {}) {
+      listeners.input({target: {value, dataset, matches: () => false}});
+    },
+    chooseMigrationConfig(row, choice) {
+      listeners.click({target: {closest: selector => selector === '[data-migration-config-action]'
+        ? {dataset: {migrationConfigAction: 'choose', row, choice}} : null}});
+    },
     clickMigrationShortcut(kind, value) {
-      const attribute = kind === 'detail' ? 'setupLegacyDetail' : 'setupLegacyOpenMapping';
-      const selector = kind === 'detail' ? '[data-setup-legacy-detail]' : '[data-setup-legacy-open-mapping]';
+      const attribute = {detail: 'setupLegacyDetail', settings: 'setupLegacySettings', back: 'setupLegacySettingsBack'}[kind] || 'setupLegacyOpenMapping';
+      const selector = {detail: '[data-setup-legacy-detail]', settings: '[data-setup-legacy-settings]', back: '[data-setup-legacy-settings-back]'}[kind] || '[data-setup-legacy-open-mapping]';
       listeners.click({target: {closest: query => query === selector ? {dataset: {[attribute]: value}} : null}});
     },
     unmount: () => sandbox.window.CompanionSetup.unmount(),
@@ -145,11 +160,54 @@ function harness({status, responses = {}, targets = [], refreshedTargets = targe
     editorStops,
     replyMounts,
     stateMounts,
+    modelMounts,
+    setModelBusy: value => { modelBusy = value; },
   };
 }
 
 const readyStatus = extra => ({step: 'complete', prepared: true, ready: true,
   completed: ['model', 'knowledge', 'relationships'], skipped: [], proactive_test: {state: 'delivered'}, ...extra});
+
+test('the configuration questionnaire loads comparisons and saves only selected rows before continuing', async () => {
+  const route = 'host/targets/first/roles/role-a/legacy';
+  const rows = [
+    {id: 'enabled', selection_id: 'enabled', selection_unit: 'enabled', field: 'proactive.contact.enabled',
+      label: '主动联系', before: true, after: false, current_known: true, status: 'merge'},
+    {id: 'interval', selection_id: 'interval', selection_unit: 'interval', field: 'proactive.contact.interval_seconds',
+      label: '主动间隔', before: 600, after: 900, current_known: true, status: 'confirm'},
+  ];
+  const discovery = {findings: [{source_id: 'private.host_configuration', state: 'ready'}]};
+  const page = harness({status: readyStatus(), targets: [{target_id: 'first', roles: [
+    {role_id: 'role-a', legacy_api: '/astrbot_plugin_private_companion/' + route}]}], responses: {
+    ['GET ' + route]: discovery,
+    ['GET ' + route + '/plan']: {...discovery, change_count: 2, plan_token: 'reviewed',
+      configuration_review: {version: 1, rows}, scope_status: [{available: true}]},
+    ['POST ' + route + '/apply']: {selection_applied: true, configuration_imported: true,
+      completion_recorded: true, kept_count: 1, written_count: 1, errors: []},
+    ['GET ' + route + '/data-plan']: {plan_token: 'data-token'},
+  }});
+  page.mountMigration();
+  await settle();
+  page.clickMigrationWizard('next');
+  await settle();
+  page.clickMigrationWizard('next');
+  await settle();
+  assert.match(page.html, /migration-config-table/);
+  assert.doesNotMatch(page.html, /source-available|source-selected/);
+  page.clickMigrationWizard('next');
+  await settle();
+  assert.equal(page.calls.some(call => call.method === 'POST' && call.route.endsWith('/apply')), false);
+  page.chooseMigrationConfig('enabled', 'keep');
+  page.chooseMigrationConfig('interval', 'merge');
+  page.clickMigrationWizard('next');
+  await settle();
+  const saved = page.calls.find(call => call.method === 'POST' && call.route.endsWith('/apply'));
+  assert.deepEqual(JSON.parse(JSON.stringify(saved.body)), {
+    plan_token: 'reviewed', configuration_scope: 'plugin', selected_fields: ['interval'],
+  });
+  assert.match(page.html, /选择资料范围/);
+  assert.ok(page.calls.some(call => call.route.endsWith('/data-plan')));
+});
 
 test('first upgrade opens migration with the newly saved destination available', async () => {
   const route = 'host/targets/t-first/roles/r-first/legacy';
@@ -537,6 +595,7 @@ test('a unique migration destination is preselected without scanning until the u
   page.clickMigrationStep(2);
   assert.match(page.html, /V1-data-root/);
   page.clickMigrationStep(3);
+  await settle();
   assert.match(page.html, /Reality 摄像头与音频/);
   page.change('', 'all', {setupLegacy: 'configuration-scope'});
   assert.match(page.html, /检查旧版配置/);
@@ -567,9 +626,9 @@ test('the role-first step lists multiple Bots and roles before any migration tar
         {platform_id: 'aiocqhttp', account_id: '10002', bot_id: 'bot-b', account_name: '备用 Bot'},
       ],
       personas: [
-        {platform_id: 'aiocqhttp', account_id: '10001', bot_id: 'bot-a', persona_id: '星缘', role_id: 'role-a', label: '星缘'},
-        {platform_id: 'aiocqhttp', account_id: '10001', bot_id: 'bot-a', persona_id: '烛雨', role_id: 'role-b', label: '烛雨'},
-        {platform_id: 'aiocqhttp', account_id: '10002', bot_id: 'bot-b', persona_id: '珝环', role_id: 'role-c', label: '珝环'},
+        {platform_id: 'aiocqhttp', account_id: '10001', bot_id: 'bot-a', persona_id: '星缘', role_id: 'role-a', label: '星缘', mapped: false},
+        {platform_id: 'aiocqhttp', account_id: '10001', bot_id: 'bot-a', persona_id: '烛雨', role_id: 'role-b', label: '烛雨', mapped: false},
+        {platform_id: 'aiocqhttp', account_id: '10002', bot_id: 'bot-b', persona_id: '珝环', role_id: 'role-c', label: '珝环', mapped: false},
       ],
       targets: [], directory: {complete: true, issues: []},
     },
@@ -578,20 +637,82 @@ test('the role-first step lists multiple Bots and roles before any migration tar
   await settle();
 
   assert.match(page.html, /先设置接收角色/);
-  assert.match(page.html, /一个 Bot，多名伴侣/);
-  assert.match(page.html, /多个 Bot，分别配置/);
-  assert.match(page.html, /第 5 步可添加多个 Bot \/ 角色去向/);
+  assert.match(page.html, /Bot 与伴侣角色/);
   assert.match(page.html, /选择本次检查所用的 Bot 和角色/);
   assert.match(page.html, /主 Bot/);
   assert.match(page.html, /备用 Bot/);
   assert.match(page.html, /星缘/);
   assert.match(page.html, /烛雨/);
   assert.match(page.html, /珝环/);
-  assert.match(page.html, /待在账号与会话中设置/);
+  assert.match(page.html, /尚未建立角色/);
   assert.doesNotMatch(page.html, /<option value="role-a"[^>]*>[^<]*可接收迁移/);
   assert.equal(page.calls.some(item => item.method === 'GET' && item.route.includes('/legacy')), false);
-  page.clickMigrationWizard('open-host');
-  assert.deepEqual(page.navigation, [['manage', 'host']]);
+  page.change('', JSON.stringify(['aiocqhttp', 'bot-a', '10001']), {setupLegacy: 'bot'});
+  page.clickMigrationWizard('create-role');
+  assert.match(page.html, /AstrBot 人格（至少选择一个）/);
+  assert.match(page.html, /type="checkbox" data-setup-legacy="new-persona"/);
+  assert.match(page.html, /保存角色/);
+  assert.deepEqual(page.navigation, []);
+});
+
+test('the migration guide creates a role inline and selects its refreshed destination', async () => {
+  const account = {platform_id: 'aiocqhttp', account_id: '10001', bot_id: 'bot-a', account_name: '主 Bot'};
+  const persona = {platform_id: 'aiocqhttp', account_id: '10001', bot_id: 'bot-a',
+    persona_id: '星缘', role_id: 'derived', label: '星缘', mapped: false};
+  const secondPersona = {...persona, persona_id: '烛雨', label: '烛雨'};
+  const route = 'host/targets/private-one/roles/new-role/legacy';
+  const targets = [{...account, target_id: 'private-one', scope_kind: 'private', roles: [
+    {role_id: '新角色', role_name: '新角色', legacy_api: '/astrbot_plugin_private_companion/' + route}]}];
+  const page = harness({status: readyStatus(), targets: [], refreshedTargets: targets, responses: {
+    'GET setup/targets': [{accounts: [account], personas: [persona, secondPersona]},
+      {accounts: [account], personas: [persona, secondPersona].map(item =>
+        ({...item, role_id: '新角色', mapped: true}))}],
+    'POST accounts/role': {saved: true},
+  }});
+  page.mountMigration();
+  await settle();
+  page.clickMigrationWizard('create-role');
+  page.input('新角色', {setupLegacy: 'new-role-name'});
+  assert.match(page.html, /data-setup-legacy-wizard="save-role" disabled/);
+  page.change('', '星缘', {setupLegacy: 'new-persona'}, {checked: true});
+  assert.ok(page.html.indexOf('data-setup-legacy="new-role-name"')
+    < page.html.indexOf('data-setup-legacy="new-persona"'));
+  page.change('', '星缘', {setupLegacy: 'new-persona'}, {checked: false});
+  assert.match(page.html, /data-setup-legacy-wizard="save-role" disabled/);
+  page.change('', '星缘', {setupLegacy: 'new-persona'}, {checked: true});
+  page.change('', '烛雨', {setupLegacy: 'new-persona'}, {checked: true});
+  assert.match(page.html, /已选择 2 个/);
+  page.clickMigrationWizard('save-role');
+  await settle();
+  assert.deepEqual(JSON.parse(JSON.stringify(page.calls.find(call => call.route === 'accounts/role').body)),
+    {platform_id: 'aiocqhttp', account_id: '10001', bot_id: 'bot-a',
+      persona_ids: ['星缘', '烛雨'], role_id: '新角色'});
+  assert.equal(page.directoryRefreshes, 1);
+  assert.match(page.html, /<option value="新角色" selected>/);
+  assert.match(page.html, /角色已保存，可以继续检查旧版来源/);
+  assert.doesNotMatch(page.html, /data-setup-legacy-wizard="next" disabled/);
+  assert.deepEqual(page.navigation, []);
+});
+
+test('a failed inline role save keeps the form and does not claim the role exists', async () => {
+  const account = {platform_id: 'aiocqhttp', account_id: '10001', bot_id: 'bot-a'};
+  const persona = {...account, persona_id: '星缘', role_id: 'derived', mapped: false};
+  const failure = Object.assign(new Error('account_role_persona_in_use'), {code: 'account_role_persona_in_use'});
+  const page = harness({status: readyStatus(), responses: {
+    'GET setup/targets': {accounts: [account], personas: [persona]},
+    'POST accounts/role': failure,
+    'GET accounts': {personas: []},
+  }});
+  page.mountMigration();
+  await settle();
+  page.clickMigrationWizard('create-role');
+  page.change('', '星缘', {setupLegacy: 'new-persona'}, {checked: true});
+  page.input('新角色', {setupLegacy: 'new-role-name'});
+  page.clickMigrationWizard('save-role');
+  await settle();
+  assert.match(page.html, /这个 AstrBot 人格已归入角色/);
+  assert.match(page.html, /value="新角色"/);
+  assert.equal(page.directoryRefreshes, 0);
 });
 
 test('the first-run page discovers an upgrade when there is one unambiguous V2 destination', async () => {
@@ -682,6 +803,7 @@ test('upgrade confirmation keeps configuration and data migration statuses separ
   page.clickMigrationStep(2);
   page.clickMigrationStep(3);
 
+  await settle();
   assert.match(page.html, /请核对重载后的绑定、模型与回复/);
   assert.match(page.html, /配置状态不代表资料已迁移/);
   assert.match(page.html, /data-setup-legacy-action="legacy-upgrade-confirm"/);
@@ -727,6 +849,7 @@ test('upgrade guide completes discovery, config inheritance and post-restart con
   beforeRestart.clickMigrationStep(2);
   beforeRestart.clickMigrationStep(3);
 
+  await settle();
   assert.match(beforeRestart.html, /立即继承旧版配置/);
   beforeRestart.click('legacy-auto');
   await settle();
@@ -754,6 +877,7 @@ test('upgrade guide completes discovery, config inheritance and post-restart con
   await settle();
   afterRestart.clickMigrationStep(2);
   afterRestart.clickMigrationStep(3);
+  await settle();
   assert.match(afterRestart.html, /请核对重载后的绑定、模型与回复/);
   assert.match(afterRestart.html, /确认重载后运行正常/);
   assert.match(afterRestart.html, /配置状态不代表资料已迁移/);
@@ -841,6 +965,7 @@ test('upgrade guide identifies legacy imports whose configuration scope was neve
   await settle();
     page.clickMigrationStep(2);
     page.clickMigrationStep(3);
+    await settle();
 
   assert.match(page.html, /旧版配置迁移记录，但原记录没有保存迁移范围/);
   assert.doesNotMatch(page.html, /旧版配置已迁移。请核对重载后的绑定/);
@@ -1076,9 +1201,9 @@ test('migration apply sends the reviewed plan token and refuses locally without 
     {configuration_scope: 'proactive'});
   assert.deepEqual(JSON.parse(JSON.stringify(planned.options)), {timeoutMs: 300000});
   assert.match(page.html, /拟写入字段与数值/);
-  assert.match(page.html, /配置未自动迁移（1）/);
+  assert.match(page.html, /配置兼容说明（1）/);
   assert.match(page.html, /reactive_poke_config\.reactive_poke_back_prompts/);
-  assert.match(page.html, /需补充配置（1）/);
+  assert.match(page.html, /暂不支持的旧设置（1）/);
   assert.match(page.html, /role\.state\.planning_enabled/);
   assert.match(page.html, /poke\.enabled/);
   assert.match(page.html, /插件设置需重启生效/);
@@ -1091,6 +1216,101 @@ test('migration apply sends the reviewed plan token and refuses locally without 
   assert.deepEqual(JSON.parse(JSON.stringify(applied.options)), {timeoutMs: 300000});
   assert.match(page.html, /已写入 3 项当前版本设置/);
   assert.match(page.html, /请重载本插件或重启 AstrBot 后回来核对/);
+});
+
+test('configuration compatibility separates unsupported settings from actionable tasks and replacement mechanisms', async () => {
+  const route = 'host/targets/migration/roles/destination/legacy';
+  const records = [
+    ['not_migrated', 'basic_config.enable_p4_b_legacy_score_isolation'],
+    ['manual_required', 'reactive_poke_config.reactive_poke_back_prompts'],
+    ['manual_mapping', 'model_assignment_config.FAST_RESPONSE_PROVIDER_ID'],
+    ['manual_mapping', 'forward_message_config.forward_message_image_limit'],
+    ['implemented_elsewhere', 'basic_config.bot_name'],
+    ['not_applicable', 'basic_config.enable_standalone_webui'],
+    ['future_status', 'future.setting'],
+  ];
+  const page = harness({status: readyStatus(), targets: [{target_id: 'migration', roles: [{role_id: 'destination',
+    legacy_api: '/astrbot_plugin_private_companion/' + route}]}], responses: {
+    ['GET ' + route]: {findings: []},
+    ['GET ' + route + '/plan']: {plan_token: 'review-token', change_count: 0, warnings: [],
+      differences: records.map(([disposition, source_key]) => ({audit: true, disposition, source_key, explain: '技术说明'}))},
+  }});
+  page.mountMigration();
+  await settle();
+  page.change('', 'plugin', {setupLegacy: 'configuration-scope'});
+  page.click('legacy-scan');
+  await settle();
+  page.click('legacy-plan');
+  await settle();
+  assert.match(page.html, /配置兼容说明（7）/);
+  for (const title of ['可手动调整（1）', '暂不支持的旧设置（1）', '改由新版机制处理（2）',
+    '未沿用的旧设置（1）', '当前不适用（1）', '尚待核实（1）']) assert.ok(page.html.includes(title), title);
+  assert.doesNotMatch(page.html, /配置未自动迁移|需补充配置|需确认映射|原样保留/);
+  const unsupported = page.html.split('暂不支持的旧设置（1）')[1].split('改由新版机制处理（2）')[0];
+  assert.doesNotMatch(unsupported, /data-setup-legacy-settings/);
+  assert.match(page.html, /data-setup-legacy-settings="models"/);
+  page.clickMigrationView('review');
+  assert.match(page.html, /1 项提供设置入口/);
+  page.clickMigrationShortcut('detail', 'audit-settings');
+  for (const key of ['review-configuration', 'config-audit', 'audit-settings']) {
+    assert.ok(page.html.includes(`data-migration-detail="${key}" open`), key);
+  }
+});
+
+test('migration settings use the chosen destination and keep selections while refreshing old plans', async () => {
+  const route = 'host/targets/migration/roles/destination/legacy';
+  const destination = '/astrbot_plugin_private_companion/host/targets/migration/roles/destination';
+  const page = harness({status: readyStatus(), targets: [{target_id: 'migration', roles: [{role_id: 'destination',
+    role_name: '接收角色', legacy_api: '/astrbot_plugin_private_companion/' + route,
+    model_api: destination + '/model', config_api: destination + '/config'}]}], responses: {
+    ['GET ' + route]: {findings: [{source_id: 'private.host_configuration', state: 'ready'}]},
+    ['GET ' + route + '/plan']: {plan_token: 'fresh-plan', change_count: 0, warnings: [], differences: []},
+    ['GET ' + route + '/data-plan']: migrationDataFixture({journals: {batch_count: 3}}),
+  }});
+  page.mountMigration();
+  await settle();
+  page.change('', 'proactive', {setupLegacy: 'configuration-scope'});
+  page.click('legacy-scan');
+  await settle();
+  page.click('legacy-plan');
+  await settle();
+  page.clickMigrationView('mapping');
+  await settle();
+  page.change('', '', {setupLegacy: 'import-journals'}, {checked: true});
+  page.clickMigrationShortcut('settings', 'models');
+  assert.equal(page.modelMounts.at(-1).options.endpoint, destination + '/model');
+  assert.match(page.html, /迁移配置调整/);
+  assert.match(page.html, /接收角色/);
+  const previousPlans = page.calls.filter(call => call.route === route + '/plan').length;
+  page.setModelBusy(true);
+  page.clickMigrationShortcut('back', '');
+  assert.match(page.html, /迁移配置调整/);
+  assert.equal(page.calls.filter(call => call.route === route + '/plan').length, previousPlans);
+  page.setModelBusy(false);
+  page.clickMigrationShortcut('back', '');
+  await settle();
+  assert.equal(page.calls.filter(call => call.route === route + '/plan').length, previousPlans + 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(page.calls.filter(call => call.route === route + '/plan').at(-1).body)),
+    {configuration_scope: 'proactive'});
+  assert.equal(page.navigation.length, 0, 'settings stay inside the guide');
+  assert.equal(page.calls.some(call => call.method === 'POST'), false, 'opening or returning must not write');
+  page.clickMigrationShortcut('settings', 'expression');
+  assert.equal(page.editorCalls.at(-1).endpoint, destination + '/config');
+  assert.deepEqual([...page.editorCalls.at(-1).kinds], ['expression.learning']);
+  page.clickMigrationShortcut('back', '');
+  await settle();
+  page.clickMigrationView('mapping');
+  await settle();
+  assert.match(page.html, /data-setup-legacy="import-journals" checked/);
+  page.clickMigrationShortcut('settings', 'news');
+  assert.equal(page.editorCalls.at(-1).endpoint, '', 'global news settings must retain installation ownership');
+  assert.deepEqual([...page.editorCalls.at(-1).views['proactive.contact'].sectionIds], ['news']);
+  assert.match(page.html, /全局设置/);
+  page.clickMigrationShortcut('back', '');
+  await settle();
+  const mounts = page.modelMounts.length + page.editorCalls.length;
+  page.clickMigrationShortcut('settings', 'unreviewed-setting');
+  assert.equal(page.modelMounts.length + page.editorCalls.length, mounts);
 });
 
 test('migration can use an explicitly selected V1 directory through scan, plan and apply', async () => {
@@ -1254,6 +1474,73 @@ test('learning relationship profiles are counted and can be selected without ori
   const applied = page.calls.find(item => item.method === 'POST' && item.route === route + '/data-apply');
   assert.equal(applied.body.import_worldbook, true);
   assert.equal(applied.body.confirm_member_ids, true);
+});
+
+test('旧版私聊用户单独试算和迁入，不必同时选择世界书或归档', async () => {
+  const route = 'host/targets/t-first/roles/r-first/legacy';
+  const targets = [{target_id: 't-first', roles: [{role_id: 'r-first', role_name: '星缘',
+    legacy_api: '/astrbot_plugin_private_companion/' + route}]}];
+  const plan = {plan_token: 'contacts-plan', reaction_assets: {}, journals: {}, worldbook: {},
+    private_contacts: {ready: 2, already_present: 0, maintained_count: 1,
+      samples: [{native_account_id: '200', nickname: '旧称呼', maintained: true, message_count: 12}]},
+    persona_sources: [], group_networks: [], memory_database: {state: 'absent'},
+    target_private_available: true, group_target_available: false};
+  const page = harness({status: readyStatus(), targets, responses: {
+    ['GET ' + route + '/data-plan']: plan,
+    ['POST ' + route + '/data-apply']: {errors: [], private_contacts: {created: 2, pending: []}}}});
+  page.mountMigration();
+  await settle();
+  page.change('', 't-first', {setupLegacy: 'target'});
+  page.change('', 'r-first', {setupLegacy: 'role'});
+  page.click('legacy-data-plan');
+  await settle();
+  assert.match(page.html, /旧版私聊用户（2 位待迁入）/);
+  assert.match(page.html, /旧称呼 · 200 · 手动维护 · 12 条历史消息/);
+  assert.doesNotMatch(page.html, /data-setup-legacy-action="legacy-data-apply"[^>]*disabled/);
+  page.click('legacy-data-apply');
+  await settle();
+  const applied = page.calls.find(item => item.method === 'POST' && item.route === route + '/data-apply');
+  assert.equal(applied.body.import_private_contacts, true);
+  assert.equal(applied.body.import_worldbook, false);
+  assert.match(page.html, /旧版私聊用户/);
+});
+
+test('关闭独立记忆库后不携带已自动选中的群记忆映射，不阻断单独迁入用户', async () => {
+  const route = 'host/targets/t-first/roles/r-first/legacy';
+  const targets = [{target_id: 't-first', roles: [{role_id: 'r-first',
+    legacy_api: '/astrbot_plugin_private_companion/' + route}]}];
+  const ownerId = 'a'.repeat(64);
+  const plan = {plan_token: 'contacts-only', reaction_assets: {}, journals: {}, worldbook: {},
+    private_contacts: {ready: 4}, persona_sources: [], group_networks: [],
+    memory_database: {state: 'ready', assets: [{path: 'memory.db'}], identity_inventory: {owners: [
+      {owner_id: ownerId, source: {scope: 'group', group_id: '555', platform: 'qq', bot_id: '1'}}]},
+      group_targets: [{target_id: 't-group', group_id: '555', platform_id: 'qq', bot_id: '1',
+        roles: [{role_id: 'r-group'}]}]},
+    target_private_available: true};
+  const page = harness({status: readyStatus(), targets, responses: {
+    ['GET ' + route + '/data-plan']: plan,
+    ['POST ' + route + '/data-apply']: {private_contacts: {created: 4}}}});
+  page.mountMigration();
+  await settle();
+  page.change('', 't-first', {setupLegacy: 'target'});
+  page.change('', 'r-first', {setupLegacy: 'role'});
+  page.click('legacy-data-plan');
+  await settle();
+  page.change('', '', {setupLegacy: 'import-memory-database'}, {checked: false});
+  page.click('legacy-data-plan');
+  await settle();
+  const read = page.calls.filter(item => item.route === route + '/data-plan').at(-1);
+  assert.equal(read.body.memory_group_mappings, undefined);
+  assert.equal(read.body.memory_owner_ids, undefined);
+  page.click('legacy-data-apply');
+  await settle();
+  const applied = page.calls.find(item => item.method === 'POST' && item.route === route + '/data-apply');
+  assert.ok(applied);
+  assert.equal(applied.body.import_private_contacts, true);
+  assert.equal(applied.body.import_memory_database, false);
+  assert.equal(applied.body.confirm_memory_mapping, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(applied.body.memory_group_mappings)), []);
+  assert.deepEqual(JSON.parse(JSON.stringify(applied.body.memory_owner_ids)), []);
 });
 
 test('data migration previews the independent memory database and sends its explicit selection', async () => {

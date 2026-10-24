@@ -360,7 +360,9 @@ function harness(kinds = ['quota', 'image_review'], views = {}, endpointOverride
     createElement: () => ({
       dataset: {}, classList: {add() {}}, textContent: '',
       innerHTML: '', appendChild() {}, querySelector: () => null, querySelectorAll: () => [],
-      addEventListener() {}, removeEventListener() {},
+      listeners: {},
+      addEventListener(type, callback) { this.listeners[type] = callback; },
+      removeEventListener(type) { delete this.listeners[type]; },
     }),
     querySelector: () => null, querySelectorAll: () => [],
     hidden: false,
@@ -393,6 +395,49 @@ async function loaded(harnessed, kinds = ['quota', 'image_review'], requestOverr
   await drains();
   return harnessed.editors.state.instances;
 }
+
+test('dirty editor exposes changed field names and discard clears the source before unmount', async () => {
+  const h = harness(['quota']);
+  const [instance] = await loaded(h, ['quota']);
+  instance.state.draft.private_owner_max_daily = 6;
+  const [pending] = h.workbench.dirtyEditors();
+  assert.equal(pending.fields.length, 1);
+  assert.equal(pending.fields[0], h.window.CompanionConfigEditors.spec.quota.labels.private_owner_max_daily);
+  assert.equal(pending.discard(), true);
+  assert.equal(h.workbench.dirtyEditors().length, 0);
+  instance.state.draft.private_owner_max_daily = 7;
+  h.editors.unmount();
+  assert.equal(h.workbench.dirtyEditors().length, 0);
+  assert.equal(instance.state.draft, null);
+});
+
+test('detached config editors cannot keep prompting on subsequent navigation', async () => {
+  const h = harness(['quota']);
+  const [instance] = await loaded(h, ['quota']);
+  instance.state.draft.private_owner_max_daily = 6;
+  h.holders.quota.isConnected = false;
+  assert.equal(h.workbench.dirtyEditors().length, 0);
+  assert.equal(instance.state.draft, null);
+});
+
+test('save from navigation uses the existing receipt and preserves invalid drafts', async () => {
+  const h = harness(['quota']);
+  const [instance] = await loaded(h, ['quota']);
+  instance.state.draft.private_owner_max_daily = 999;
+  const invalid = await h.workbench.dirtyEditors()[0].save();
+  assert.ok(invalid.error);
+  assert.equal(h.requests.length, 1);
+  assert.equal(h.workbench.dirtyEditors().length, 1);
+  instance.state.draft.private_owner_max_daily = 6;
+  const save = h.workbench.dirtyEditors()[0].save();
+  await drains();
+  assert.equal(h.requests[1].method, 'POST');
+  h.requests[1].resolve({result:{operation_id:'navigation-save',replayed:false},
+    status:{sections:{quota:section('quota',{private_owner_max_daily:6},TOKEN('b'))}}});
+  assert.equal(await save, true);
+  assert.equal(h.workbench.dirtyEditors().length, 0);
+  h.editors.unmount();
+});
 
 test('the role dossier exposes the V1 character and world detail fields in one grouped contract', () => {
   const {window} = harness(['role_profile']);
@@ -656,6 +701,126 @@ test('explicit field saves preserve unrelated configuration drafts', async () =>
   assert.equal((await instance.saveField('group_max_daily', 5)).state, 'dirty');
   assert.equal(instance.state.draft.group_max_daily, -1);
   assert.equal(harnessed.requests.length, 1);
+});
+
+test('核对新版本保留本地改动，并采用其他页面已保存的无冲突字段', async () => {
+  const h = harness(['quota']);
+  const [instance] = await loaded(h, ['quota']);
+  instance.state.draft.group_max_daily = 5;
+  const saving = instance.save();
+  await drains();
+  h.requests[1].reject(Object.assign(new Error('configuration_revision_conflict'), {code: 'configuration_revision_conflict'}));
+  await saving;
+  assert.match(h.painted.quota, /data-wb-action="reconcile"/);
+  assert.match(h.painted.quota, /改动已保留，待核对当前配置/);
+  const reading = instance.refresh();
+  await drains();
+  h.requests[2].resolve(payload('quota', {private_friend_max_daily: 9}, TOKEN('b')));
+  await reading;
+  assert.equal(instance.state.draft.group_max_daily, 5);
+  assert.equal(instance.state.draft.private_friend_max_daily, 9);
+  assert.deepEqual(plain(instance.state.conflicts), {});
+  const retry = instance.save();
+  await drains();
+  assert.deepEqual(plain(h.requests[3].body.changes), {group_max_daily: 5});
+  assert.equal(h.requests[3].body.edit_token, TOKEN('b'));
+  h.requests[3].resolve({result: {operation_id: 'merged', replayed: false},
+    status: payload('quota', {group_max_daily: 5, private_friend_max_daily: 9}, TOKEN('c'))});
+  await retry;
+  assert.equal(instance.dirty(), false);
+});
+
+test('同一字段同时修改需逐项确认，刷新两次也不会静默覆盖', async () => {
+  const h = harness(['quota']);
+  const [instance] = await loaded(h, ['quota']);
+  instance.state.draft.group_max_daily = 5;
+  for (let index = 1; index <= 2; index += 1) {
+    const reading = instance.refresh();
+    await drains();
+    h.requests[index].resolve(payload('quota', {group_max_daily: 7}, TOKEN('b')));
+    await reading;
+    assert.equal(instance.state.draft.group_max_daily, 5);
+    assert.ok(instance.state.conflicts.group_max_daily);
+  }
+  await instance.save();
+  assert.equal(h.requests.length, 3);
+  assert.match(h.painted.quota, /当前已保存：7/);
+  assert.match(h.painted.quota, /我的修改：5/);
+  h.holders.quota.listeners.click({target: {closest: selector => selector === '[data-wb-conflict]'
+    ? {dataset: {wbConflict: 'group_max_daily', wbChoice: 'draft'}} : null}});
+  assert.deepEqual(plain(instance.state.conflicts), {});
+  const saving = instance.save();
+  await drains();
+  assert.equal(h.requests[3].body.changes.group_max_daily, 5);
+  h.requests[3].resolve({result: {operation_id: 'chosen-draft', replayed: false},
+    status: payload('quota', {group_max_daily: 5}, TOKEN('c'))});
+  await saving;
+  assert.equal(instance.dirty(), false);
+});
+
+test('选择当前值消除冲突，只提交剩余本地改动', async () => {
+  const h = harness(['quota']);
+  const [instance] = await loaded(h, ['quota']);
+  Object.assign(instance.state.draft, {group_max_daily: 5, proactive_max_daily: 3});
+  const reading = instance.refresh();
+  await drains();
+  h.requests[1].resolve(payload('quota', {group_max_daily: 7}, TOKEN('b')));
+  await reading;
+  h.holders.quota.listeners.click({target: {closest: selector => selector === '[data-wb-conflict]'
+    ? {dataset: {wbConflict: 'group_max_daily', wbChoice: 'current'}} : null}});
+  assert.equal(instance.state.draft.group_max_daily, 7);
+  const saving = instance.save();
+  await drains();
+  assert.deepEqual(plain(h.requests[2].body.changes), {proactive_max_daily: 3});
+  h.requests[2].resolve({result: {operation_id: 'chosen-current', replayed: false},
+    status: payload('quota', {group_max_daily: 7, proactive_max_daily: 3}, TOKEN('c'))});
+  await saving;
+});
+
+test('冲突后使用已保存配置会重新读取，恢复后可以继续编辑保存', async () => {
+  const h = harness(['quota']);
+  const [instance] = await loaded(h, ['quota']);
+  instance.state.draft.group_max_daily = 5;
+  const saving = instance.save();
+  await drains();
+  h.requests[1].reject(Object.assign(new Error('configuration_revision_conflict'), {code: 'configuration_revision_conflict'}));
+  await saving;
+  h.holders.quota.listeners.click({target: {closest: selector => selector === '[data-wb-action]'
+    ? {dataset: {wbAction: 'reset'}} : null}});
+  await drains();
+  h.requests[2].resolve(payload('quota', {group_max_daily: 7}, TOKEN('b')));
+  await drains();
+  assert.equal(instance.state.stale, false);
+  assert.equal(instance.state.draft.group_max_daily, 7);
+  assert.equal(instance.dirty(), false);
+  assert.equal(h.requests.length, 3, '恢复配置只读取，不重复执行被拒绝的保存');
+});
+
+test('未确认保存的工作台重新挂载后仍能读取状态并核对原请求', async () => {
+  const h = harness(['quota']);
+  const [instance] = await loaded(h, ['quota']);
+  instance.state.draft.group_max_daily = 5;
+  const saving = instance.save();
+  await drains();
+  const original = plain(h.requests[1].body);
+  h.requests[1].reject(Object.assign(new Error('bridge down'), {code: 'bridge_timeout'}));
+  await saving;
+  instance.unmount();
+  instance.mount();
+  await drains();
+  assert.equal(h.requests[2].method, 'GET');
+  h.requests[2].resolve(payload('quota', {group_max_daily: 5}, TOKEN('b')));
+  await drains();
+  assert.ok(instance.state.pending);
+  const reconciling = instance.save(true);
+  await drains();
+  assert.deepEqual(plain(h.requests[3].body), original);
+  h.requests[3].resolve({result: {operation_id: 'recovered', replayed: true},
+    status: payload('quota', {group_max_daily: 5}, TOKEN('b'))});
+  await reconciling;
+  assert.equal(instance.state.pending, null);
+  assert.equal(instance.dirty(), false);
+  instance.unmount();
 });
 
 test('an enum-valued text field is edited as a select, not a free-text box', async () => {

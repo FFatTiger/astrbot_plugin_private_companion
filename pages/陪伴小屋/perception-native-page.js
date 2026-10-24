@@ -434,6 +434,28 @@ window.CompanionNativePerceptionPage = (() => {
       return [...draft.touched].some(name => String(draft.values?.[name]) !== String(draft.original?.[name]));
     });
   }
+  function changedFields() {
+    return Object.entries(drafts).flatMap(([section, draft]) => (fields[section] || [])
+      .filter(([name]) => draft.touched?.has(name) && String(draft.values?.[name]) !== String(draft.original?.[name]))
+      .map(([, label]) => label));
+  }
+  async function saveBeforeLeave() {
+    for (const [section, draft] of Object.entries(drafts)) {
+      if (![...(draft.touched || [])].some(name => String(draft.values[name]) !== String(draft.original[name]))) continue;
+      if (draft.pending) return {error:'上次保存结果待核对，请在感知配置中核对原请求。'};
+      await save(section);
+      if (drafts[section]?.pending || drafts[section]?.stale) return {error:notices[section] || '保存尚未确认。'};
+    }
+    return !isDirty() ? true : {error:Object.values(notices).find(Boolean) || '感知配置未保存，请回到配置中检查。'};
+  }
+  function discardChanges() {
+    if (busy) return {error:'感知配置正在处理，请稍后切换。'};
+    for (const draft of Object.values(drafts)) {
+      draft.values = {...draft.original}; draft.touched = new Set();
+    }
+    rememberState(); render();
+    return true;
+  }
   /* 全局搜索用：感知页自己的字段表（日期、节假日、农历、黄历、平台标识等）。
      这一组不在 config-editor 的 spec 里，此前整组搜不到。
      「资讯」段的字段其实是主动联系的 news.*，spec 里已经能搜到，这里不再重复索引。 */
@@ -446,7 +468,7 @@ window.CompanionNativePerceptionPage = (() => {
       sectionCount: Object.keys(sectionTitles).length,
     })));
   }
-  return {mount, unmount, refresh:load, searchEntries, isDirty, subscribe(listener) {
+  return {mount, unmount, refresh:load, searchEntries, isDirty, changedFields, saveBeforeLeave, discardChanges, subscribe(listener) {
     if (typeof listener !== "function") return () => {};
     subscribers.add(listener); listener(publicSnapshot());
     return () => subscribers.delete(listener);

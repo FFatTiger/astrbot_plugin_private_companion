@@ -197,6 +197,8 @@ class LegacyDataPlan:
     wardrobe_items: tuple[LegacyWardrobeItem, ...] = ()
     wardrobe_rejected: tuple[dict, ...] = ()
     expression_profiles: tuple[dict, ...] = ()
+    private_contacts: tuple[dict, ...] = ()
+    private_contact_rejected: tuple[dict, ...] = ()
 
     def document(self, *, source_group_id="", existing_reaction_ids=(),
                  existing_journal_heads=None, existing_reference_hashes=(),
@@ -356,6 +358,8 @@ class LegacyDataPlan:
                 "samples": [item.document() for item in ready_wardrobe[:12]],
             },
             "profile_data": dict(self.profile_summary),
+            "private_contacts": {"total": len(self.private_contacts),
+                "rejected": list(self.private_contact_rejected)},
             "work_delivery": dict(self.work_delivery),
             "world_assets": dict(self.world_assets),
             "group_networks": [{key: value for key, value in item.items() if key not in ("members", "edges")}
@@ -1635,7 +1639,7 @@ def _profile_summary(payload):
             "worldbook_entries": len(world_entries),
             "diary_entries": len(diaries), "dream_fragments": len(data.get("dream_fragments", []))
                 if isinstance(data.get("dream_fragments"), list) else 0,
-            "non_equivalent_reason": "私人用户运行画像、关系分数、投递状态和定时缓存没有可验证的 V2 等价归属，不整库复制。成员线索、群资料、群互动汇总、日记及带日期的梦境碎片按各自作用域合同迁移。"}
+            "non_equivalent_reason": "用户目录与私聊往来汇总按已确认账号及角色迁入；旧关系分数、投递状态和定时缓存不恢复。成员线索、群资料、群互动汇总、日记及带日期的梦境碎片按各自作用域迁移。"}
 
 
 def build_data_plan(v1_root: str | Path, *, source_persona_id="", v1_configuration=None) -> LegacyDataPlan:
@@ -1667,6 +1671,8 @@ def build_data_plan(v1_root: str | Path, *, source_persona_id="", v1_configurati
     worldbook_rejected = tuple((*worldbook_rejected, *group_profile_rejected))
     member_profiles, member_profile_rejected = _member_profiles(profile)
     profile_data = _profile_data(profile)
+    from .private_contacts import private_contacts
+    contacts, contact_rejected = private_contacts(profile_data)
     from .expression_data import expression_profiles
     learned_expressions = expression_profiles(profile_data, source_persona_id)
     reference_images, reference_image_rejected = _reference_assets(
@@ -1682,6 +1688,8 @@ def build_data_plan(v1_root: str | Path, *, source_persona_id="", v1_configurati
             "worldbook_entries": 0, "diary_entries": 0,
             "dream_fragments": 0, "non_equivalent_reason": profile_error}
     material = {
+        "private_contacts": contacts,
+        "private_contact_rejected": contact_rejected,
         "expression_profiles": learned_expressions,
         "source_persona_id": source_persona_id,
         "selected_path": selected_path,
@@ -1725,7 +1733,8 @@ def build_data_plan(v1_root: str | Path, *, source_persona_id="", v1_configurati
         journal_rejected, worldbook_items, worldbook_rejected, member_profiles,
         member_profile_rejected, persona_sources, source_persona_id, profile_summary,
         work_delivery, world_assets, fingerprint, tuple(warnings + group_warnings),
-        reference_images, reference_image_rejected, wardrobe_items, wardrobe_rejected, learned_expressions)
+        reference_images, reference_image_rejected, wardrobe_items, wardrobe_rejected, learned_expressions,
+        contacts, contact_rejected)
 
 
 def load_reaction_asset(v1_root: str | Path, item: ReactionAsset) -> bytes:

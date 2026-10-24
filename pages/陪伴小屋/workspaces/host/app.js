@@ -530,7 +530,7 @@
     return group;
   }
 
-  function renderTopologySessions(data) {
+  function renderTopologySessions(data, {resetScroll = false} = {}) {
     const list = $("topology-sessions");
     const pagination = $("topology-session-pagination");
     const previous = $("topology-session-prev");
@@ -557,6 +557,7 @@
       empty.textContent = topologySessionFilter === "group" ? "没有群聊窗口" : "没有私聊窗口";
       list.replaceChildren(empty);
     }
+    if (resetScroll) list.scrollTop = 0;
     const paged = pageCount > 1;
     pagination.hidden = !paged;
     pageLabel.textContent = paged
@@ -579,7 +580,7 @@
     topologySessionPage = nextPage;
     topologyHover = null;
     if (topologySelection?.startsWith("session:")) topologySelection = null;
-    renderTopologySessions(topologySnapshot);
+    renderTopologySessions(topologySnapshot, {resetScroll: true});
     scheduleTopologyLinks();
   }
 
@@ -592,9 +593,24 @@
     const width = Math.max(1, canvasRect.width);
     const height = Math.max(1, canvasRect.height);
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-    svg.replaceChildren();
     const nodes = [...canvas.querySelectorAll(".topology-node")];
     const find = (key) => nodes.find((node) => node.dataset.topologyKey === key);
+    const existing = new Map([...svg.querySelectorAll(".topology-line")].map(line =>
+      [JSON.stringify([line.dataset.topologySource, line.dataset.topologyTarget]), line]));
+    const retained = new Set();
+    const visibleRect = node => {
+      const rect = node.getBoundingClientRect();
+      const list = node.closest(".topology-session-list");
+      if (!list) return rect;
+      const viewport = list.getBoundingClientRect();
+      const left = Math.max(rect.left, viewport.left);
+      const right = Math.min(rect.right, viewport.right);
+      const top = Math.max(rect.top, viewport.top);
+      const bottom = Math.min(rect.bottom, viewport.bottom);
+      // A card can exist on this page while being clipped by the scroll list.
+      if (right <= left || bottom <= top) return null;
+      return {left, right, top, bottom, width: right - left, height: bottom - top};
+    };
     const connections = [];
     data.personas.forEach((persona) => {
       persona.accountKeys.forEach((key) => connections.push([key, persona.key]));
@@ -618,20 +634,29 @@
       const source = find(sourceKey);
       const target = find(targetKey);
       if (!source || !target) return;
-      const [start, end, vertical] = port(source.getBoundingClientRect(), target.getBoundingClientRect());
+      const sourceRect = visibleRect(source);
+      const targetRect = visibleRect(target);
+      if (!sourceRect || !targetRect) return;
+      const [start, end, vertical] = port(sourceRect, targetRect);
       const distance = vertical ? Math.max(18, Math.abs(end[1] - start[1]) * .42)
         : Math.max(22, Math.abs(end[0] - start[0]) * .42);
-      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      path.classList.add("topology-line");
-      path.dataset.topologySource = sourceKey;
-      path.dataset.topologyTarget = targetKey;
-      path.setAttribute("pathLength", "1");
-      path.style.setProperty("--line-delay", `${Math.min(lineIndex * 48, 240)}ms`);
+      const key = JSON.stringify([sourceKey, targetKey]);
+      let path = existing.get(key);
+      if (!path) {
+        path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.classList.add("topology-line");
+        path.dataset.topologySource = sourceKey;
+        path.dataset.topologyTarget = targetKey;
+        path.setAttribute("pathLength", "1");
+        path.style.setProperty("--line-delay", `${Math.min(lineIndex * 48, 240)}ms`);
+        svg.append(path);
+      }
+      retained.add(path);
       path.setAttribute("d", vertical
         ? `M ${start[0]} ${start[1]} C ${start[0]} ${start[1] + distance}, ${end[0]} ${end[1] - distance}, ${end[0]} ${end[1]}`
         : `M ${start[0]} ${start[1]} C ${start[0] + distance} ${start[1]}, ${end[0] - distance} ${end[1]}, ${end[0]} ${end[1]}`);
-      svg.append(path);
     });
+    for (const line of existing.values()) if (!retained.has(line)) line.remove();
     paintTopologySelection(false);
   }
 
@@ -690,7 +715,7 @@
       : topologySnapshot.sessions.filter(item => item.scopeKind === topologySessionFilter);
     const index = filtered.findIndex((row) => row.key === key);
     topologySessionPage = Math.max(0, Math.floor(index / TOPOLOGY_SESSION_PAGE_SIZE));
-    renderTopologySessions(topologySnapshot);
+    renderTopologySessions(topologySnapshot, {resetScroll: true});
     scheduleTopologyLinks();
     paintTopologySelection();
   }
@@ -1675,7 +1700,7 @@
       renderSessionManager();
       paintTopologySelection(false);
     }
-    renderTopologySessions(topologySnapshot);
+    renderTopologySessions(topologySnapshot, {resetScroll: true});
     scheduleTopologyLinks();
   });
   $("topology-pin-session").addEventListener("click", toggleTopologyPin);
@@ -1701,6 +1726,16 @@
     paintTopologySelection();
   });
   window.addEventListener("resize", scheduleTopologyLinks, {passive: true});
+  $("topology-sessions").addEventListener("scroll", scheduleTopologyLinks, {passive: true});
+  $("topology-canvas").addEventListener("animationend", event => {
+    if (event.target.matches(".topology-column, .topology-node")) scheduleTopologyLinks();
+  });
+  if (typeof ResizeObserver === "function") {
+    const observer = new ResizeObserver(scheduleTopologyLinks);
+    for (const id of ["topology-canvas", "topology-accounts", "topology-roles", "topology-sessions"]) {
+      observer.observe($(id));
+    }
+  }
   boot();
   setInterval(() => {
     if (host && !busy && !bindingsDirty && !groupTargetsDirty

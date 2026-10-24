@@ -8,6 +8,13 @@ CORE_TOOL_DISPATCH_EXTRA = "_companion_v2_core_tool_dispatch"
 logger = logging.getLogger(__name__)
 
 
+def _restore_tool_reply(state):
+    pending = state.pop("deferred_reply", None)
+    if pending is not None:
+        response, text, chain = pending
+        response.completion_text, response.result_chain = text, chain
+
+
 def active_core_runner(event, run_context):
     try:
         from astrbot.core.pipeline.process_stage.follow_up import _ACTIVE_AGENT_RUNNERS
@@ -25,6 +32,7 @@ def restore_core_tool_dispatch(event, run_context=None):
     if not isinstance(state, dict) or (run_context is not None and state["run_context"] is not run_context):
         return
     runner = state["runner"]
+    _restore_tool_reply(state)
     for name, (had_local, old_local, wrapper) in state["methods"].items():
         try:
             if getattr(runner, name, None) is wrapper:
@@ -53,7 +61,25 @@ def observe_core_tool_dispatch_begin(event, run_context):
         return None
     state = {"runner": runner, "run_context": run_context, "methods": {}, "finished": [], "restored": False}
 
+    original_responses = getattr(runner, "_iter_llm_responses_with_fallback", None)
+
+    async def responses(*args, **kwargs):
+        async for response in original_responses(*args, **kwargs):
+            names = getattr(response, "tools_call_name", ())
+            if (not runner.streaming and not getattr(response, "is_chunk", False)
+                    and getattr(response, "role", None) == "assistant" and names
+                    and set(names) == {"companion_v2_reaction_search"}):
+                # AstrBot emits tool-step prose before executing the search.
+                # Defer that draft until the final media reply; restore the exact
+                # response before dispatch so tool IDs, arguments and history stay intact.
+                state["deferred_reply"] = (response, response.completion_text, response.result_chain)
+                # The SDK text setter mutates result_chain when one is attached.
+                response.result_chain = None
+                response.completion_text = ""
+            yield response
+
     async def bound_tools(*args, **kwargs):
+        _restore_tool_reply(state)
         # A binding error leaves the tool unavailable; it must never substitute
         # a model-supplied ID or execute an operation under a guessed identity.
         try:
@@ -99,7 +125,10 @@ def observe_core_tool_dispatch_begin(event, run_context):
 
     event.set_extra(CORE_TOOL_DISPATCH_EXTRA, state)
     try:
-        for name, wrapper in (("_handle_function_tools", bound_tools), ("step", observed_step)):
+        methods = [("_handle_function_tools", bound_tools), ("step", observed_step)]
+        if callable(original_responses):
+            methods.append(("_iter_llm_responses_with_fallback", responses))
+        for name, wrapper in methods:
             local = getattr(runner, "__dict__", {})
             state["methods"][name] = (name in local, local.get(name), wrapper)
             setattr(runner, name, wrapper)

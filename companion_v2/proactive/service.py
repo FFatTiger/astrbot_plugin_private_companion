@@ -390,6 +390,32 @@ class ProactiveContacts:
         prefix = DIAGNOSTIC_TASK_PREFIX if administrator_test else "contact-task-"
         return prefix + digest([context.scope.key, opportunity.opportunity_id])
 
+    @staticmethod
+    def _origin_for_selected_intent(origin, purpose):
+        """Keep only candidate metadata that belongs to the selected thought.
+
+        A regular conversation slot may carry a relationship candidate alongside
+        its chat candidate.  The scheduler needs the full origin while it is
+        choosing, but once a thought wins, persisting the other candidate's
+        marker would make later prompt assembly and delivery diagnostics describe
+        a route that was never selected.
+        """
+        if not isinstance(origin, dict):
+            return origin
+        relationship = origin.get("relationship_event")
+        if not isinstance(relationship, dict):
+            return origin
+        purposes = relationship.get("purposes")
+        if isinstance(purposes, list):
+            if purpose not in purposes:
+                return {key: value for key, value in origin.items() if key != "relationship_event"}
+            narrowed = {**relationship, "purposes": [purpose]}
+            return {**origin, "relationship_event": narrowed}
+        marker_purpose = relationship.get("purpose")
+        if marker_purpose is not None and marker_purpose != purpose:
+            return {key: value for key, value in origin.items() if key != "relationship_event"}
+        return origin
+
     def _continuity(self, context, history, interaction, origin, at, *, last_reply=None,
                     dialogue_history=None, diagnostic_origin=None):
         if history is not None:
@@ -609,9 +635,10 @@ class ProactiveContacts:
                         observed_at=at, selection_seed=selection_seed))
                     intent = originals[selection.selected.thought_id]
                     records = records_by_id[intent.thought.thought_id]
+                    selected_origin = self._origin_for_selected_intent(automatic_origin, intent.purpose)
                     job = ContactJob(context, intent, role_instruction, request_hash,
                         preferences.snapshot.resolution_token, tuple(record.content_hash for record in records),
-                        selection.feasible_count, selection.weight_used, history, interaction, automatic_origin,
+                        selection.feasible_count, selection.weight_used, history, interaction, selected_origin,
                         administrator_test=administrator_test,
                         diagnostic_source_backed=diagnostic_source_backed, diagnostic_origin=diagnostic_origin,
                         diagnostic_image_intent=diagnostic_image_intent)

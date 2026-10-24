@@ -187,7 +187,7 @@ window.CompanionContactPage = (() => {
     proactive_contact_dates_invalid:"重要日期需要一个 JSON 数组，最多 32 条。",
     proactive_contact_source_invalid:"资讯来源填写有误，请核对类型、标识或地址。",
     proactive_contact_revision_conflict:"设置已有其他更新，已读取最新值。",
-    configuration_revision_conflict:"设置已有其他更新，请重新读取后再保存。",
+    configuration_revision_conflict:"设置已有其他更新。正在读取最新值，未保存的改动会保留。",
     contact_configuration_invalid:"请核对联系设置：提交的字段或操作不完整。",
     invalid_contact_preference:"请核对联系设置的格式或范围。",
     configuration_relationship_required:"这个对象还没有建立可写入的关系。",
@@ -715,12 +715,33 @@ window.CompanionContactPage = (() => {
       }
       const unresolved = !!data.pendingWrite && !error.confirmed;
       notice(unresolved ? recoveryFailure(error) : reason(code), true);
-      if (["configuration_revision_conflict", "proactive_contact_revision_conflict",
-        "proactive_contact_target_changed"].includes(code)) {
+      if (["configuration_revision_conflict", "proactive_contact_revision_conflict"].includes(code)) {
+        /* A revision conflict rejects only the stale write.  Keep the fields
+           the user edited while refreshing the authoritative settings and
+           token, so a concurrent update cannot turn into lost UI work.  The
+           next save submits touched fields only, which preserves unrelated
+           changes made by the other writer. */
+        const conflictedDraft = {...data.draft};
+        const conflictedTouched = new Set(data.touched);
+        const conflictedTier = data.tierDraft;
+        await loadContract();
+        if (live(ticket)) {
+          data.draft = conflictedDraft;
+          data.touched = conflictedTouched;
+          data.tierDraft = conflictedTier;
+          notice(settingsAvailable() && data.configToken
+            ? "设置已有其他更新，已读取最新值；未保存的改动仍保留，请核对后再次保存。"
+            : "设置已有其他更新，但最新值暂时无法读取；未保存的改动仍保留，请重新读取后再保存。",
+          !(settingsAvailable() && data.configToken));
+          render();
+        }
+      } else if (code === "proactive_contact_target_changed") {
         data.touched.clear(); data.draft = {}; data.tierDraft = null;
         await loadContract();
-        if (live(ticket) && !data.error) {
-          notice("设置已有其他更新，已读取最新值。", false);
+        if (live(ticket)) {
+          notice(data.configToken
+            ? "联系配置目标已变化，已读取新目标设置；请核对后重新编辑。"
+            : "联系配置目标已变化，但新目标设置暂时无法读取；请重新读取。", !data.configToken);
           render();
         }
       } else {

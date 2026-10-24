@@ -102,7 +102,7 @@
   // 渲染顺序就是视觉顺序：核心在最上，逐级向下收窄。
   const tierOrder = ["core", "important", "standard"];
   // 名字来源：后端 directory_display_name 回传的 basis，用于说明这一行名字是怎么来的。
-  const nameBasisLabels = {administrator: "管理员备注", platform: "平台昵称", account: "账号回退"};
+  const nameBasisLabels = {administrator: "管理员备注", platform: "平台昵称", legacy: "旧版称呼", account: "账号回退"};
   const nameBasisOf = person => person.name_basis || (person.admin_nickname ? "administrator"
     : person.display_name && person.display_name !== person.native_account_id ? "platform" : "account");
   const tierHelp = {standard: "普通用户，没有管理员权限。", important: "重要用户，可用普通功能；管理操作仍需核心身份。",

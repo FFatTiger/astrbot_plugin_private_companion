@@ -221,7 +221,7 @@ dialog::backdrop { background: rgba(25, 27, 45, .48); }
 .topology-empty[hidden], .topology-canvas[hidden] { display: none; }
 .topology-empty strong { color: var(--ink); font-size: 13px; }
 .topology-canvas { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: center; gap: clamp(14px, 3vw, 38px); min-height: 160px; margin-top: 17px; }
-.topology-links { position: absolute; z-index: 2; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.topology-links { position: absolute; z-index: 2; inset: 0; width: 100%; height: 100%; overflow: hidden; pointer-events: none; }
 .topology-column { position: relative; z-index: 1; min-width: 0; animation: topology-column-in .36s var(--ease-out) both; }
 .topology-column:nth-of-type(2) { animation-delay: .04s; }
 .topology-column:nth-of-type(3) { animation-delay: .08s; }

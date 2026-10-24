@@ -139,7 +139,8 @@ class RealityExtensionAPI:
         settings = plugin._reality_touch_configuration_snapshot()
         camera = plugin._reality_touch_camera_page_snapshot()
         camera['camera_enabled'] = camera.pop('global_enabled')
-        return {'schema': 'companion.perception-settings.v1', 'plugin_id': PLUGIN_NAME, 'global': {key: settings[key] for key in _V2_PERCEPTION_FIELDS['global']}, 'camera': {key: camera[key] for key in _V2_PERCEPTION_FIELDS['camera']}, 'mobile': {key: settings['mobile'].get(key, '') for key in _V2_PERCEPTION_FIELDS['mobile'] if key not in {'pairing_token', 'amap_api_key'}}, 'health': {key: settings['health'][key] for key in _V2_PERCEPTION_FIELDS['health']}, 'secrets': {'pairing_token_configured': settings['mobile']['pairing_token_configured'], 'amap_api_key_configured': settings['mobile']['amap_api_key_configured']}}
+        vision_options = plugin._vision_provider_options()
+        return {'schema': 'companion.perception-settings.v1', 'plugin_id': PLUGIN_NAME, 'global': {key: settings[key] for key in _V2_PERCEPTION_FIELDS['global']}, 'vision_providers': vision_options, 'camera': {key: camera[key] for key in _V2_PERCEPTION_FIELDS['camera']}, 'mobile': {key: settings['mobile'].get(key, '') for key in _V2_PERCEPTION_FIELDS['mobile'] if key not in {'pairing_token', 'amap_api_key'}}, 'health': {key: settings['health'][key] for key in _V2_PERCEPTION_FIELDS['health']}, 'secrets': {'pairing_token_configured': settings['mobile']['pairing_token_configured'], 'amap_api_key_configured': settings['mobile']['amap_api_key_configured']}}
 
     async def companion_v2_update_perception_settings(self, section: str, updates: dict[str, Any]) -> dict[str, Any]:
         rules = _V2_PERCEPTION_FIELDS.get(section)

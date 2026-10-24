@@ -196,6 +196,43 @@ class ProactiveStyleTests(unittest.TestCase):
         self.assertIn("不要把短间隔说成久别", request.instruction)
         self.assertIn("短时间内刚联系过时，不用郑重重开场", request.instruction)
 
+    def test_candidate_and_recent_dialogue_are_reconciled_before_sending(self):
+        now = datetime(2026, 10, 23, 10, 58, tzinfo=timezone.utc)
+        preferences = ContactPreferences(None, dict(PREF_VALUES, quiet_timezone="Asia/Shanghai"), now)
+        job = self.contact_job()
+        job.intent.thought.summary = "借群聊分享的话题，预热明天的生日"
+        dialogue = (
+            {"role": "user", "text": "看看明天是什么日子", "received_at": "2026-10-23T18:42:41+08:00"},
+            {"role": "assistant", "text": "明天是周六，农历九月十五", "delivered_at": "2026-10-23T18:43:09+08:00"},
+            {"role": "user", "text": "我什么时候生日", "received_at": "2026-10-23T18:46:03+08:00"},
+            {"role": "assistant", "text": "明天是你的生日，我刚才漏掉了", "delivered_at": "2026-10-23T18:46:48+08:00"},
+        )
+
+        request = request_for(job, (), preferences, dialogue=dialogue)
+        materials = {item.purpose: json.loads(item.payload) for item in request.context.materials
+                     if item.purpose == "contact_intent"}
+        self.assertEqual(materials["contact_intent"]["local_time"], "18:58")
+        self.assertEqual(materials["contact_intent"]["minutes_until_midnight"], 302)
+        recent = [json.loads(item.payload)["text"] for item in request.context.materials
+                  if item.purpose == "recent_private_dialogue"]
+        self.assertEqual(recent, [item["text"] for item in dialogue])
+        self.assertIn("contact_intent.thought 只是待评估的一个开场方向", request.instruction)
+        self.assertIn("若还剩数小时，就不要说快到零点", request.instruction)
+        self.assertIn("不要把已经确认的事实演成刚发现的悬念、惊喜或遗漏", request.instruction)
+
+    def test_unselected_relationship_candidate_does_not_leak_into_chat_prompt(self):
+        preferences = ContactPreferences(None, dict(PREF_VALUES, dedup_enabled=True), NOW)
+        job = self.contact_job()
+        job.automatic_origin = {"relationship_event": {
+            "mode": "slot", "purposes": ["affection", "care", "play", "repair", "invitation"]}}
+
+        chat_request = request_for(job, (), preferences)
+        self.assertNotIn(ORIGIN_INSTRUCTIONS["relationship_event"], chat_request.instruction)
+
+        job.intent.purpose = "care"
+        relationship_request = request_for(job, (), preferences)
+        self.assertIn(ORIGIN_INSTRUCTIONS["relationship_event"], relationship_request.instruction)
+
     def test_administrator_diagnostic_omits_history_and_dedup_for_every_purpose(self):
         values = dict(PREF_VALUES, dedup_enabled=True)
         preferences = ContactPreferences(snapshot=None, values=values, observed_at=NOW)
@@ -356,7 +393,10 @@ class ProactiveStyleTests(unittest.TestCase):
         for marker, guidance in ORIGIN_INSTRUCTIONS.items():
             with self.subTest(marker=marker):
                 job = self.contact_job()
-                job.automatic_origin = {marker: {}}
+                job.automatic_origin = ({"relationship_event": {"purpose": "care"}}
+                                        if marker == "relationship_event" else {marker: {}})
+                if marker == "relationship_event":
+                    job.intent.purpose = "care"
                 request = request_for(job, (), preferences)
                 self.assertIn(guidance, request.instruction)
 

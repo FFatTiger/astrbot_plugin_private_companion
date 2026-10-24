@@ -214,6 +214,11 @@ def _cross_window_section(messages, context, at):
     return _material_section("跨窗口在场", CROSS_WINDOW_INSTRUCTION, (material,))
 
 
+def _input_received_at(native_input, fallback):
+    """Use the original input timestamp when a host adapter names it either way."""
+    return getattr(native_input, "at", None) or getattr(native_input, "received_at", None) or fallback
+
+
 def build_core_reply_prompt(application, context, native_input, *, at):
     """Build optional background independently; no failed section blocks reply."""
     blocks, stable_blocks, sections, expression_signal_ids = [], [], [], []
@@ -305,7 +310,8 @@ def build_core_reply_prompt(application, context, native_input, *, at):
     def conversation_perception():
         from companion_v2.agenda.planning_config import configured_annual_calendars
         from companion_v2.conversation.date_context import (
-            ALMANAC_INSTRUCTION, CALENDAR_INSTRUCTION, project_interaction_gap, project_local_date,
+            ALMANAC_INSTRUCTION, CALENDAR_INSTRUCTION, PERSONAL_DATE_INSTRUCTION,
+            project_interaction_gap, project_local_date, project_personal_dates,
         )
 
         settings = perception_settings()
@@ -315,7 +321,7 @@ def build_core_reply_prompt(application, context, native_input, *, at):
         owner = getattr(application, "background_history", None)
         if owner is not None and hasattr(context, "key"):
             try:
-                received_at = getattr(native_input, "at", at)
+                received_at = _input_received_at(native_input, at)
                 interaction = owner.interaction(context, min(received_at, at), action="conversation.reply")
                 if isinstance(interaction, dict):
                     last_at = max((value for value in (interaction.get("last_user_at"),
@@ -345,6 +351,37 @@ def build_core_reply_prompt(application, context, native_input, *, at):
             instructions.append(CALENDAR_INSTRUCTION)
             if settings["almanac_enabled"]:
                 instructions.append(ALMANAC_INSTRUCTION)
+        # Personal birthdays are explicit profile data, so they remain available
+        # even when generic calendar labels are disabled. User data is included
+        # only for the identified private recipient; role data is safe to share
+        # wherever the same role is active.
+        role_birthday = ""
+        user_birthday = ""
+        role_owner = getattr(messages, "role_profile_context", None)
+        if role_owner is not None:
+            try:
+                role_snapshot = role_owner.capture(context, at)
+                role_fields = role_snapshot.get("fields", {}) if isinstance(role_snapshot, dict) else {}
+                role_birthday = role_fields.get("birthday", "") if isinstance(role_fields, dict) else ""
+            except Exception as error:
+                logger.warning("[CompanionV2] 角色生日日期参考降级 error_type=%s", type(error).__name__)
+        if context.scope.kind is ScopeKind.PRIVATE:
+            relationship_owner = getattr(messages, "relationship_profile_context", None)
+            if relationship_owner is not None:
+                try:
+                    relationship_snapshot = relationship_owner.capture(context, at)
+                    relationship_fields = (relationship_snapshot.get("fields", {})
+                                           if isinstance(relationship_snapshot, dict) else {})
+                    user_birthday = (relationship_fields.get("user_birthday", "")
+                                     if isinstance(relationship_fields, dict) else "")
+                except Exception as error:
+                    logger.warning("[CompanionV2] 私聊生日日期参考降级 error_type=%s", type(error).__name__)
+        personal_dates = project_personal_dates(
+            at, settings["calendar_timezone"], role_birthday=role_birthday,
+            user_birthday=user_birthday)
+        if personal_dates["entries"]:
+            perception_data["personal_date_context"] = personal_dates
+            instructions.append(PERSONAL_DATE_INSTRUCTION)
         return {"context": encode(perception_data), "instructions": tuple(instructions),
                 "guidance": settings["guidance"].strip(),
                 "options": tuple(settings[name] for name in (
@@ -358,7 +395,7 @@ def build_core_reply_prompt(application, context, native_input, *, at):
             owner = getattr(application, "background_history", None)
             if owner is None:
                 return ""
-            received_at = getattr(native_input, "at", at)
+            received_at = _input_received_at(native_input, at)
             snapshot = owner.capture(context, min(received_at, at), action="conversation.reply",
                                      limit=8, max_chars=3200)
             items = owner.read(snapshot, context, at, action="conversation.reply")

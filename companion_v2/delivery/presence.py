@@ -11,6 +11,11 @@ from companion_v2.foundation.refs import ScopeKind
 
 logger = logging.getLogger(__name__)
 
+# QQ's away and busy modes have user-visible platform effects (including the
+# native away auto-reply). Role simulation must not select them automatically;
+# fatigue, rest and attention remain in the role fields and short wording.
+AUTOMATICALLY_BLOCKED_MODES = frozenset(("away", "busy"))
+
 
 class PresenceCoordinator:
     def __init__(self, app, port):
@@ -49,6 +54,7 @@ class PresenceCoordinator:
         if lease is None or lease["context"] != context or lease["reset"] != reset:
             lease = {"context": context, "reset": reset, "turns": {}}
             self.native_replies[route] = lease
+        lease["activity_at"] = stamp(self.app.now())
         lease["turns"].setdefault(turn_id, {"batch_id": turn_id, "state": "prepared",
                                           "execution_path": "astrbot_core"})
         self.bind(context)
@@ -58,7 +64,8 @@ class PresenceCoordinator:
     def finish_native_reply(self, context, turn_id):
         lease = self.native_replies.get(self.route(context))
         if lease is not None and lease["context"] == context:
-            lease["turns"].pop(turn_id, None)
+            if lease["turns"].pop(turn_id, None) is not None:
+                lease["activity_at"] = stamp(self.app.now())
             self._advance_typing()
             self.app.notify()
 
@@ -229,6 +236,43 @@ class PresenceCoordinator:
     def desired(self, context):
         return self.desired_status(context)["desired"]
 
+    def reply_status(self, context, state):
+        """Actual reply activity supersedes an older simulated absence.
+
+        Keep the completed lease and use durable native activity after restart,
+        so finishing a reply cannot immediately put the account away again.
+        Explicit operator calibration and newer simulations remain authoritative.
+        """
+        if state.get("reason") == "human_edit":
+            return None
+        from companion_v2.conversation.reset import boundary
+        from companion_v2.conversation.native_turns import latest_scope
+        lease = self.native_replies.get(self.route(context))
+        reset = boundary(self.runtime, context.scope)
+        activity, active = None, False
+        if (lease is not None and lease["context"] == context
+                and lease["reset"] == reset):
+            activity, active = lease.get("activity_at"), bool(lease["turns"])
+        native = latest_scope(self.runtime, context.scope)
+        if (native is not None and native["context_key"] == context.key
+                and (reset is None or native["observed_at"] > reset["reset_at"])):
+            # Reset boundaries invalidate old activity just as they do typing.
+            # A failed model request still came through genuine reply intake;
+            # model availability must not put QQ back into an old away mode.
+            observed = native["last_sent_at"] or native["observed_at"]
+            activity = max(activity or observed, observed)
+        if not activity or not active and activity <= state.get("updated_at", ""):
+            return None
+        mode = state.get("values", {}).get("online_mode")
+        if mode is None:
+            previous = self.latest_status(context)
+            if previous is None or previous["context_key"] != context.key:
+                return None
+            mode = json.loads(previous["request_json"]).get("mode")
+        if mode not in {"away", "busy", "invisible"}:
+            return None
+        return {"mode": "online", "basis": "native_reply", "reference": [activity]}
+
     @staticmethod
     def intent_hash(desired):
         return digest(desired["wording"]) if "wording" in desired else digest(["online", desired["mode"]])
@@ -244,6 +288,11 @@ class PresenceCoordinator:
                 continue
         if not available:
             raise TaskError("presentation_disabled", "optional account status is unavailable")
+        state = self.app.role_state.read(context) if values["enabled"] else None
+        if state is not None and "online_status_enabled" in available:
+            reply = self.reply_status(context, state)
+            if reply is not None:
+                return {"desired": reply, "reason": None}
         now = self.app.now()
         if "presence_enabled" in available:
             try:
@@ -257,11 +306,15 @@ class PresenceCoordinator:
                             "reference": [row["id"], row["revision"], row["sequence"]]}, "reason": None}
             except TaskError:
                 pass
-        if values["enabled"]:
-            state = self.app.role_state.read(context)
+        if state is not None:
             public = state.get("values", {})
             mode = public.get("online_mode")
             if "online_status_enabled" in available and mode:
+                if mode in AUTOMATICALLY_BLOCKED_MODES:
+                    # Recover an account left in an old away/busy state without
+                    # issuing either forbidden platform mode again.
+                    return {"desired": {"mode": "online", "basis": "blocked_role_mode",
+                            "reference": [state["revision"], mode]}, "reason": "blocked_role_mode"}
                 return {"desired": {"mode": mode, "basis": "role_simulation",
                         "reference": [state["revision"]]}, "reason": None}
             wording = public.get("presence")

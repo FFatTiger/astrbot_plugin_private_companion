@@ -69,8 +69,12 @@
       hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
   };
   const nameOf = (person) => person.display_name || `未命名成员 ${person.native_account_id ?? ""}`.trim();
-  const personFilter = (person) => person?.private_chat || person?.private_target ? "stable"
-    : person?.group_member ? "temporary" : person ? "stable" : null;
+  const isPrivateUser = person => Boolean(person?.private_chat || person?.private_contact
+    || person?.private_target && (person?.admin_nickname || ["core", "important"].includes(person?.identity_tier)));
+  const knownPerson = person => Boolean(hasInteraction(person) || person?.private_contact
+    || person?.admin_nickname || ["core", "important"].includes(person?.identity_tier));
+  const personFilter = person => isPrivateUser(person) ? "stable"
+    : person?.group_member ? "temporary" : person ? "discovered" : null;
   const accountLabel = (item) => item.account_name || (/^\d+$/.test(String(item.account_id || ""))
     ? `QQ ${item.account_id}` : "当前 Bot 账号");
   const groupsOf = (person) => person.groups && typeof person.groups === "object" ? person.groups : {};
@@ -87,7 +91,8 @@
   const personaDisplayLabel = (person) => personaIdsOf(person).map(value => value || "默认人格").join("、")
     || person?.role_name || "当前人格";
   const routeSnapshot = (person) => Object.fromEntries(["platform", "bot_id", "account_id", "role_id", "persona_ids",
-    "revision", "settings_available", "private_target", "private_chat", "admin_nickname", "identity_tier",
+    "revision", "settings_available", "private_target", "private_chat", "private_contact",
+    "legacy_private_contact", "legacy_maintained", "admin_nickname", "identity_tier",
     "display_name", "native_account_id", "role_name", "private", "groups", "total"]
     .filter(key => person?.[key] !== undefined).map(key => [key, Array.isArray(person[key]) ? [...person[key]] : person[key]]));
   const displayPersonKey = (person) => JSON.stringify([person.subject_id, personaGroupKey(person)]);
@@ -124,6 +129,9 @@
       target.display_route_count = target.display_routes.length;
       target.persona_ids = [...new Set([...(target.persona_ids || []), ...personaIdsOf(source)])];
       target.private_chat ||= Boolean(source.private_chat);
+      target.private_contact ||= Boolean(source.private_contact);
+      target.legacy_private_contact ||= Boolean(source.legacy_private_contact);
+      target.legacy_maintained ||= Boolean(source.legacy_maintained);
       target.private_target ||= Boolean(source.private_target);
       target.group_member ||= Boolean(source.group_member);
       target.settings_available = target.display_route_count > 0;
@@ -207,15 +215,16 @@
       || Object.values(groupsOf(person)).some((item) => number(item?.msg_count) > 0));
   }
   function isIdleOrdinaryUser(person) {
-    return String(person?.identity_tier || "standard") === "standard" && !hasInteraction(person);
+    return !knownPerson(person);
   }
   function peopleForCurrentFilter({includeHidden = false} = {}) {
     if (!data) return [];
     return data.persons.filter((person) => {
       if (!matchesSearch(person)) return false;
-      if (filter === "stable" && personFilter(person) !== "stable") return false;
-      if (filter === "temporary" && personFilter(person) !== "temporary") return false;
-      if (!includeHidden && hideIdleUsers && isIdleOrdinaryUser(person)) return false;
+      if (filter === "stable" && !isPrivateUser(person)) return false;
+      if (filter === "temporary" && !person.group_member) return false;
+      if (filter === "discovered" && knownPerson(person)) return false;
+      if (filter !== "discovered" && !includeHidden && hideIdleUsers && isIdleOrdinaryUser(person)) return false;
       return true;
     });
   }
@@ -280,7 +289,7 @@
     return data.persons.filter((person) => {
       if (!matchesSearch(person)) return false;
       if (hideIdleUsers && isIdleOrdinaryUser(person)) return false;
-      if (graphScope === "private") return person.private_chat;
+      if (graphScope === "private") return isPrivateUser(person);
       if (graphScope === "group") return person.group_member;
       return true;
     });
@@ -487,7 +496,8 @@
     const badges = node("span", undefined, "card-badges");
     if (person.private_chat) badges.append(badge("私聊", "private"));
      if (person.group_member) badges.append(badge(`群聊 ${groupIdsOf(person).length}`, "group"));
-     if (!person.private_chat && !person.group_member) badges.append(badge("暂无往来"));
+     if (person.legacy_private_contact) badges.append(badge("旧版用户"));
+     if (!person.private_chat && !person.group_member) badges.append(badge(person.private_contact ? "已维护" : "未有往来"));
      badges.append(badge(TIER_LABELS[person.identity_tier] || "普通用户", person.identity_tier === "core" ? "companion" : ""));
      if (person.identity_tier === "core") badges.append(badge("管理员", "administrator"));
      title.append(badges);
@@ -513,12 +523,12 @@
     const visibilitySummary = $("people-visibility-summary");
     if (visibilitySummary) {
       const hidden = data ? peopleForCurrentFilter({includeHidden: true}).length - people.length : 0;
-      visibilitySummary.textContent = hideIdleUsers
+      visibilitySummary.textContent = filter === "discovered" ? "仅在 AstrBot 中发现的会话，可在此单独配置" : hideIdleUsers
         ? hidden ? `已隐藏 ${hidden} 位无交往普通用户` : "默认隐藏无交往普通用户"
         : "已显示全部用户";
     }
     const toggle = $("hide-idle-users");
-    if (toggle) toggle.checked = hideIdleUsers;
+    if (toggle) { toggle.checked = hideIdleUsers; toggle.disabled = filter === "discovered"; }
     if (!people.length) {
       const empty = node("div", undefined, "empty-state");
       const hidden = data ? peopleForCurrentFilter({includeHidden: true}).length : 0;
@@ -1226,7 +1236,7 @@
     const counts = data?.counts;
     $("count-total").textContent = counts ? String(number(counts.total)) : "—";
     const stableCount = data?.persons.filter(person => personFilter(person) === "stable").length;
-    const temporaryCount = data?.persons.filter(person => personFilter(person) === "temporary").length;
+    const temporaryCount = data?.persons.filter(person => person.group_member).length;
     $("count-private").textContent = counts ? String(number(counts.private_chat)) : "—";
     $("count-group").textContent = counts ? String(number(counts.group_member)) : "—";
     $("count-both").textContent = counts ? String(number(counts.both)) : "—";
@@ -1235,6 +1245,7 @@
     $("operator").textContent = data?.operator_name ?? "—";
     $("chip-stable").textContent = String(stableCount || 0);
     $("chip-temporary").textContent = String(temporaryCount || 0);
+    $("chip-discovered").textContent = String(data?.persons.filter(person => !knownPerson(person)).length || 0);
     $("nav-people-count").textContent = `${number(counts?.total)} 位`;
     $("nav-groups-count").textContent = `${allGroups().length} 个`;
   }
@@ -1368,11 +1379,11 @@
   }
   function applyDirectory(result, {background = false} = {}) {
     const persons = mergeDirectoryPeople(Array.isArray(result.persons) ? result.persons : []);
-    const privateCount = persons.filter(item => item.private_chat).length;
+    const privateCount = persons.filter(isPrivateUser).length;
     const groupCount = persons.filter(item => item.group_member).length;
-    const bothCount = persons.filter(item => item.private_chat && item.group_member).length;
+    const bothCount = persons.filter(item => isPrivateUser(item) && item.group_member).length;
     data = { ...result, persons, groups: Array.isArray(result.groups) ? result.groups : [],
-      counts: {...(result.counts || {}), total: persons.length, private_chat: privateCount,
+      counts: {...(result.counts || {}), total: persons.filter(knownPerson).length, private_chat: privateCount,
         group_member: groupCount, both: bothCount, private_only: privateCount - bothCount,
         group_only: groupCount - bothCount} };
     const previous = selected ? displayPersonKey(selected) : null;

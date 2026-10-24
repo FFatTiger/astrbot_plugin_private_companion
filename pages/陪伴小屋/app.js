@@ -72,8 +72,7 @@ let configEditorMounts=[];
 let identityDialogMount=null;
 let roleProfileConfigMount=null;
 let toastTimer, arrangementDraft=null, dialogReturnFocus=null, dialogReturnFurniture='', lastDetail='', voxelController=null;
-/* 「放弃改动」已确认、这一次跳转不再重复弹窗（见 guardUnsaved / pageLeaveDecision）。 */
-let dirtyApproved=false;
+let draftConfirmation=null;
 const configuredRoleName=()=>escapeHTML(configSnapshot.identity?.botName||'当前角色');
 /* 角色名。有真实角色就用它，没有就用配置里的角色名——
    不再有「望舒（示例）」这种带着「示例」字样的占位，那会让真实使用中被误读成假数据。 */
@@ -278,7 +277,7 @@ function currentNavigationHref(){
 }
 function pageLeaveDecision(){
   if(window.CompanionStatePage?.canLeave?.()===false)return false;
-  /* 路由跳转（链接、搜索落点、hash）不走 guardUnsaved，这里补一次同样的确认。
+  /* 所有导航统一在这里确认，避免点击守卫和路由守卫重复询问。
      注意天气源页的 canLeave 可能是 Promise：必须把它原样接下去，
      不能在同步分支里丢掉，否则「等用户在页内确认」会变成立即放行。 */
   const confirmDrafts=()=>{
@@ -452,7 +451,7 @@ async function probeHost(){
 }
 function onProductChanged(reason){
   integrationSnapshot=product.manifest;
-  if(arrangementDraft||reason?.kind==='host-mappings'&&$('.product-workspace-frame')){
+  if(arrangementDraft||reason?.kind==='host-mappings'&&($('.product-workspace-frame')||$('#legacyMigrationWorkspace'))){
     updateHostChrome();renderShellSide();return;
   }
   if(reason?.kind==='state-refresh'){renderShellSide();renderHomeEnvironment();return;}
@@ -804,6 +803,7 @@ function paintPanel(){
      只在来源确实是导航时移动焦点——面板内部的刷新（轮询、保存回执）不该抢焦点。 */
   const fromRail=Boolean(document.activeElement?.closest?.('.rail'));
   const commit=()=>{
+    unmountConfigEditors();
     host.innerHTML=furniture?renderFurniturePanel(furniture)
       :section?renderSectionPanel(section)
       :view?renderViewPanel(view)
@@ -1141,35 +1141,33 @@ function dirtyDrafts(){
   try{pending.push(...(window.CompanionPageGuards?.dirty?.()||[]));}catch(error){console.warn('[陪伴小屋] 页面脏检查失败',error);}
   return pending;
 }
-/* 已经确认过「放弃改动」的这一次跳转不再重复弹窗：
-   guardUnsaved 之后往往还会走 navigate() → pageLeaveDecision。 */
 function confirmDirtyDrafts(pending){
-  if(!pending.length||dirtyApproved)return true;
-  if(typeof window.CompanionConfirm!=='function')return true;
-  const names=pending.map(item=>item.title||item.group||item.id).slice(0,2).join('、')
-    +(pending.length>2?` 等 ${pending.length} 处`:'');
-  return Promise.resolve(window.CompanionConfirm({
-    title:'还有未保存的改动',
-    message:`「${names}」的改动还没保存，离开后这些改动会丢失。`,
-    confirmText:'放弃改动',
-    cancelText:'回去保存',
-    danger:true,
-  }));
-}
-function guardUnsaved(run){
-  const pending=dirtyDrafts();
-  if(!pending.length){
-    try{run();}catch(error){console.warn('[陪伴小屋] 导航失败',error);}
+  if(draftConfirmation)return draftConfirmation;
+  if(!pending.length)return true;
+  if(typeof window.CompanionConfirm!=='function')return false;
+  const resolveDrafts=async action=>{
+    for(const item of pending){
+      if(typeof item[action]!=='function'){
+        if(action==='save')return {error:`「${item.title||item.group||item.id}」需要回到原配置中确认保存。`};
+        continue;
+      }
+      const result=await item[action]();
+      if(result!==true)return {error:`${item.title||item.group||item.id}：${result?.error||'操作未完成，改动仍保留。'}`};
+    }
     return true;
-  }
-  if(typeof window.CompanionConfirm!=='function'){run();return true;}
-  void confirmDirtyDrafts(pending).then(ok=>{
-    if(typeof ok==='object')ok=true; /* 极端情况下 CompanionConfirm 返回事件对象 */
-    if(!ok)return;
-    dirtyApproved=true;
-    try{run();}catch(error){console.warn('[陪伴小屋] 导航失败',error);}finally{dirtyApproved=false;}
-  });
-  return true;
+  };
+  draftConfirmation=Promise.resolve(window.CompanionConfirm({
+    title:'还有未保存的改动',
+    message:'以下配置还没有保存。可以保存后切换，或放弃这些改动。',
+    details:pending.map(item=>({title:item.title||item.group||item.id,
+      fields:item.fields?.length?item.fields:['当前编辑的配置']})),
+    confirmText:'放弃并切换',
+    cancelText:'继续编辑',
+    onSave:()=>resolveDrafts('save'),
+    onConfirm:()=>resolveDrafts('discard'),
+    danger:true,
+  })).then(ok=>ok===true).finally(()=>{draftConfirmation=null;});
+  return draftConfirmation;
 }
 
 /* 整页关闭 / 刷新同样会丢掉草稿，浏览器只允许用原生提示拦一下。 */
@@ -1185,16 +1183,22 @@ window.addEventListener('beforeunload',event=>{
 function registerPageGuards(){
   const guards=window.CompanionPageGuards;
   if(!guards?.register)return;
-  const add=(id,title,check)=>guards.register(id,title,check);
+  const add=(id,title,check,actions={})=>guards.register(id,title,check,actions);
   add('room-editor','布置房间',()=>{
     if(!arrangementDraft||!voxelController)return false;
     try{return JSON.stringify(voxelController.getLayout())!==JSON.stringify(arrangementDraft.layout);}catch{return false;}
+  },{fields:()=>['家具位置与朝向'],save:()=>{finishRoomEditor(true);return true;},
+    discard:()=>{finishRoomEditor(false);return true;}});
+  const page=(id,title,name)=>add(id,title,()=>window[name]?.isDirty?.()===true,{
+    fields:()=>window[name]?.changedFields?.()||[],
+    save:()=>window[name]?.saveBeforeLeave?.()??{error:'请回到原配置中确认保存。'},
+    discard:()=>window[name]?.discardChanges?.()??true,
   });
-  add('role-profile-draft','角色档案草稿',()=>window.CompanionRoleProfileDraft?.isDirty?.()===true);
-  add('perception','感知配置',()=>window.CompanionNativePerceptionPage?.isDirty?.()===true);
-  add('models','模型与连接',()=>window.CompanionModelsPage?.isDirty?.()===true);
-  add('semantic','语义校验',()=>window.CompanionSemanticPage?.isDirty?.()===true);
-  add('setup','开始使用',()=>window.CompanionSetup?.isDirty?.()===true);
+  page('role-profile-draft','角色档案草稿','CompanionRoleProfileDraft');
+  page('perception','感知配置','CompanionNativePerceptionPage');
+  page('models','模型与连接','CompanionModelsPage');
+  page('semantic','语义校验','CompanionSemanticPage');
+  page('setup','开始使用','CompanionSetup');
 }
 registerPageGuards();
 
@@ -1213,13 +1217,13 @@ function chooseFurniture(id){
 }
 /* 选配置分区：换下方面板，小屋退到背景（不销毁）。 */
 function chooseSection(id){
-  navigate('manage',id);
+  return navigate('manage',id);
 }
 /* 回到首页：清掉分区选择，面板回到小屋总览。
    小屋本身没被销毁过，所以这一步不需要重建——它只是从窄条放大回来，
    取景仍是离开时的那个机位。 */
 function backHome(){
-  navigate('life','home');
+  return navigate('life','home');
 }
 function render(){
   product.unmountWorkspace();
@@ -1242,9 +1246,8 @@ function render(){
   unmountSetupGuide();
   window.CompanionBackupPage?.unmount();
   window.CompanionStoragePage?.unmount();
-  /* Config editors own no host object: dropping their DOM drops their handlers,
-     and mount() re-reads, so nothing survives a route change. */
-  configEditorMounts=[];
+  /* Release editor registrations before replacing their DOM. */
+  unmountConfigEditors();
   if(arrangementDraft)finishRoomEditor(false);
   updateAppearance();
 
@@ -3643,9 +3646,13 @@ function outputConfigView(kind,overrides={}){
   const definition=window.CompanionConfigEditors?.spec?.[kind]||{};
   return {note:'',navigationLimit:0,helps:Object.fromEntries(Object.keys(definition.helps||{}).map(key=>[key,''])),...overrides};
 }
-function renderConfigEditors(){
-  configEditorMounts.length=0;
+function unmountConfigEditors(){
+  for(const mount of configEditorMounts)mount?.unmount?.();
+  configEditorMounts=[];
   roleProfileConfigMount=null;
+}
+function renderConfigEditors(){
+  unmountConfigEditors();
   if($('#imageOutputWorkspace'))configEditorMounts.push(mountConfigEditor('imageOutputWorkspace',['image.output'],{
     'image.output':outputConfigView('image.output',{onStatus:value=>{
       window.CompanionImageMaterialsPage?.reload?.();
@@ -4190,7 +4197,9 @@ function renderDataOriginal(){
   if(dataPane==='backup'){
     content=`<section class="data-page-view" aria-labelledby="data-page-title"><header class="data-page-view-head"><span>02</span><h3 id="data-page-title">备份与还原</h3></header><div id="backupWorkspace">${consoleLoading('正在读取快照列表…')}</div></section>`;
   }else if(dataPane==='migration'){
-    content=`<section class="data-page-view" aria-labelledby="data-page-title"><header class="data-page-view-head"><span>03</span><h3 id="data-page-title">旧版资料迁入</h3></header><div id="legacyMigrationWorkspace"></div></section>`;
+    /* 迁入工作区自带页面抬头；这里保留一份仅供读屏与路由锚点的标题，
+       避免视觉上出现「03 旧版资料迁入」和抬头标题两份。 */
+    content=`<section class="data-page-view" aria-labelledby="data-page-title"><header class="data-page-view-head sr-only"><span>03</span><h3 id="data-page-title">旧版资料迁入</h3></header><div id="legacyMigrationWorkspace"></div></section>`;
   }else{
     content=`<section class="data-page-view" aria-labelledby="data-page-title"><header class="data-page-view-head"><span>01</span><h3 id="data-page-title">存储位置与清理策略</h3></header><div id="storageWorkspace">${consoleLoading('正在读取插件存储…')}</div></section>`;
   }
@@ -4312,7 +4321,7 @@ function showDetail(id){
 function openDetailDialog(title,body){
   const dialog=$('#detailDialog');
   if(!dialog||!dialog.classList||!$('#dialogContent'))return false;
-  identityDialogMount?.stop?.();
+  identityDialogMount?.unmount?.();
   identityDialogMount=null;
   window.CompanionGameAccess?.unmount();
   const previousNativeHost=$('#dialogContent').querySelector('[data-native-extension-host]');
@@ -4841,29 +4850,29 @@ document.addEventListener('click',event=>{
   if(el.dataset.shellFurniture){
     /* 再点一次同一件 = 取消选中，回到全景与总览面板。 */
     const same=window.CompanionShell?.furniture===el.dataset.shellFurniture;
-    if(guardUnsaved(()=>{chooseFurniture(same?null:el.dataset.shellFurniture);
-      if(same)voxelController?.focus?.('overview');}))return;
+    void Promise.resolve(chooseFurniture(same?null:el.dataset.shellFurniture)).then(ok=>{
+      if(ok&&same)voxelController?.focus?.('overview');});
     return;
   }
   if(el.dataset.shellView){
-    if(guardUnsaved(()=>navigate('life',el.dataset.shellView)))return;return;
+    navigate('life',el.dataset.shellView);return;
   }
   /* 小屋退到背景时点它 = 回到首页。缩略态下整个小屋区都是返回入口，
      不要求用户去点那个小按钮。 */
   if(el.closest('#stageScene')&&window.CompanionShell?.section){
-    if(guardUnsaved(backHome))return;
+    backHome();
     return;
   }
   if(el.dataset.shellHome!==undefined){
-    if(guardUnsaved(()=>{backHome();voxelController?.focus?.('overview');}))return;
+    void Promise.resolve(backHome()).then(ok=>{if(ok)voxelController?.focus?.('overview');});
     return;
   }
   if(el.dataset.shellSection){
-    if(guardUnsaved(()=>chooseSection(el.dataset.shellSection)))return;
+    chooseSection(el.dataset.shellSection);
     return;
   }
   if(el.dataset.manageTab){
-    if(guardUnsaved(()=>navigate('manage',el.dataset.manageTab)))return;
+    navigate('manage',el.dataset.manageTab);
     return;
   }
   if(el.dataset.albumPage!==undefined){showDetail('album');return;}
@@ -4932,7 +4941,7 @@ document.addEventListener('submit',event=>{
      弹窗里现在不会有 data-form 表单，保留这条兜底防止未捕获的提交刷新页面。 */
   const form=event.target;if(!form.dataset.form)return;event.preventDefault();
 });
-$('#detailDialog').addEventListener('close',()=>{identityDialogMount?.stop?.();identityDialogMount=null;window.CompanionGameAccess?.unmount();const nativeHost=$('#dialogContent').querySelector('[data-native-extension-host]');if(nativeHost)window.CompanionNativeExtensionPanel?.unmount(nativeHost);$('#detailDialog').classList.remove('detail-dialog-settings','detail-dialog-native-extension');if(dialogReturnFocus?.isConnected)dialogReturnFocus.focus({preventScroll:true});else if(dialogReturnFurniture)document.querySelector('[data-furniture="'+dialogReturnFurniture+'"]')?.focus({preventScroll:true});else document.querySelector('[data-detail="'+lastDetail+'"]')?.focus({preventScroll:true});});
+$('#detailDialog').addEventListener('close',()=>{identityDialogMount?.unmount?.();identityDialogMount=null;window.CompanionGameAccess?.unmount();const nativeHost=$('#dialogContent').querySelector('[data-native-extension-host]');if(nativeHost)window.CompanionNativeExtensionPanel?.unmount(nativeHost);$('#detailDialog').classList.remove('detail-dialog-settings','detail-dialog-native-extension');if(dialogReturnFocus?.isConnected)dialogReturnFocus.focus({preventScroll:true});else if(dialogReturnFurniture)document.querySelector('[data-furniture="'+dialogReturnFurniture+'"]')?.focus({preventScroll:true});else document.querySelector('[data-detail="'+lastDetail+'"]')?.focus({preventScroll:true});});
 $('#detailDialog').addEventListener('click',event=>{if(event.target!==event.currentTarget)return;const r=event.currentTarget.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)closeDetail();});
 $('#searchDialog').addEventListener('click',event=>{if(event.target===event.currentTarget){const r=event.currentTarget.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)event.currentTarget.close();}});
 $('#searchButton').addEventListener('click',openSearch);

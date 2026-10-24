@@ -129,6 +129,11 @@ def bind_core_voice_authoring(event, runner):
                         await _repair(event, runner, response)
                     observe_core_voice_response(event, response)
                 yield response
+        except GeneratorExit:
+            # The SDK closes this per-request iterator after the final provider
+            # item even when the agent still has tools to run. Keep the binding
+            # through that continuation; agent completion owns normal cleanup.
+            raise
         except BaseException:
             restore_core_voice_authoring(event)
             raise
@@ -141,6 +146,9 @@ def bind_core_voice_authoring(event, runner):
 def prepare_core_voice_authoring(event, run_context):
     runner = active_core_runner(event, run_context)
     if runner is not None:
+        # Voice wraps dispatch presentation; the host restores voice first.
+        from .core_reply_tool_dispatch import observe_core_tool_dispatch_begin
+        observe_core_tool_dispatch_begin(event, run_context)
         bind_core_voice_authoring(event, runner)
 
 

@@ -1954,12 +1954,12 @@ window.CompanionModelsPage = (() => {
   function unmount() { version++; if (root) { root.removeEventListener("input", input); root.removeEventListener("change", input); root.removeEventListener("click", click); root.removeEventListener("pointerover", providerHover); root.removeEventListener("pointerout", providerHover); }
     if (state) { state.loading = false; state.busy = false; }
     root = null; state = null; path = key = null; }
-  function mount(element) { unmount(); root = element; if (!root) return; const product = window.CompanionProduct;
+  function mount(element, options = {}) { unmount(); root = element; if (!root) return; const product = window.CompanionProduct;
     /* 这里原先先判断 hosted()，桥还没注入时直接写「从 AstrBot 管理界面打开陪伴小屋后…」。
        桥的注入晚于脚本执行是正常时序，所以那句话在正经的拓展页里也出现过。
        现在改成读不到就说读不到，并给一个重新读取的入口——刷新之后桥通常就在了。 */
     const identity = product.identity();
-    const endpoint = product.role()?.model_api;
+    const endpoint = Object.hasOwn(options, "endpoint") ? options.endpoint : product.role()?.model_api;
     if (!product.hosted() || typeof endpoint !== "string" || !endpoint.startsWith(PREFIX) || /[?#%\\:]/.test(endpoint) || endpoint.split("/").slice(1).some(p => !p || p === "." || p === "..") || !identity.operator_id) { root.innerHTML = `<div class="model-empty">${product.hosted()?'当前对象没有模型配置工作区。请选择已关联角色的私聊窗口。':'角色与会话目录暂未读到，请稍后重新读取。'}<div class="dialog-actions"><button class="button small" type="button" data-workspace-retry>重新读取</button><button class="button small" type="button" data-go="manage" data-manage="host">账号与会话</button></div></div>`; return; }
     /* path 是每一次请求的基址（model_api + /configure、/voice、/tts/providers…），
        也是 localStorage 键的一部分。桥要插件相对路径，所以切掉插件目录名。 */
@@ -1984,18 +1984,117 @@ window.CompanionModelsPage = (() => {
     root.addEventListener("input", input); root.addEventListener("change", input); root.addEventListener("click", click); root.addEventListener("pointerover", providerHover); root.addEventListener("pointerout", providerHover); render();
     if (state.tab && state.tab !== "fn") { if (state.tab === "voice" && !state.voice.loaded) voiceRefresh(state); else if (state.tab === "image" && !state.image.loaded) imageRefresh(state); else if (state.tab === "search" && !state.search.loaded) searchRefresh(state); else if (state.tab === "laya" && !state.laya.loaded) layaRefresh(state); }
     else { refresh().catch(() => {}); } }
-  /* 页面级未保存守卫（page-guards.js）：模型页的草稿分散在任务草稿表、
-     语音配置、识图配置、Laya 配置里，逐个用页面自己的脏判定。
-     任何一项算不出来就跳过这一项，不让守卫本身把页面卡住。 */
-  function isDirty() {
-    for (const s of states.values()) {
-      if (!s) continue;
-      try { if (pendingCount(s) > 0) return true; } catch { }
-      try { if (s.voice && voiceDirty(s.voice)) return true; } catch { }
-      try { if (s.image && imageConfigDirty(s.image)) return true; } catch { }
-      try { if (s.laya && layaDirty(s.laya)) return true; } catch { }
+  /* Only the mounted scope can block navigation. Retained drafts belonging to
+     another role or a closed page must not trigger a warning on every route. */
+  function imageChangedFields(i) {
+    const changed = [], same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const labels = {enabled:'启用开关', backend:'后端模式', base_url:'API 地址', model:'模型 ID', name:'端点名称',
+      platform:'协议', timeout_seconds:'超时秒数', api_key:'API Key', clear_api_key:'清除已保存密钥',
+      custom_headers:'自定义请求头', clear_custom_headers:'清除已保存请求头', quality:'图片质量',
+      size_label:'尺寸标签', width:'宽度', height:'高度', max_reference_images:'最多参考图',
+      comfyui:'ComfyUI', sd_webui:'SD WebUI', network:'下载网络', download_proxy:'下载代理',
+      clear_download_proxy:'清除已保存代理', use_environment_proxy:'使用系统代理',
+      parameters:'生图参数', operation_routes:'调用顺序', generate:'文生图', edit:'改图',
+      mask_edit:'蒙版局部改图', workflows:'工作流', legacy_options:'旧版兼容参数'};
+    const compare = (base, draft, prefix) => {
+      for (const name of new Set([...Object.keys(base || {}), ...Object.keys(draft || {})])) {
+        if (same(base?.[name], draft?.[name])) continue;
+        const label = `${prefix} · ${labels[name] || imageSchema?.sd_webui?.fields?.[name]?.label || name}`;
+        if (['network','comfyui','sd_webui','parameters','operation_routes','generate','edit'].includes(name)
+            && !Array.isArray(base?.[name]) && !Array.isArray(draft?.[name])) compare(base?.[name], draft?.[name], label);
+        else changed.push(label);
+      }
+    };
+    const {endpoints: before = [], ...base} = i.configBase;
+    const {endpoints: after = [], ...draft} = i.configDraft;
+    compare(base, draft, '生图模型');
+    for (const id of new Set([...before.map(item => item.id), ...after.map(item => item.id)])) {
+      const old = before.find(item => item.id === id), value = after.find(item => item.id === id);
+      const label = `生图模型 · ${value?.name || old?.name || '图片模型'}`;
+      if (!old || !value) changed.push(`${label}（${value ? '新增' : '删除'}）`);
+      else compare(old, value, label);
     }
-    return false;
+    const textLabels = {'sd.generate':'SD WebUI · 文生图高级参数', 'sd.edit':'SD WebUI · 改图高级参数',
+      'comfy.generate':'ComfyUI · 文生图工作流', 'comfy.edit':'ComfyUI · 改图工作流',
+      'comfy.mask_edit':'ComfyUI · 蒙版局部改图工作流', 'legacy.options':'旧版兼容参数'};
+    for (const name of new Set([...Object.keys(i.configTextBase || {}), ...Object.keys(i.configText || {})])) {
+      if (same(i.configTextBase?.[name], i.configText?.[name])) continue;
+      const endpoint = name.startsWith('headers.') && [...after, ...before].find(item => item.id === name.slice(8));
+      if (endpoint && !after.some(item => item.id === endpoint.id)) continue;
+      changed.push(`生图模型 · ${endpoint ? `${endpoint.name || '图片模型'} · 自定义请求头` : textLabels[name] || name}`);
+    }
+    return [...new Set(changed)];
   }
-  return { mount, unmount, isDirty };
+  function changedFields() {
+    const s = state;
+    if (!root || !s) return [];
+    const changed = [];
+    for (const task of snapshot(s)) {
+      const draft = s.drafts.get(task.kind);
+      if (!draft) continue;
+      const patch = patchFor(task, draft);
+      for (const field of new Set([...Object.keys(patch.changes), ...patch.reset]))
+        changed.push(`${taskName(task.kind).label} · ${fieldLabel[field] || field}`);
+      if (draft.pending) changed.push(`${taskName(task.kind).label} · 保存结果待核对`);
+    }
+    if (s.voice && voiceDirty(s.voice)) {
+      const labels = {voice_timeout_seconds:'语音合成超时'};
+      for (const lang of s.voice.data?.languages || []) labels[`voice_${lang.k}_provider_id`] = `${lang.label || lang.k}语音模型`;
+      changed.push(...Object.keys(voiceChanges(s.voice)).map(name => labels[name] || name));
+    }
+    if (s.image && imageDirty(s.image)) for (const [action, label] of Object.entries(IMAGE_LABELS)) {
+      if (s.image.draft[action] !== s.image.data.enabled[action]) changed.push(`${label}能力开关`);
+    }
+    if (s.image && imageConfigDirty(s.image)) changed.push(...imageChangedFields(s.image));
+    if (s.laya && layaDirty(s.laya)) {
+      const labels = {enabled:'启用决策', mode:'运行方式', endpoint:'服务地址', local_model_path:'本地模型路径',
+        api_key:'API Key', timeout_seconds:'请求超时'};
+      for (const name of Object.keys(layaChanges(s.laya))) {
+        if (name === 'decision_fields') changed.push(...LAYA_DECISION_FIELDS.filter(([key]) =>
+          s.laya.draft.decision_fields[key] !== (s.laya.data.decision_fields?.[key] !== false)).map(([, label]) => `Laya · ${label}`));
+        else changed.push(`Laya · ${labels[name] || name}`);
+      }
+    }
+    if (s.search && searchDirty(s.search)) changed.push('联网搜索凭据来源');
+    return changed;
+  }
+  function isDirty() {
+    return changedFields().length > 0;
+  }
+  async function saveBeforeLeave() {
+    const s = state;
+    if (!s || !root) return true;
+    if (s.busy || s.loading || s.voice?.busy || s.image?.busy || s.image?.configSaving || s.laya?.busy || s.search?.busy)
+      return {error:'模型配置正在处理，请稍后保存。'};
+    if ([...s.drafts.values()].some(draft => draft.pending) || s.voice?.pending)
+      return {error:'上次保存结果待核对，请回到模型配置中核对原请求。'};
+    const kinds = snapshot(s).filter(task => {const draft = s.drafts.get(task.kind); return draft && dirty(task, draft);}).map(task => task.kind);
+    if (kinds.length) {
+      await saveTasks(s, kinds);
+      if (kinds.some(kind => dirty(taskOf(s, kind), s.drafts.get(kind)))) return {error:s.notice || '任务路由尚未保存。'};
+    }
+    for (const [needed, action, remaining, message] of [
+      [s.voice && voiceDirty(s.voice), voiceSave, () => voiceDirty(s.voice) || s.voice.pending, () => s.voice.notice],
+      [s.image && imageDirty(s.image), imageSave, () => imageDirty(s.image), () => s.image.notice],
+      [s.image && imageConfigDirty(s.image), imageConfigSave, () => imageConfigDirty(s.image), () => s.image.configNotice],
+      [s.laya && layaDirty(s.laya), layaSave, () => layaDirty(s.laya), () => s.laya.notice],
+      [s.search && searchDirty(s.search), searchSave, () => searchDirty(s.search), () => s.search.notice],
+    ]) {
+      if (!needed) continue;
+      await action(s);
+      if (remaining())
+        return {error:message() || '保存尚未确认，请回到配置中检查。'};
+    }
+    return !isDirty() ? true : {error:'还有配置未保存，改动仍保留。'};
+  }
+  function discardChanges() {
+    if (state?.busy || state?.voice?.busy || state?.image?.busy || state?.image?.configSaving || state?.laya?.busy || state?.search?.busy)
+      return {error:'正在保存，请等待结果后再切换。'};
+    if (key) states.delete(key);
+    unmount();
+    return true;
+  }
+  const isBusy = () => Boolean(state && (state.busy || state.voice?.busy || state.voice?.ttsBusy
+    || state.voice?.ttsTesting || state.image?.busy || state.image?.configSaving || state.laya?.busy || state.search?.busy));
+  return { mount, unmount, isDirty, isBusy, changedFields, saveBeforeLeave, discardChanges };
 })();

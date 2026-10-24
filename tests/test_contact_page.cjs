@@ -888,6 +888,35 @@ test('保存只提交动过的字段，并把两个令牌分开带上', async ()
   assert.ok(posted[0].route === undefined);
 });
 
+test('版本冲突刷新令牌但保留未保存草稿，并可用新版本再次提交', async () => {
+  const h = harness();
+  await boot(h);
+  const box = fakeInput({type: 'checkbox', checked: false, dataset: {field: 'news.enabled'}});
+  h.element.dispatch('change', fieldEvent(box, 'change'));
+  h.element.dispatch('click', {target: {closest: sel => sel === '[data-action]' ? {dataset: {action: 'save'}} : null}});
+  await h.settle();
+
+  const stale = h.requests.find(request => request.method === 'POST');
+  h.fail(stale, 'configuration_revision_conflict');
+  await h.settle();
+  const refreshed = h.requests.filter(request => request.method === 'GET' && request.route === 'config').at(-1);
+  assert.notEqual(refreshed, h.requests[0], '冲突后必须重新读取安装级设置');
+  replyGlobalConfig(h, refreshed, {...baseSettings(), 'news.enabled': true}, 'n'.repeat(64));
+  await h.settle();
+
+  assert.equal(h.page.state.data.touched.has('news.enabled'), true,
+    '冲突只拒绝旧写入，用户已编辑字段必须保留');
+  assert.equal(h.page.state.data.draft['news.enabled'], false);
+  assert.equal(h.page.state.data.configToken, 'n'.repeat(64));
+  assert.match(h.page.state.data.notice, /未保存的改动仍保留/);
+
+  h.element.dispatch('click', {target: {closest: sel => sel === '[data-action]' ? {dataset: {action: 'save'}} : null}});
+  await h.settle();
+  const retry = h.requests.filter(request => request.method === 'POST').at(-1);
+  assert.equal(retry.values.edit_token, 'n'.repeat(64));
+  assert.deepEqual(JSON.parse(JSON.stringify(retry.values.changes)), {'news.enabled': false});
+});
+
 test('长目标路径使用不超过后端上限的幂等键', async () => {
   const target = 'target-' + 'x'.repeat(80);
   const role = 'role-' + 'y'.repeat(80);

@@ -73,7 +73,8 @@ def count_input(document, scope, received_at, day):
 
 def aggregate(document):
     entries = tuple(document["contexts"].values())
-    return {"msg_count": sum(entry["msg_count"] for entry in entries),
+    legacy = document.get("legacy_private_contact") or {}
+    return {"msg_count": sum(entry["msg_count"] for entry in entries) + legacy.get("message_count", 0),
             "active_days": sum(entry["active_days"] for entry in entries),
             "first_seen": min((entry["first_seen"] for entry in entries), default=None),
             "last_seen": max((entry["last_seen"] for entry in entries), default=None)}

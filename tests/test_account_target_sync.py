@@ -21,7 +21,9 @@ class AccountTargetSyncTests(unittest.IsolatedAsyncioTestCase):
         self.personas = deepcopy(self.config["multi_host"]["personas"])
         self.discovered = {"accounts": self.accounts, "personas": self.personas, "targets": []}
 
-        async def apply(candidate):
+        async def apply(candidate, *, expected_config=None):
+            if expected_config is not None and expected_config != self.config:
+                raise AssertionError("stale role save")
             self.config.clear()
             self.config.update(candidate)
             return {"saved": True, "requires_reload": False, "requires_initialize": False}
@@ -35,6 +37,71 @@ class AccountTargetSyncTests(unittest.IsolatedAsyncioTestCase):
             body=AsyncMock(return_value=json.dumps(body).encode("utf-8")))
         with patch("astrbot_host.account_session_api.request", request):
             return await self.api.save()
+
+    async def add_role(self, **body):
+        request = NS(username="admin", query={},
+            body=AsyncMock(return_value=json.dumps(body, ensure_ascii=False).encode("utf-8")))
+        with patch("astrbot_host.account_session_api.request", request):
+            return await self.api.add_role()
+
+    async def test_inline_role_preserves_other_accounts_and_group_routes(self):
+        before = deepcopy(self.config["multi_host"])
+        self.discovered["personas"].extend([
+            {**self.accounts[0], "persona_id": "另一个人格"},
+            {**self.accounts[0], "persona_id": "第三个人格"},
+        ])
+        result = await self.add_role(**self.accounts[0],
+            persona_ids=["另一个人格", "第三个人格"], role_id="新角色")
+        self.assertEqual(result["status"], "ok", result)
+        after = self.config["multi_host"]
+        for key in ("targets", "group_targets"):
+            self.assertEqual(after[key], before[key])
+        self.assertIn(self.accounts[0], after["accounts"])
+        self.assertEqual(after["personas"][:-2], before["personas"])
+        self.assertEqual(after["personas"][-2:], [
+            {"bot_id": "bot-a", "persona_id": "另一个人格", "role_id": "新角色"},
+            {"bot_id": "bot-a", "persona_id": "第三个人格", "role_id": "新角色"},
+        ])
+
+    async def test_inline_role_refuses_reassignment_of_existing_persona(self):
+        before = deepcopy(self.config)
+        existing = self.personas[0]
+        account = next(item for item in self.accounts if item["bot_id"] == existing["bot_id"])
+        self.discovered["personas"].append({**account, "persona_id": "可用人格"})
+        result = await self.add_role(**account,
+            persona_ids=["可用人格", existing["persona_id"]], role_id="别的角色")
+        self.assertEqual(result["data"]["code"], "account_role_persona_in_use")
+        self.assertEqual(self.config, before)
+        self.controller.apply_bindings.assert_not_awaited()
+
+    async def test_inline_role_can_register_another_connected_bot(self):
+        account = {"platform_id": "qq-third", "account_id": "102", "bot_id": "bot-c"}
+        self.discovered["accounts"].append(account)
+        self.discovered["personas"].append({**account, "persona_id": "新的人格"})
+        old_groups = deepcopy(self.config["multi_host"]["group_targets"])
+        result = await self.add_role(**account, persona_ids=["新的人格"], role_id="第三个角色")
+        self.assertEqual(result["status"], "ok", result)
+        section = self.config["multi_host"]
+        self.assertIn(account, section["accounts"])
+        self.assertEqual(section["group_targets"], old_groups)
+        new_targets = [item for item in section["targets"] if item["bot_id"] == "bot-c"]
+        self.assertEqual(len(new_targets), 1)
+        self.assertEqual({key: new_targets[0][key] for key in account}, account)
+        self.assertEqual(new_targets[0]["participant_id"], "*")
+        self.assertTrue(new_targets[0]["target_id"].startswith("private-"))
+
+    async def test_inline_role_requires_one_distinct_persona_from_same_bot(self):
+        account = self.accounts[0]
+        self.discovered["personas"].append({**account, "persona_id": "可用人格"})
+        before = deepcopy(self.config)
+        for persona_ids, code in (([], "account_config_invalid"),
+                                  (["可用人格", "可用人格"], "account_config_invalid"),
+                                  (["可用人格", "其他 Bot 人格"], "host_persona_unavailable")):
+            with self.subTest(persona_ids=persona_ids):
+                result = await self.add_role(**account, persona_ids=persona_ids, role_id="新角色")
+                self.assertEqual(result["data"]["code"], code)
+                self.assertEqual(self.config, before)
+        self.controller.apply_bindings.assert_not_awaited()
 
     async def test_new_account_gets_private_template_and_preserves_existing_ids_and_groups(self):
         section = self.config["multi_host"]

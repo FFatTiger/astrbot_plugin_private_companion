@@ -1387,6 +1387,43 @@ test('proactive binding failure explains the separate administrator permission a
   page.unmount();
 });
 
+test('proactive authorization diagnostics distinguish Dashboard identity from core permission', async () => {
+  for (const [code, title, explanation] of [
+    ['dashboard_identity_required', 'Dashboard 登录身份不可用', 'API Key 不会被当作管理员账号使用'],
+    ['unbound_identity', 'Dashboard 身份尚未完成绑定', '还没有在这份 AstrBot 安装中完成绑定'],
+    ['binding_revoked', 'Dashboard 身份绑定已撤销', '绑定已被撤销'],
+    ['binding_expired', 'Dashboard 身份绑定已过期', '绑定已经过期'],
+    ['binding_not_active', 'Dashboard 身份绑定尚未生效', '绑定尚未到生效时间'],
+    ['binding_rebound', 'Dashboard 身份已重新绑定', '已经被重新绑定'],
+    ['scope_installation_mismatch', 'Dashboard 身份不属于当前安装', '属于另一份 AstrBot 安装'],
+    ['scope_not_granted', '当前 Dashboard 身份未获该配置范围授权', '没有本次主动测试所需的配置范围授权'],
+    ['core_access_required', '当前 Dashboard 身份没有核心管理权限', 'Dashboard 登录成功，但这个身份没有本体核心管理权限'],
+    ['authorization_denied', '当前 Dashboard 身份没有配置管理权限', '无法管理主动联系配置'],
+    ['authorization_revoked', '当前 Dashboard 身份的管理授权已撤销', '系统不会在测试时自动恢复'],
+    ['authorization_expired', '当前 Dashboard 身份的管理授权已过期', '管理授权已经过期'],
+    ['authorization_not_active', '当前 Dashboard 身份的管理授权尚未生效', '管理授权尚未生效'],
+  ]) {
+    const {page, root} = harness({
+      maintenance: {generated_at: localStamp(), summary: {calls: 0, tokens: 0}, totals: {}, daily: [], history: [],
+        windows: {}, providers: [], recent: [], budget: {}, runtime: {}},
+      voice: {providers: []}, image: {actions: []}, model: {tasks: [], providers: []},
+      posts: {'/setup/proactive-diagnostic': {state: 'failed', purpose: 'screen', purpose_label: '已授权屏幕观察',
+        stage: 'authorization', code, failure_title: title,
+        suggestion: explanation, error: code, stages: [{stage: 'authorization', state: 'failed'}]}},
+    });
+    page.mount(root);
+    await flush();
+    root.change('[data-proactive-purpose]', 'screen');
+    root.click('[data-proactive-test]');
+    root.click('[data-proactive-confirm]');
+    await flush();
+    assert.match(root.innerHTML, new RegExp('测试未通过 · ' + title));
+    assert.match(root.innerHTML, new RegExp(explanation));
+    assert.match(root.innerHTML, /Dashboard 身份与核心权限<\/span><strong>失败/);
+    page.unmount();
+  }
+});
+
 test('proactive diagnostic explains model skip and shows generation as completed', async () => {
   const {page, root} = harness({
     maintenance: {generated_at: localStamp(), summary: {calls: 0, tokens: 0}, totals: {}, daily: [], history: [],

@@ -16,7 +16,8 @@ from tests.test_management_access import NOW
 from astrbot_host.binding_store import PendingBinding, write_binding
 from astrbot_host.controller import AstrBotStagingController
 from astrbot_host.multi_controller import AstrBotMultiController
-from astrbot_host.setup_api import SetupWebAPI
+from astrbot_host.setup_api import (PROACTIVE_TEST_FAILURE_LABELS, PROACTIVE_TEST_STAGE_BY_CODE,
+                                    PROACTIVE_TEST_SUGGESTIONS, SetupWebAPI)
 from companion_v2.adapters.astrbot.staging import NativeAdapterTypes
 from companion_v2.execution.models import TaskError
 from companion_v2.proactive.diagnostic_models import DiagnosticSourceError
@@ -78,6 +79,31 @@ class AstrBotSetupFlowTests(unittest.IsolatedAsyncioTestCase):
                 return receipt
             await asyncio.sleep(0.01)
         self.fail(f"proactive test did not reach a terminal receipt: {self.api.progress.read()['proactive_test']}")
+
+    def test_proactive_authorization_diagnostics_distinguish_login_and_core_permission(self):
+        cases = {
+            "dashboard_identity_required": "Dashboard 登录身份不可用",
+            "unbound_identity": "Dashboard 身份尚未完成绑定",
+            "binding_revoked": "Dashboard 身份绑定已撤销",
+            "binding_expired": "Dashboard 身份绑定已过期",
+            "binding_not_active": "Dashboard 身份绑定尚未生效",
+            "binding_rebound": "Dashboard 身份已重新绑定",
+            "scope_installation_mismatch": "Dashboard 身份不属于当前安装",
+            "scope_not_granted": "当前 Dashboard 身份未获该配置范围授权",
+            "core_access_required": "当前 Dashboard 身份没有核心管理权限",
+            "authorization_denied": "当前 Dashboard 身份没有配置管理权限",
+            "authorization_revoked": "当前 Dashboard 身份的管理授权已撤销",
+            "authorization_expired": "当前 Dashboard 身份的管理授权已过期",
+            "authorization_not_active": "当前 Dashboard 身份的管理授权尚未生效",
+        }
+        for code, title in cases.items():
+            with self.subTest(code=code):
+                self.assertEqual(PROACTIVE_TEST_STAGE_BY_CODE[code], "authorization")
+                self.assertEqual(PROACTIVE_TEST_FAILURE_LABELS[code][1], title)
+                self.assertTrue(PROACTIVE_TEST_SUGGESTIONS[code])
+                result = SetupWebAPI._diagnostic_failure("screen", None, "authorization", code, code)
+                self.assertEqual(result["failure_title"], title)
+                self.assertIn(result["suggestion"], PROACTIVE_TEST_SUGGESTIONS.values())
 
     def message_calls(self):
         calls = self.native.platform.client._api._wsr_api.calls

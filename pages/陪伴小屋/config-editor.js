@@ -1857,6 +1857,7 @@ window.CompanionConfigEditors = (() => {
         return instance ? instance.saveField(field, value) : Promise.resolve({state: "unavailable"});
       },
       stop() { for (const instance of instances) instance.stop(); },
+      unmount() { for (const instance of instances) instance.unmount(); },
       start() { for (const instance of instances) instance.start(); },
       get state() { return {instances}; },
     };

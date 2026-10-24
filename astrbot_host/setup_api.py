@@ -33,6 +33,19 @@ PREFIX = "/astrbot_plugin_private_companion/setup"
 logger = logging.getLogger(__name__)
 
 PROACTIVE_TEST_SUGGESTIONS = {
+    "dashboard_identity_required": "当前请求没有可用于真实投递的 Dashboard 登录身份。请从已登录的管理界面重新打开；插件 API Key 不能代替 Dashboard 登录会话。",
+    "unbound_identity": "当前 Dashboard 身份还没有完成本体绑定。请从已登录的管理界面重新打开一次，让系统建立当前安装的身份绑定。",
+    "binding_revoked": "当前 Dashboard 身份与本体的绑定已撤销。请由仍有核心权限的管理员重新确认该身份，不要反复运行真实投递测试。",
+    "binding_expired": "当前 Dashboard 身份与本体的绑定已过期。请重新登录并由仍有核心权限的管理员确认当前身份。",
+    "binding_not_active": "当前 Dashboard 身份的本体绑定尚未生效。请稍后重新读取状态，确认绑定生效后再测。",
+    "binding_rebound": "当前 Dashboard 身份已被重新绑定到其他主体。请刷新管理界面，确认当前账号与本体身份对应后再测。",
+    "scope_installation_mismatch": "当前 Dashboard 身份属于其他 AstrBot 安装，不能管理这份插件数据。请从当前安装的管理界面重新打开。",
+    "scope_not_granted": "当前 Dashboard 身份没有这个配置范围的授权。请由仍有核心权限的管理员补发对应授权。",
+    "core_access_required": "当前 Dashboard 身份没有本体核心管理权限。请使用已获核心管理权限的账号，或由仍有权限的管理员恢复该授权。",
+    "authorization_denied": "当前 Dashboard 身份没有管理此配置的权限。请由仍有核心权限的管理员检查授权状态。",
+    "authorization_revoked": "当前 Dashboard 身份的核心管理授权已撤销。请由另一位仍有权限的管理员重新授权；反复运行测试不会恢复授权。",
+    "authorization_expired": "当前 Dashboard 身份的管理授权已过期。请由仍有核心权限的管理员重新授权。",
+    "authorization_not_active": "当前 Dashboard 身份的管理授权尚未生效。请稍后刷新状态，或由仍有核心权限的管理员重新授权。",
     "contact_permission_required": "在核心管理员私聊的主动联系设置中启用主动联系授权。",
     "model_task_unregistered": "为核心管理员角色配置并启用 proactive.compose 模型任务。",
     "contact_attempt_budget": "这是旧版本的模型调用次数上限错误；当前版本已取消该独立上限，请更新插件并查看每日实际联系额度。",
@@ -68,6 +81,19 @@ PROACTIVE_TEST_SUGGESTIONS = {
 }
 
 PROACTIVE_TEST_FAILURE_LABELS = {
+    "dashboard_identity_required": ("authorization", "Dashboard 登录身份不可用"),
+    "unbound_identity": ("authorization", "Dashboard 身份尚未完成绑定"),
+    "binding_revoked": ("authorization", "Dashboard 身份绑定已撤销"),
+    "binding_expired": ("authorization", "Dashboard 身份绑定已过期"),
+    "binding_not_active": ("authorization", "Dashboard 身份绑定尚未生效"),
+    "binding_rebound": ("authorization", "Dashboard 身份已重新绑定"),
+    "scope_installation_mismatch": ("authorization", "Dashboard 身份不属于当前安装"),
+    "scope_not_granted": ("authorization", "当前 Dashboard 身份未获该配置范围授权"),
+    "core_access_required": ("authorization", "当前 Dashboard 身份没有核心管理权限"),
+    "authorization_denied": ("authorization", "当前 Dashboard 身份没有配置管理权限"),
+    "authorization_revoked": ("authorization", "当前 Dashboard 身份的管理授权已撤销"),
+    "authorization_expired": ("authorization", "当前 Dashboard 身份的管理授权已过期"),
+    "authorization_not_active": ("authorization", "当前 Dashboard 身份的管理授权尚未生效"),
     "contact_attempt_budget": ("attempt_budget", "旧版本的主动模型调用次数上限已触发"),
     "contact_delivery_budget": ("delivery_budget", "本私聊今日实际联系额度已用完"),
     "contact_permission_required": ("authorization", "主动联系授权未通过"),
@@ -98,7 +124,7 @@ PROACTIVE_TEST_FAILURE_LABELS = {
 }
 
 PROACTIVE_TEST_STAGE_SUGGESTIONS = {
-    "authorization": "使用已登录的 Dashboard 管理员身份，并确认当前账号仍有插件管理权限。",
+    "authorization": "先看具体原因：登录身份缺失或使用 API Key，与本体核心权限不足、已撤销是不同问题；请勿重复启动真实投递测试。",
     "binding": "确认首次绑定，或确保共享配置中只有一个精确私聊目标对应当前核心管理员身份。",
     "runtime": "在宿主管理页检查 V2 运行实例、角色载入和路由注册状态。",
     "settings": "检查主动联系总开关、目的开关及角色/关系/窗口各层的有效配置。",
@@ -128,6 +154,18 @@ PROACTIVE_TEST_STAGE_ORDER = (
 
 PROACTIVE_TEST_STAGE_BY_CODE = {
     "dashboard_identity_required": "authorization",
+    "unbound_identity": "authorization",
+    "binding_revoked": "authorization",
+    "binding_expired": "authorization",
+    "binding_not_active": "authorization",
+    "binding_rebound": "authorization",
+    "scope_installation_mismatch": "authorization",
+    "scope_not_granted": "authorization",
+    "core_access_required": "authorization",
+    "authorization_denied": "authorization",
+    "authorization_revoked": "authorization",
+    "authorization_expired": "authorization",
+    "authorization_not_active": "authorization",
     "setup_binding_confirmation_required": "binding",
     "setup_core_window_not_configured": "binding",
     "setup_core_window_ambiguous": "binding",
@@ -330,9 +368,10 @@ class SetupWebAPI:
                 for persona_id in names:
                     mapping = next((item for item in self.controller.config.get("multi_host", {}).get("personas", [])
                                     if item.get("bot_id") == account["bot_id"] and item.get("persona_id") == persona_id), None)
-                    choices.append({"bot_id": account["bot_id"], "persona_id": persona_id,
+                    choices.append({"platform_id": account["platform_id"], "account_id": account["account_id"],
+                                    "bot_id": account["bot_id"], "persona_id": persona_id,
                                     "role_id": mapping["role_id"] if mapping else derive_role_id(account["account_id"], persona_id),
-                                    "label": persona_id})
+                                    "label": persona_id, "mapped": mapping is not None})
             directory = await self.controller.session_topology.inventory_report()
             targets = directory["targets"]
             names = display_names(self.controller)

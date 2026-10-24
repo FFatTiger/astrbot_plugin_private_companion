@@ -77,7 +77,9 @@ class DateContactTests(ContactScheduleFixture, unittest.IsolatedAsyncioTestCase)
     async def test_configured_lunar_date_uses_local_day_and_keeps_its_basis(self):
         app = await self.setup_date(dates=LUNAR_JSON)
         self.advance(app, 60)
-        await self.automatic_delivery(app)
+        with patch("companion_v2.proactive.date_events.lunar_date_parts",
+                   return_value=(2026, 8, 11, False)):
+            await self.automatic_delivery(app)
         request = self.contact_calls()[0].original
         self.assertIn("管理员配置农历日期", request.context.materials[0].payload)
         marker = json.loads(self.contacts(app)[0]["record_json"])["automatic_origin"]["date_event"]

@@ -6,7 +6,8 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from companion_v2.conversation.date_context import period_label, project_interaction_gap, project_local_date
+from companion_v2.conversation.date_context import (period_label, project_interaction_gap, project_local_date,
+                                                    project_personal_dates)
 from companion_v2.conversation import date_context
 from companion_v2.agenda.annual_calendar import SCHEMA, parse_annual_calendar
 
@@ -223,6 +224,27 @@ class LocalDateContextTests(unittest.TestCase):
             project_interaction_gap(now, datetime(2026, 9, 22, 15, 0, tzinfo=timezone.utc), "Asia/Shanghai"),
             {"band": "days_apart", "elapsed_minutes": 3540, "days_apart": 3},
         )
+
+    def test_explicit_personal_birthdays_are_projected_with_their_owner(self):
+        at = datetime(2026, 10, 23, 8, 0, tzinfo=timezone.utc)
+        result = project_personal_dates(at, "Asia/Shanghai", role_birthday="設定為 10月24日",
+                                        user_birthday="2001-10-24")
+        self.assertEqual(result["entries"], [
+            {"subject": "role", "label": "角色生日", "date": "2026-10-24",
+             "days_until": 1, "calendar": "gregorian"},
+            {"subject": "user", "label": "对方生日", "date": "2026-10-24",
+             "days_until": 1, "calendar": "gregorian"},
+        ])
+
+    def test_lunar_personal_birthday_and_ambiguous_text(self):
+        at = datetime(2026, 10, 23, 8, 0, tzinfo=timezone.utc)
+        with patch("companion_v2.conversation.date_context.lunar_date_parts",
+                   side_effect=lambda day: (2026, 9, 15, False) if day.isoformat() == "2026-10-24" else None):
+            result = project_personal_dates(at, "Asia/Shanghai", user_birthday="农历九月十五")
+        self.assertEqual(result["entries"], [{"subject": "user", "label": "对方生日",
+            "date": "2026-10-24", "days_until": 1, "calendar": "lunar"}])
+        self.assertEqual(project_personal_dates(at, "Asia/Shanghai",
+            user_birthday="生日大概在秋天，具体日期不清楚")["entries"], [])
 
 
 if __name__ == "__main__":

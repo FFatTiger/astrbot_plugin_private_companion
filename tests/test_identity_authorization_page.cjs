@@ -132,11 +132,11 @@ function harness({ persons, groups = [], group_networks = [], group_access, auth
   const requests = [];
   const byId = new Map();
   const tabs = [element("button"), element("button"), element("button")];
-  const chips = [element("button"), element("button")];
+  const chips = [element("button"), element("button"), element("button")];
   const graphFilters = [element("button"), element("button"), element("button")];
   const panels = [element("section"), element("section"), element("section")];
   tabs.forEach((tab, index) => { tab.dataset.tab = ["network", "people", "groups"][index]; });
-  chips.forEach((chip, index) => { chip.dataset.filter = ["stable", "temporary"][index]; });
+  chips.forEach((chip, index) => { chip.dataset.filter = ["stable", "temporary", "discovered"][index]; });
   graphFilters.forEach((filter, index) => { filter.dataset.graphScope = ["all", "private", "group"][index]; });
   panels.forEach((panel, index) => { panel.id = ["panel-network", "panel-people", "panel-groups"][index]; });
   tabs.forEach((tab, index) => { tab.id = ["tab-network", "tab-people", "tab-groups"][index]; });
@@ -279,7 +279,7 @@ function tree(node, depth = 0) {
 test("关系图作为关系网默认视图，人物筛选保留", async () => {
   const html = fs.readFileSync(path.resolve(__dirname, "../pages/关系与权限/workspace.html"), "utf8");
   assert.deepEqual([...html.matchAll(/data-tab="([^"]+)"/g)].map(match => match[1]), ["network", "people", "groups"]);
-  assert.deepEqual([...html.matchAll(/data-filter="([^"]+)"/g)].map(match => match[1]), ["stable", "temporary"]);
+  assert.deepEqual([...html.matchAll(/data-filter="([^"]+)"/g)].map(match => match[1]), ["stable", "temporary", "discovered"]);
   const h = harness();
   await h.send();
   assert.equal(h.document.querySelectorAll(".tab")[0].getAttribute("aria-selected"), "true");
@@ -408,13 +408,13 @@ test("稳定和临时只按成员往来类型筛选，跳转时保持对应分�
   ]});
   await h.send();
   const chips = h.document.querySelectorAll(".chip");
-  assert.equal(chips.length, 2);
+  assert.equal(chips.length, 3);
   assert.equal(h.element("chip-stable").textContent, "2");
-  assert.equal(h.element("chip-temporary").textContent, "1");
+  assert.equal(h.element("chip-temporary").textContent, "2");
   assert.equal(h.element("people-result-count").textContent, "2 人");
 
   chips[1].handlers.click();
-  assert.equal(h.element("people-result-count").textContent, "1 人");
+  assert.equal(h.element("people-result-count").textContent, "2 人");
   assert.match(flat(h.element("people-grid")), /临时成员/);
   assert.equal(chips[1].getAttribute("aria-pressed"), "true");
 
@@ -423,7 +423,7 @@ test("稳定和临时只按成员往来类型筛选，跳转时保持对应分�
     return selector === "[data-person-id]" ? this : null;
   }}});
   assert.equal(chips[1].getAttribute("aria-pressed"), "true");
-  assert.equal(h.element("people-result-count").textContent, "1 人");
+  assert.equal(h.element("people-result-count").textContent, "2 人");
 
   h.document.querySelectorAll(".tab")[2].handlers.click();
   findAll(h.element("groups-list"), "group-card")[0].handlers.click();
@@ -1447,3 +1447,23 @@ function findPermission(node, capability) {
   }
   return null;
 }
+
+
+test("原生窗口不冒充私聊用户，已迁入用户与目录计数一致", async () => {
+  const migrated = person("old", "旧版用户", {private_chat: false, private_contact: true,
+    legacy_private_contact: true, private: null, total: {msg_count: 0}});
+  const discovered = Array.from({length: 76}, (_, i) => person("route-" + i, "宿主会话" + i, {
+    private_chat: false, private_target: true, private: null, total: {msg_count: 0}}));
+  const h = harness({persons: [migrated, ...discovered]});
+  await h.send();
+  assert.equal(h.element("count-total").textContent, "1");
+  assert.equal(h.element("count-private").textContent, "1");
+  assert.equal(h.element("chip-stable").textContent, "1");
+  assert.equal(h.element("chip-discovered").textContent, "76");
+  assert.equal(h.element("people-result-count").textContent, "1 人");
+  assert.match(flat(h.element("people-grid")), /旧版用户/);
+  assert.doesNotMatch(flat(h.element("people-grid")), /宿主会话/);
+  h.document.querySelectorAll(".chip")[2].handlers.click();
+  assert.equal(h.element("people-result-count").textContent, "76 人");
+  assert.match(flat(h.element("people-grid")), /宿主会话0/);
+});

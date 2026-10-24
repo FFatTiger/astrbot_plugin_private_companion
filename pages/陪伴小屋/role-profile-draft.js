@@ -651,5 +651,18 @@ window.CompanionRoleProfileDraft = (() => {
       String(value ?? "") !== String(draft.fields?.[field] ?? ""));
   }
 
-  return {markup, open: openDialog, isDirty};
+  function changedFields() {
+    return Object.entries(state.fieldValues || {}).filter(([field,value]) =>
+      String(value ?? '') !== String(state.draft?.fields?.[field] ?? ''))
+      .map(([field]) => profileSpec().labels?.[field] || field);
+  }
+  function discardChanges() {
+    if(state.busy)return {error:'档案正在处理，请稍后切换。'};
+    state.fieldValues = {};
+    return true;
+  }
+  function saveBeforeLeave() {
+    return {error:'请在角色档案草稿中勾选要写入的字段，再使用“填入所选空白字段”或“覆盖所选字段”保存。'};
+  }
+  return {markup, open: openDialog, isDirty, changedFields, saveBeforeLeave, discardChanges};
 })();

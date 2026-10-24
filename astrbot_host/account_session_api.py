@@ -27,6 +27,8 @@ class AccountSessionWebAPI:
     def routes(self):
         return [(PREFIX, self.get, ["GET"], "Read account bindings and native session topology"),
                 (PREFIX, self.save, ["POST"], "Apply reviewed account and group bindings"),
+                (PREFIX + "/role", self.add_role, ["POST"],
+                 "Create a companion role for one connected Bot and selected native personas"),
                 (PREFIX + "/group-target", self.save_group_target, ["POST"],
                  "Enable or disable one discovered group target"),
                 (PREFIX + "/session", self.save_session, ["POST"], "Manage a discovered native session")]
@@ -68,6 +70,67 @@ class AccountSessionWebAPI:
             return {"status": "ok", "data": {**self._view(), "discovered": await self._discovered()}}
         except (TaskError, HostControlError) as error:
             return self._error(error.code, str(error))
+
+    async def add_role(self):
+        """Add one role without replacing concurrent account, window or group edits."""
+        try:
+            self._admin()
+            body = await self._body()
+            if set(body) != {"platform_id", "account_id", "bot_id", "persona_ids", "role_id"}:
+                raise TaskError("account_config_invalid", "select a Bot, at least one native persona and a role name")
+            platform_id, account_id, bot_id, persona_ids, role_id = (body[key] for key in
+                ("platform_id", "account_id", "bot_id", "persona_ids", "role_id"))
+            if any(type(value) is not str or not value.strip() or len(value) > 128
+                   for value in (platform_id, account_id, bot_id, role_id)) or (
+                   type(persona_ids) is not list or not persona_ids or len(persona_ids) > 128 or
+                   any(type(value) is not str or not value.strip() or len(value) > 128
+                       for value in persona_ids) or len(set(persona_ids)) != len(persona_ids)):
+                raise TaskError("account_config_invalid", "select a Bot, at least one native persona and a role name")
+            role_id = role_id.strip()
+            account = (platform_id, account_id, bot_id)
+            discovered = await self._discovered()
+            if not any((item["platform_id"], item["account_id"], item["bot_id"]) == account
+                       for item in discovered["accounts"]):
+                raise TaskError("account_config_invalid", "the selected Bot is no longer connected")
+            available_personas = {item["persona_id"] for item in discovered["personas"]
+                                  if item["bot_id"] == bot_id}
+            if not set(persona_ids) <= available_personas:
+                raise TaskError("host_persona_unavailable", "select a loaded AstrBot persona")
+            expected = deepcopy(dict(self.controller.config))
+            candidate = deepcopy(expected)
+            section = candidate.setdefault("multi_host", {})
+            if type(section) is not dict:
+                raise TaskError("account_config_invalid", "the shared host configuration is invalid")
+            saved_personas = section.setdefault("personas", [])
+            if any(item.get("bot_id") == bot_id and item.get("persona_id") in persona_ids
+                   for item in saved_personas):
+                raise TaskError("account_role_persona_in_use", "this persona already belongs to a role")
+            if any(item.get("bot_id") == bot_id and item.get("role_id") == role_id
+                   for item in saved_personas):
+                raise TaskError("account_role_name_in_use", "choose another role name for this Bot")
+            accounts = section.setdefault("accounts", [])
+            if not any((item.get("platform_id"), item.get("account_id"), item.get("bot_id")) == account
+                       for item in accounts):
+                accounts.append(dict(zip(("platform_id", "account_id", "bot_id"), account)))
+            targets = section.setdefault("targets", [])
+            if not any((item.get("platform_id"), item.get("account_id"), item.get("bot_id")) == account
+                       for item in targets):
+                targets.append({"target_id": "private-" + digest((platform_id, account_id, "*"))[:20],
+                                "platform_id": platform_id, "account_id": account_id,
+                                "bot_id": bot_id, "participant_id": "*"})
+            saved_personas.extend({"bot_id": bot_id, "persona_id": persona_id, "role_id": role_id}
+                                  for persona_id in persona_ids)
+            section["enabled"] = True
+            MultiHostSettings.parse(candidate)
+            result = await self.controller.apply_bindings(candidate, expected_config=expected)
+            return {"status": "ok", "data": {**result, "bot_id": bot_id,
+                                             "persona_ids": persona_ids, "role_id": role_id}}
+        except (TaskError, HostControlError) as error:
+            return self._error(error.code, str(error))
+        except (ValueError, TypeError, KeyError):
+            return self._error("account_config_invalid", "the role could not be validated")
+        except OSError:
+            return self._error("account_config_save_failed", "the role could not be saved")
 
     @staticmethod
     def _error(code, reason):

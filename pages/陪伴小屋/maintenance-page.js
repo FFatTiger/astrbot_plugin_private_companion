@@ -1958,6 +1958,19 @@ window.CompanionMaintenancePage = (() => {
       respect_user_boundary: "为尊重对方边界而保持沉默", other: "模型选择暂不发送",
     };
     const failureTitles = {
+      dashboard_identity_required: "Dashboard 登录身份不可用",
+      unbound_identity: "Dashboard 身份尚未完成绑定",
+      binding_revoked: "Dashboard 身份绑定已撤销",
+      binding_expired: "Dashboard 身份绑定已过期",
+      binding_not_active: "Dashboard 身份绑定尚未生效",
+      binding_rebound: "Dashboard 身份已重新绑定",
+      scope_installation_mismatch: "Dashboard 身份不属于当前安装",
+      scope_not_granted: "当前 Dashboard 身份未获该配置范围授权",
+      core_access_required: "当前 Dashboard 身份没有核心管理权限",
+      authorization_denied: "当前 Dashboard 身份没有配置管理权限",
+      authorization_revoked: "当前 Dashboard 身份的管理授权已撤销",
+      authorization_expired: "当前 Dashboard 身份的管理授权已过期",
+      authorization_not_active: "当前 Dashboard 身份的管理授权尚未生效",
       setup_binding_confirmation_required: "核心管理员窗口尚未绑定确认",
       contact_attempt_budget: "旧版本的主动模型调用次数上限已触发",
       contact_delivery_budget: "本私聊今日实际联系额度已用完",
@@ -1968,6 +1981,19 @@ window.CompanionMaintenancePage = (() => {
       contact_diagnostic_source_required: "当前没有可测试的私聊窗口或事件机会",
     };
     const failureExplanations = {
+      dashboard_identity_required: "真实主动消息测试需要已登录的 Dashboard 用户身份。插件 API Key 不会被当作管理员账号使用。",
+      unbound_identity: "当前登录身份还没有在这份 AstrBot 安装中完成绑定；重新打开当前管理界面后才会建立可核对的本体身份。",
+      binding_revoked: "当前登录身份与本体的绑定已被撤销，测试不会自动恢复它；请由仍有核心权限的管理员重新确认。",
+      binding_expired: "当前登录身份与本体的绑定已经过期；请重新登录并由仍有核心权限的管理员确认当前身份。",
+      binding_not_active: "当前登录身份的本体绑定尚未到生效时间；刷新状态后再运行测试。",
+      binding_rebound: "当前登录身份已经被重新绑定到其他主体；刷新页面并核对当前安装、账号与角色映射。",
+      scope_installation_mismatch: "当前登录身份属于另一份 AstrBot 安装，不能读取或投递这份插件的核心配置。",
+      scope_not_granted: "当前登录身份通过了 Dashboard 登录，但没有本次主动测试所需的配置范围授权。",
+      core_access_required: "Dashboard 登录成功，但这个身份没有本体核心管理权限；请使用有权限的账号，或由其他管理员恢复授权。",
+      authorization_denied: "当前身份无法管理主动联系配置；请由仍有核心权限的管理员检查该身份的配置授权。",
+      authorization_revoked: "这项管理授权曾被撤销，系统不会在测试时自动恢复；请由另一位仍有权限的管理员重新授权。",
+      authorization_expired: "这项管理授权已经过期；请由仍有核心权限的管理员重新授权后再测。",
+      authorization_not_active: "这项管理授权尚未生效；刷新状态或等待授权生效后再测。",
       setup_binding_confirmation_required: "用户页的“管理员权限”决定谁是核心管理员；“开始使用”里的私聊窗口确认决定消息投递到哪扇可信窗口，两者是独立前置条件。本次失败表示窗口确认缺失：回到开始使用确认同一私聊窗口；若用户页仍显示未开启，再把目标成员设为核心用户并保存。",
       contact_attempt_budget: "这条记录来自旧版本的模型调用次数上限；当前版本已取消该独立上限，仅按每日实际联系额度限制发送。",
       contact_delivery_budget: "本私聊今日实际联系额度已用完；已确认发送计联系，待回执发送暂时占位，明确未发送后释放。",
@@ -1980,7 +2006,7 @@ window.CompanionMaintenancePage = (() => {
       : skipReason === "low_confidence" && Number.isFinite(confidence) && Number.isFinite(threshold)
         ? '模型把握度 ' + confidence.toFixed(2) + ' 低于沉默阈值 ' + threshold.toFixed(2)
         : result?.judge_reason && skipReason === "persona_review" ? result.judge_reason : "";
-    const stageNames = {authorization: "核心管理员与角色授权", settings: "主动联系授权", purpose: "目的开关", execution: "端到端执行",
+    const stageNames = {authorization: "Dashboard 身份与核心权限", settings: "主动联系授权", purpose: "目的开关", execution: "端到端执行",
       trusted_candidate: "测试机会", contact_admission: "主动联系准入", attempt_budget: "旧版本模型调用次数上限",
       delivery_budget: "本窗口每日实际联系额度", model_route: "主动联系模型任务", model_generation: "模型生成",
       persona_review: "人格复核", delivery: "消息投递"};

@@ -42,7 +42,8 @@ sleep_execution 记录实际睡眠，sleep_profile.has_sleep_history=false 或 s
 energy 是 0 到 100 的主观精力。结合 previous_simulation 及 updated_at、当前时段、实际睡眠回执、睡眠压力/欠睡、质量、中断与活动连续调整，沿用不等于照抄。低值且无持续负荷或睡眠不足依据时，可随时间小幅回升至角色惯常水平，不必等睡眠回执才允许感受温和好转；好转不宣称已休息。接近日常水平后稳定或自然起伏，不突然满格或持续单向上升，不让过时疲惫永久锁低。
 持续负荷或明确欠睡时可偏低并在下轮重评；低质量睡眠、刚睡被叫醒或反复中断限制恢复，补足后渐进回升。午休只缓解部分困倦，睡眠压力不换算为固定精力扣分。深夜持续互动可以慢慢加深疲惫，短聊不要求改变作息；状态维护不代替睡眠执行器。
 busy 描述注意力，不决定是否拒答。共享状态只写角色自己的概括感受与活动，不写对象、他人位置或私人日程。当前窗口没新消息不表示不忙、情绪归零或状态结束；没有变化依据时保留有效状态或 null。
-临时影响使用含时区的合理 expires_at，表示下次复核时点，不是固定康复时刻；到期后重新评估当前感受，既不自动痊愈也不无依据续期。共享字段只写角色自己的概括感受，不记录聊天对象、私人互动原文或他人情况。presence 是公开 QQ 短状态，最多 8 个字符，写泛化活动（如阅读中、休息中）。online_mode 可为 online/away/busy/invisible/null，仅在状态需要时改变，不表示是否回应。
+临时影响使用含时区的合理 expires_at，表示下次复核时点，不是固定康复时刻；到期后重新评估当前感受，既不自动痊愈也不无依据续期。共享字段只写角色自己的概括感受，不记录聊天对象、私人互动原文或他人情况。presence 是公开 QQ 短状态，最多 8 个字符，写泛化活动（如阅读中、休息中）。
+online_mode 是会实际改变 QQ 账号的在线状态，away 会触发 QQ 原生离开自动回复，busy 也会改变账号对外表现；本插件不会自动设置 away 或 busy。不能用这些模式表达普通困倦、待休息、看书、注意力变化或窗口暂时没有消息。这些生活感受写在 sleep/busy/presence 中。正常接话、近期仍在连续互动时保持 online；previous_simulation 中过时的 away/busy 不因沿用旧状态而续期，旧值也应通过在线状态恢复。隐身仍只在明确配置时使用。online_mode 通常只输出 online/invisible/null；null 只表示本轮不改变平台状态。
 仅输出 JSON：energy 为 0 到 100 的整数或 null；hunger、health、sleep、busy、mood、location、cycle、presence、online_mode 通常为简短文字或 null，mood/cycle 按本轮各自结构协议；conditions 是 kind/text/expires_at 对象数组，kind 选 hunger/health/sleep/busy/mood/cycle/other，无临时变化填空数组。
 """
 STATE_INTERVENTION_INSTRUCTION = (

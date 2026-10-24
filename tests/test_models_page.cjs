@@ -130,6 +130,36 @@ function harness() {
   return {page: window.CompanionModelsPage, requests, root, store, audioBlobs, revokedAudioUrls};
 }
 
+test('embedded migration models read and save through the explicit destination endpoint', async () => {
+  const h = harness(), node = h.root();
+  const endpoint = '/astrbot_plugin_private_companion/host/targets/import/roles/destination/model';
+  h.page.mount(node, {endpoint});
+  assert.equal(h.requests[0].route, 'host/targets/import/roles/destination/model');
+  h.requests[0].resolve(status());
+  await flush();
+  node.click('[data-model-open]', {modelOpen: 'memory.reflect'});
+  node.change('[data-model-field]', {modelField: 'provider', modelKind: 'memory.reflect', value: 'secondary'});
+  node.click('[data-model-action]', {modelAction: 'save-one', modelKind: 'memory.reflect'});
+  const saved = h.requests.find(request => request.method === 'POST');
+  assert.ok(saved, 'the destination task should be editable');
+  assert.equal(h.page.isBusy(), true, 'the embedded guide must wait for an in-flight save');
+  assert.equal(saved.route, 'host/targets/import/roles/destination/model/configure');
+  assert.equal(h.requests.some(request => request.route === 'model' || request.route === 'model/configure'), false);
+  saved.resolve({replayed: false, task: task('memory.reflect', 'secondary', ['text'], 'background')});
+  await flush();
+  assert.equal(h.page.isBusy(), false);
+  h.page.unmount();
+});
+
+test('an invalid explicit migration model endpoint cannot fall back to another role', () => {
+  for (const endpoint of ['', '/other-plugin/model', '/astrbot_plugin_private_companion/model?role=other']) {
+    const h = harness(), node = h.root();
+    h.page.mount(node, {endpoint});
+    assert.equal(h.requests.length, 0);
+    assert.match(node.innerHTML, /没有模型配置工作区/);
+  }
+});
+
 test('registered review, media and authoring tasks have searchable Chinese names in every model view', async () => {
   const h = harness(), node = h.root(), data = status();
   const labels = {
@@ -709,7 +739,14 @@ test('image page separates generation and editing model queues and saves paramet
   node.change('[data-img-config-field]', {imgConfigField: 'sd_webui.parameters.generate.steps', value: 32});
   node.change('[data-img-config-field]', {imgConfigField: 'sd_webui.parameters.generate.cfg_scale', value: 6.5});
   node.input('[data-img-config-json]', {imgConfigJson: 'sd.generate', value: '{"steps":24,"cfg_scale":6.5,"sampler_name":"Euler"}'});
-  node.click('[data-img-config-save]');
+  assert.equal(page.isDirty(), true);
+  const unsavedFields = Array.from(page.changedFields());
+  assert.ok(unsavedFields.includes('生图模型 · 调用顺序 · 改图'));
+  assert.ok(unsavedFields.includes('生图模型 · 主用模型 · 模型 ID'));
+  assert.ok(unsavedFields.includes('生图模型 · SD WebUI · 生图参数 · 文生图 · 采样步数'));
+  assert.doesNotMatch(unsavedFields.join('\n'), /image-v3|127\.0\.0\.1|Euler/,
+    'the leave prompt lists field labels without exposing configuration values');
+  const leaveSave = page.saveBeforeLeave();
   const configSave = requests.find(r => r.method === 'POST' && r.route.endsWith('/image/output/save'));
   assert.ok(configSave, 'saving model configuration uses the native image configuration API');
   assert.deepEqual(JSON.parse(JSON.stringify(configSave.values.changes.operation_routes.edit)),
@@ -722,7 +759,9 @@ test('image page separates generation and editing model queues and saves paramet
     {steps: 32, cfg_scale: 6.5, sampler_name: 'Euler'},
     'function-specific sampling fields and advanced values are saved together');
   configSave.resolve({...config, revision: 'image-r2', settings: configSave.values.changes});
+  assert.equal(await leaveSave, true);
   await flush();
+  assert.equal(page.isDirty(), false);
   assert.match(node.innerHTML, /生图模型与优先级已保存/);
 
   node.click('[data-img-endpoint-test]', {imgEndpointTest: 'primary'});
@@ -1083,6 +1122,8 @@ test('search service binds and saves an AstrBot DeepSeek Provider id', async () 
   assert.match(node.innerHTML, /Search \/ Fetch API/);
 
   node.change('[data-search-provider]', {value: 'deepseek_main'});
+  assert.equal(page.isDirty(), true);
+  assert.ok(Array.from(page.changedFields()).includes('联网搜索凭据来源'));
   node.click('[data-search-save]');
   const save = requests.find(item => item.method === 'POST' && item.route === 'model/search/save');
   assert.deepEqual(JSON.parse(JSON.stringify(save.values)), {
@@ -1092,6 +1133,7 @@ test('search service binds and saves an AstrBot DeepSeek Provider id', async () 
     providers: [{id: 'deepseek_main', name: 'DeepSeek 主账号'}]});
   await flush();
   assert.match(node.innerHTML, /后续搜索立即生效/);
+  assert.equal(page.isDirty(), false);
   page.unmount();
 });
 
@@ -1146,6 +1188,7 @@ test('Laya page exposes official local install, first-run download, and SystemOn
 
   node.change('[data-laya-decision]', {layaDecision: 'tool_need', checked: false});
   node.change('[data-laya-field]', {layaField: 'local_model_path', value: 'C:/models/laya-finetuned'});
+  assert.deepEqual(Array.from(page.changedFields()).sort(), ['Laya · 判断能力需求', 'Laya · 本地模型路径'].sort());
   node.click('[data-laya-save]');
   const saveRequest = requests.find(item => item.method === 'POST' && item.route === 'model/laya/save');
   assert.equal(saveRequest.values.changes.decision_fields.tool_need, false);
@@ -1163,4 +1206,12 @@ test('Laya page exposes official local install, first-run download, and SystemOn
   assert.match(node.innerHTML, /\/v1\/systemone/);
   assert.match(node.innerHTML, /复制服务启动命令/);
   assert.match(node.innerHTML, /data-laya-save/);
+  assert.equal(page.isDirty(), true);
+  assert.equal(page.discardChanges(), true);
+  assert.equal(page.isDirty(), false);
+  page.mount(root());
+  requests.filter(item => item.method === 'GET' && item.route === 'model').at(-1).resolve(status());
+  await flush();
+  assert.equal(page.isDirty(), false, 'discarded cached model scopes cannot block later navigation');
+  page.unmount();
 });

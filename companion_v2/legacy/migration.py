@@ -774,7 +774,7 @@ class LegacyMigration:
         audit_count = sum(bool(item.get("audit")) for item in differences)
         if audit_count:
             warnings.append(
-                f"台账共核对 1,010 个 V1 配置键；当前来源有 {audit_count} 项未自动迁移，原因已列在差异审计中。"
+                f"当前来源有 {audit_count} 项配置兼容说明，请按分类查看设置入口和未接续的能力。"
             )
 
         for key, value in converted_changes.items():

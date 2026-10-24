@@ -1,4 +1,6 @@
-# AstrBot provides its SDK, aiocqhttp, aiohttp and Pillow.
+# AstrBot provides its SDK, aiocqhttp and aiohttp. AstrBot 4.29 pins Pillow 13;
+# keep the plugin metadata compatible with that host-provided runtime package.
+Pillow>=13,<14
 # Windows does not ship an IANA timezone database for zoneinfo.
 tzdata>=2025.2; sys_platform == "win32"
 # QWeather official-alert JWT signing (AstrBot's bundled runtime already includes it).

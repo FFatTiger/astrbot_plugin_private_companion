@@ -101,6 +101,64 @@ class CoreReplyTimeContextTests(unittest.TestCase):
         self.assertIn("今天一起聊了星星", prompt.context_instruction)
         self.assertNotIn("稳定角色档案", prompt.context_instruction)
 
+    def test_personal_birthday_reference_is_prioritized_and_scoped_to_private_window(self):
+        settings = {"guidance": "", "calendar_timezone": "Asia/Shanghai", "calendar_enabled": True,
+                    "holiday_enabled": False, "holiday_country": "CN", "lunar_enabled": False,
+                    "automatic_solar_terms_enabled": False, "almanac_enabled": False,
+                    "platform_enabled": True, "model_route_enabled": True,
+                    "configured_modalities_enabled": True}
+
+        class RoleProfile:
+            def capture(self, *_args):
+                return {"fields": {"birthday": "10月24日"}}
+
+            def instruction(self, *_args):
+                return ""
+
+        class RelationshipProfile:
+            def capture(self, context, *_args):
+                return {"fields": {"user_birthday": "2001-10-24"}} \
+                    if context.scope.kind is ScopeKind.PRIVATE else None
+
+            def instruction(self, *_args):
+                return ""
+
+        messages = NS(
+            role_profile_context=RoleProfile(),
+            acquaintance=NS(card_contribution=lambda *_args, **_kwargs: None),
+            knowledge=None, proactive_inspirations=None,
+            relationship_profile_context=RelationshipProfile(), memory_context=None,
+            relationship_context=None, life_context=None, role_growth_context=None,
+            role_self_review_context=None, open_items_context=None, role_state_context=None,
+            expression_style_context=None,
+        )
+        application = NS(messages=messages,
+            perception_settings=NS(capture=lambda *_args: {"settings": settings}),
+            router=NS(profiles={}), tools=NS())
+        context = NS(scope=NS(kind=ScopeKind.PRIVATE), key="birthday-private",
+                     actor=NS(), role_binding=NS(role=NS()))
+        native_input = NS(text="看看明天是什么日子", event_id="birthday-date-question")
+        at = datetime(2026, 10, 23, 8, 0, tzinfo=timezone.utc)
+
+        prompt = build_core_reply_prompt(application, context, native_input, at=at)
+        perception = json.loads(prompt.perception_context)
+        self.assertEqual(perception["personal_date_context"]["entries"], [
+            {"subject": "role", "label": "角色生日", "date": "2026-10-24",
+             "days_until": 1, "calendar": "gregorian"},
+            {"subject": "user", "label": "对方生日", "date": "2026-10-24",
+             "days_until": 1, "calendar": "gregorian"},
+        ])
+        self.assertTrue(any("先自然说明与当前日期相符的个人日期" in item
+                            for item in prompt.perception_instructions))
+
+        context.scope.kind = ScopeKind.GROUP
+        group_prompt = build_core_reply_prompt(application, context, native_input, at=at)
+        group_perception = json.loads(group_prompt.perception_context)
+        self.assertEqual(group_perception["personal_date_context"]["entries"], [
+            {"subject": "role", "label": "角色生日", "date": "2026-10-24",
+             "days_until": 1, "calendar": "gregorian"},
+        ])
+
 
 if __name__ == "__main__":
     unittest.main()

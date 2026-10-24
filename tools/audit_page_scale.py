@@ -66,7 +66,9 @@ MIGRATED = ("memory-page.css", "learning-page.css", "contact-page.css",
             "weather-source.css",
             # 2026-10-11：原生扩展管理面板使用同一套尺度令牌，纳入阈值判定。
             "native-extension-panel.css", "confirmation-dialog.css",
-            "workspace-loading.css")
+            "workspace-loading.css",
+            # 2026-10-24：旧版资料迁入的配置对照表随页面重构迁入尺度令牌。
+            "migration-config-table.css")
 # 仍在使用自有尺度的页面：只统计，不判定（逐步迁移）。
 # 2026-10-02：`shell.css` 迁入后这里是空的——`pages/陪伴小屋/*.css` 全部走尺度令牌。
 #
