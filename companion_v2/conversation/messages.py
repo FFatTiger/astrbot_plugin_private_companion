@@ -502,8 +502,7 @@ class ConversationMessages:
                     ConversationExpressionStyleContext.validate_snapshot(style_snapshot, context)
                     contributions.extend(
                         self.expression_style_context.contributions(style_snapshot, context, at,
-                            policy=read_expression_settings(self.runtime, context),
-                            batch_id=None if historical else row["batch_id"]))
+                            policy=read_expression_settings(self.runtime, context), candidate_pool=True))
                 except Exception as error:
                     logger.warning("V2 expression materials unavailable: %s", type(error).__name__)
         if isinstance(saved, dict) and saved.get("role_state") is not None:
@@ -969,14 +968,41 @@ class ConversationMessages:
             return False
         actual = self._request(self.owned(context, batch_id), context, self.tasks.now(), include_tools=False)
         expected = tuple(m for m in actual.context.materials if self.optional_guidance(m))
-        if new != expected:
+        style_purposes = {"expression_style_context", "expression_style_rule"}
+        other = lambda items: tuple(m for m in items if m.purpose not in style_purposes)
+        if other(new) != other(expected):
             return False
-        # The style summary changes its injection count after a rule lapses.
-        # Other payloads may only disappear, never be replaced or newly injected.
-        old_payloads = iter(m for m in old if m.purpose != "expression_style_context")
-        for material in new:
-            if material.purpose != "expression_style_context" and not any(m == material for m in old_payloads):
+        previous_other = iter(other(old))
+        if any(not any(material == previous for previous in previous_other) for material in other(new)):
+            return False
+
+        def style_rules(items):
+            return tuple(m for m in items if m.purpose == "expression_style_rule")
+
+        def ordered_subset(items, candidates):
+            remaining = iter(candidates)
+            return all(any(item == candidate for candidate in remaining) for item in items)
+
+        selected = style_rules(new)
+        if not ordered_subset(selected, style_rules(old)) or not ordered_subset(selected, style_rules(expected)):
+            return False
+        summaries = tuple(m for m in new if m.purpose == "expression_style_context")
+        if not selected:
+            return not summaries
+        sources = tuple(m for m in expected if m.purpose == "expression_style_context")
+        if len(summaries) != 1 or len(sources) != 1:
+            return False
+        try:
+            current_info, source_info = json.loads(summaries[0].payload), json.loads(sources[0].payload)
+            for name in ("context_at", "rules_available", "learning_mode"):
+                if current_info.get(name) != source_info.get(name):
+                    return False
+            if (current_info.get("rules_injected") != len(selected)
+                    or current_info.get("selection_partial") != (
+                        len(selected) < current_info["rules_available"])):
                 return False
+        except (TypeError, ValueError, AttributeError, KeyError):
+            return False
         return True
 
     def _prepare_daily_outfit(self, run, at):

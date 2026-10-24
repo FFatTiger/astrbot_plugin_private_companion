@@ -20,6 +20,7 @@ from companion_v2.execution.models import TaskError, digest, stamp
 from companion_v2.expression import feedback as style_feedback
 from companion_v2.expression import learning as style_learning
 from companion_v2.expression import style_rotation
+from companion_v2.expression import rule_details
 
 from .foreground import ContextContribution, ContributionState
 
@@ -85,13 +86,13 @@ class ConversationExpressionStyleContext:
         scope_key = digest(context.scope)
         if context.scope.kind.value == "private":
             rows = self.runtime.read_all("""SELECT s.signal_id, s.run_id, s.scope_key,
-                    s.applicability_json, r.sample_json
+                    s.applicability_json, s.evidence_json, r.sample_json
                 FROM expression_style_signals s JOIN expression_style_runs r ON r.run_id = s.run_id
                 WHERE s.owner_key = ? AND s.state = 'adopted'
                 ORDER BY s.signal_id LIMIT ?""", (owner_key, MAX_POOL_SCAN + 1))
         else:
             rows = self.runtime.read_all("""SELECT s.signal_id, s.run_id, s.scope_key,
-                    s.applicability_json, r.sample_json
+                    s.applicability_json, s.evidence_json, r.sample_json
                 FROM expression_style_signals s JOIN expression_style_runs r ON r.run_id = s.run_id
                 WHERE s.owner_key = ? AND s.scope_key = ? AND s.state = 'adopted'
                 ORDER BY s.signal_id LIMIT ?""", (owner_key, scope_key, MAX_POOL_SCAN + 1))
@@ -116,6 +117,15 @@ class ConversationExpressionStyleContext:
                     eligible = style_learning.applicability_matches_channel(applicability, channel)
                 except (TypeError, ValueError):
                     eligible = False
+            # A withdrawn sample must not keep a candidate slot: the rule would be
+            # dropped again when its material is re-read, but it would first crowd
+            # still-valid rules out of the bounded rotation.
+            if eligible and window.get("source_kind") == "conversation_input":
+                try:
+                    source = self.catalog.evidence_context(window, context)
+                    eligible = self.catalog.reviews.allows_handles(source, json.loads(row["evidence_json"]))
+                except Exception:
+                    eligible = False
             if eligible:
                 pool.append((row["signal_id"], row["run_id"]))
                 scopes.add(row["scope_key"])
@@ -127,7 +137,8 @@ class ConversationExpressionStyleContext:
         # The sample is drawn once here and sealed into the turn, so re-reading the
         # turn reproduces exactly the same rules.
         picked = style_rotation.sample(pool, usage_map=usage_map,
-            at=at, count=candidate_limit, seed=[context.key, stamp(at), rules_per_turn, decay_hours])
+            at=at, count=candidate_limit, seed=[context.key, stamp(at), rules_per_turn, decay_hours],
+            decay_hours=decay_hours or style_rotation.DEFAULT_RECOVERY_HOURS)
         return [{"signal_id": signal_id, "run_id": run_id}
                 for signal_id, run_id in picked], len(pool) > candidate_limit
 
@@ -229,7 +240,9 @@ class ConversationExpressionStyleContext:
                 raise TaskError("expression_sample_changed", "sample approval was revoked")
             self.catalog.resolve_handles(handles, opened_at, closed_at, original, at, source_kind=source_kind)
             basis = "adopted_dialogue_expression" if source_kind == "conversation_input" else "adopted_role_expression"
-        return json.dumps({"basis": basis, "dimension": row["dimension"],
+        form = rule_details.form_for(self.runtime, row)
+        return json.dumps({"signal_id": row["signal_id"], "basis": basis, "dimension": row["dimension"],
+            **({"expression": form} if form else {}),
             "proposal": row["proposal"], "applicability": applicability}, ensure_ascii=False, sort_keys=True,
             separators=(",", ":"), allow_nan=False)
 
@@ -249,7 +262,21 @@ class ConversationExpressionStyleContext:
             owner_key=digest(self.catalog.role_owner(context)), scope_key=digest(context.scope),
             channel=context.scope.kind.value, text=text, received_at=received_at)
 
-    def contributions(self, snapshot, context, at, *, policy=None, batch_id=None, on_injection=None):
+    def stage_request(self, request, context, *, batch_id, at):
+        """Record actual model guidance outside the read-only prompt projection."""
+        identifiers = []
+        for material in request.context.materials:
+            if material.owner == "role.expression" and material.purpose == "expression_style_rule":
+                identifier = json.loads(material.payload).get("signal_id")
+                if identifier:
+                    identifiers.append(identifier)
+        if identifiers:
+            style_feedback.stage_injection(self.runtime, batch_id=batch_id,
+                owner_key=digest(self.catalog.role_owner(context)), scope_key=digest(context.scope),
+                signal_ids=identifiers, at=at)
+
+    def contributions(self, snapshot, context, at, *, policy=None, batch_id=None, on_injection=None,
+                      candidate_pool=False):
         self.validate_snapshot(snapshot, context)
         if not snapshot.get("application_enabled", True) or policy is not None and not policy.applies_to(context):
             return ()
@@ -268,7 +295,11 @@ class ConversationExpressionStyleContext:
             limit, budget = min(limit, live_rules), min(budget, live_budget)
         materials, used, consumed = [], [], 0
         channel = snapshot.get("channel", context.scope.kind.value)
-        for reference in snapshot["references"][:limit]:
+        # A reply may have a semantic decision only after this projection. Offer
+        # the bounded candidate pool to that later selector so a narrow rule in
+        # third place is not hidden behind two unrelated rules. Only the final
+        # selection is sent to the model or counted as an injection.
+        for reference in snapshot["references"] if candidate_pool else snapshot["references"][:limit]:
             try:
                 payload = self._material(reference, context, at)
                 applicability = style_learning.normalize_applicability(json.loads(payload)["applicability"])
@@ -278,15 +309,17 @@ class ConversationExpressionStyleContext:
                 # A retired or invalidated rule lapses silently; it never blocks a turn.
                 continue
             if consumed + len(payload.encode("utf-8")) > budget:
+                if candidate_pool:
+                    continue
                 break
             consumed += len(payload.encode("utf-8"))
             materials.append((reference, payload))
             used.append(reference["signal_id"])
         if not materials:
             return ()
-        if on_injection is not None:
+        if on_injection is not None and not candidate_pool:
             on_injection(tuple(used))
-        if batch_id is not None:
+        if batch_id is not None and not candidate_pool:
             try:
                 style_feedback.stage_injection(self.runtime, batch_id=batch_id,
                     owner_key=digest(self.catalog.role_owner(context)), scope_key=digest(context.scope),
@@ -296,7 +329,8 @@ class ConversationExpressionStyleContext:
                 logger.warning("V2 expression feedback staging failed: %s", type(error).__name__)
         info = json.dumps({"context_at": snapshot["captured_at"],
             "selection_partial": len(used) < len(snapshot["references"]),
-            "rules_injected": len(used), "rules_available": len(snapshot["references"]),
+            "rules_injected": 0 if candidate_pool else len(used),
+            "rules_available": len(snapshot["references"]),
             "learning_mode": snapshot.get("learning_mode", "balanced")},
             ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return (ContextContribution("expression-style-context", "role.expression",

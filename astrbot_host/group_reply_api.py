@@ -45,6 +45,7 @@ class GroupReplyWebAPI:
                  "Save this group's active interjection settings"),
                 (prefix + "/style", self.style, ["GET"], "Review this group's learned expression signals"),
                 (prefix + "/style/samples", self.style_samples, ["GET"], "Review this group's writing samples"),
+                (prefix + "/style/revise", self.style_revise, ["POST"], "Edit a group expression rule"),
                 (prefix + "/style/samples/command", self.style_sample_command, ["POST"], "Decide a group writing sample"),
                 (prefix + "/style/learn", self.style_learn, ["POST"], "Learn from eligible group samples"),
                 (prefix + "/style/export", self.style_export, ["POST"], "Export this group's adopted rules"),
@@ -319,6 +320,7 @@ class GroupReplyWebAPI:
                 fields = {
                     "command": {"signal_id", "action", "view_token", "operation_key"},
                     "sample_command": {"handle", "action", "view_token", "operation_key"},
+                    "revise": {"signal_id", "view_token", "operation_key", "changes"},
                     "learn": set(), "export_pack": {"signal_ids"},
                     "preview_import": {"package_json"},
                     "import_pack": {"package_json", "preview_token", "operation_key"},
@@ -398,6 +400,9 @@ class GroupReplyWebAPI:
 
     async def style_learn(self):
         return await self._style(command=True, method="learn")
+
+    async def style_revise(self):
+        return await self._style(command=True, method="revise")
 
     async def style_export(self):
         return await self._style(command=True, method="export_pack")

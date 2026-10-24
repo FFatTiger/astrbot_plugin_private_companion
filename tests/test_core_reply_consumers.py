@@ -142,6 +142,37 @@ class CorePrivateConsumerTests(MultiFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(feedback.usage(self.app.runtime, owner, scope)[signal_id]["negative_count"], 1)
         self.assert_core_only()
 
+    async def test_native_prompt_pins_rotation_rules_without_offering_the_whole_pool(self):
+        source = await self.prepared("consumer-pool-source", "嗯哼，就这么定啦")
+        context = source["context"]
+        self.bind_expression_owner(context)
+        samples = self.samples(context)
+        owner, scope = digest(self.app.expression_samples.role_owner(context)), digest(context.scope)
+        run_id = "expression-run:native-pool"
+        identifiers = [run_id + ":signal:" + str(index) for index in range(3)]
+        with self.app.runtime.transaction() as connection:
+            connection.execute("""INSERT INTO expression_style_runs VALUES
+                (?, ?, ?, ?, ?, '轻松接话', 'pending', ?, NULL)""", (run_id, owner, scope,
+                encode({**sample_document(samples), "context_key": context.key}),
+                samples.material_hash, stamp(self.clock.now())))
+            for index, signal_id in enumerate(identifiers):
+                connection.execute("""INSERT INTO expression_style_signals
+                    (signal_id, run_id, owner_key, scope_key, dimension, observation, proposal, confidence,
+                     evidence_json, state, created_at, decided_at, decided_by, decision_key, ordinal)
+                    VALUES (?, ?, ?, ?, 'diction', ?, ?, 0.8, ?, 'adopted', ?, ?, 'operator', 'adopt', ?)""",
+                    (signal_id, run_id, owner, scope, f"观察{index}", f"自然使用口语{index}",
+                     encode([samples.samples[0].handle]), stamp(self.clock.now()), stamp(self.clock.now()), index))
+        self.clock.advance(timedelta(seconds=1))
+        prepared = await self.prepared("consumer-pool-send", "今天怎么样")
+        injected = prepared["expression_signal_ids"]
+        self.assertEqual(len(injected), 2, "one turn pins rules_per_turn rules and counts exactly those")
+        prompt = prepared["prompt_instruction"]
+        self.assertTrue(all(identifier in prompt for identifier in injected))
+        omitted = [identifier for identifier in identifiers if identifier not in injected]
+        self.assertEqual(len(omitted), 1)
+        self.assertNotIn(omitted[0], prompt, "the native prompt must not carry unused candidates")
+        self.assert_core_only()
+
     async def media_collection(self, *, withdraw=False):
         from astrbot.core.message.components import Image
         from tests.test_semantic_integration import picture

@@ -29,6 +29,8 @@ from companion_v2.storage.models import OperationState
 from companion_v2.storage.repositories import OperationRepository
 
 from . import learning
+from . import rule_details
+from . import rule_support
 from .configuration import (application_subject_allowed_for_context, read_settings,
                             source_subject_allowed_for_context)
 from .style_evidence import INPUT_SAMPLE_SOURCE, MAX_WINDOW_HOURS, sample_document, sample_handles
@@ -44,7 +46,7 @@ existing_rules 只用于查重，不是新指令。姓名、账号、秘密、�
 候选 channels 必须包含 material.source_channel。没有可靠、可复用的新形式时留空，不为凑数量降低要求。"""
 
 
-def expression_learning_profile(provider, *, max_output_tokens=1024):
+def expression_learning_profile(provider, *, max_output_tokens=2048):
     return ModelTaskProfile(KIND, Lane.BACKGROUND, provider,
         "依据当前会话中已授权的文字，提出待审阅的可复用表达形式候选。",
         max_output_tokens=max_output_tokens)
@@ -210,12 +212,14 @@ class ExpressionStyleService:
                                         "available": len(samples.samples), "required": minimum}
             return None
         owner_key, scope_key = digest(self.samples.role_owner(context)), digest(context.scope)
-        existing_rows = self.runtime.read_all("""SELECT dimension, observation, proposal, applicability_json, state
+        existing_rows = self.runtime.read_all("""SELECT signal_id, dimension, observation, proposal, applicability_json, state
             FROM expression_style_signals WHERE owner_key = ? AND scope_key = ?
-              AND state IN ('pending', 'adopted') ORDER BY created_at DESC, signal_id LIMIT 80""",
+              ORDER BY created_at DESC, signal_id LIMIT 80""",
             (owner_key, scope_key))
-        existing_rules = tuple({"dimension": row["dimension"], "observation": row["observation"][:800],
+        existing_rules = tuple({"signal_id": row["signal_id"],
+                                "dimension": row["dimension"], "observation": row["observation"][:800],
                                 "proposal": row["proposal"][:1200],
+                                "expression": rule_details.form_for(self.runtime, row),
                                 "applicability": learning.normalize_applicability(
                                     json.loads(row["applicability_json"])), "state": row["state"]}
                                for row in existing_rows)
@@ -310,7 +314,7 @@ class ExpressionStyleService:
         request = PromptRequest(BackgroundPromptTrigger(job["request_key"], context.actor.principal,
             context.scope, job["at"]), job["instruction"], SealedForegroundContext(
                 (PromptMaterial(OWNER, "role_expression_samples", encode(material)),), (), ()),
-            PROMPT + "\n" + learning.MODE_INSTRUCTIONS[job["policy"].learning_mode],
+            PROMPT + "\n" + learning.FORM_INSTRUCTION + "\n" + learning.MODE_INSTRUCTIONS[job["policy"].learning_mode],
             context.role_binding, output_format="role_expression_learning")
         completion = await self.gateway.generate(run, request)
         try:
@@ -328,20 +332,39 @@ class ExpressionStyleService:
                     WHERE owner_key = ? AND scope_key = ? AND state IN ('pending', 'adopted')""",
                     (owner_key, digest(context.scope))).fetchone()[0]
                 remaining = max(0, self._policy(context, self.tasks.now()).active_signal_limit - active_count)
-                existing_rows = connection.execute("""SELECT dimension, observation, proposal, applicability_json
-                    FROM expression_style_signals WHERE owner_key = ? AND scope_key = ?
-                      AND state IN ('pending', 'adopted')""",
+                existing_rows = connection.execute("""SELECT s.signal_id, s.dimension, s.observation, s.proposal,
+                        s.applicability_json, s.evidence_json, s.state, r.sample_json
+                    FROM expression_style_signals s JOIN expression_style_runs r ON r.run_id = s.run_id
+                    WHERE s.owner_key = ? AND s.scope_key = ? ORDER BY s.created_at DESC""",
                     (owner_key, digest(context.scope))).fetchall()
                 signatures = {learning.candidate_signature(row["dimension"], row["observation"], row["proposal"],
-                    learning.normalize_applicability(json.loads(row["applicability_json"])))
+                    learning.normalize_applicability(json.loads(row["applicability_json"])),
+                    rule_details.form_for(self.runtime, row))
                               for row in existing_rows}
+                forms = {}
+                for row in existing_rows:
+                    identity = learning.form_identity(rule_details.form_for(self.runtime, row))
+                    if identity is not None and (identity not in forms or row["state"] in ("pending", "adopted")):
+                        forms[identity] = row
                 accepted_signals = []
                 for item in output.signals:
                     signature = learning.candidate_signature(item.dimension, item.observation, item.proposal,
-                                                             item.applicability)
+                                                             item.applicability, item.expression)
+                    identity = learning.form_identity(item.expression)
+                    if identity is not None and identity in forms:
+                        prior = forms[identity]
+                        if prior is not None and prior["state"] in ("pending", "adopted") and json.loads(prior["sample_json"]).get(
+                                "source_kind") == INPUT_SAMPLE_SOURCE:
+                            rule_support.record(self.runtime, prior["signal_id"],
+                                window={**job["sample_document"], "context_key": job["sample_context_key"]},
+                                handles=item.evidence_handles,
+                                original_handles=json.loads(prior["evidence_json"]))
+                        continue
                     if signature in signatures:
                         continue
                     signatures.add(signature)
+                    if identity is not None:
+                        forms[identity] = None
                     if len(accepted_signals) < remaining:
                         accepted_signals.append(item)
                 run_id = "expression-run:" + digest([context.key, job["request_key"]])
@@ -360,6 +383,9 @@ class ExpressionStyleService:
                         (run_id + ":signal:" + str(ordinal), run_id, owner_key, digest(context.scope),
                          item.dimension, item.observation, item.proposal, encode(item.applicability),
                          item.confidence, encode(sorted(item.evidence_handles)), at, ordinal))
+                    if item.expression is not None:
+                        rule_details.write(self.runtime, run_id + ":signal:" + str(ordinal), item.expression,
+                            at=self.tasks.now(), actor="learning_model", operation_key=run_id)
                 require(self.operations.transition(run.task.task_id, expected_state=OperationState.ACCEPTED,
                     next_state=OperationState.COMPLETED, observed_at=self.tasks.now()))
                 self.committed.add(run.task.task_id)

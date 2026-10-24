@@ -38,7 +38,7 @@ LIMITS = {
     "min_samples": (1, 16),
     "group_min_samples": (5, 64),
     "sample_chars": (40, 4000),
-    "active_signal_limit": (12, 240),
+    "active_signal_limit": (12, 480),
     "rules_per_turn": (1, 16),
     "payload_chars": (500, 16000),
     "rotation_candidate_limit": (1, 64),

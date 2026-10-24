@@ -480,6 +480,11 @@ def build_core_reply_prompt(application, context, native_input, *, at):
             return ""
         policy = read_settings(application.runtime, context)
         snapshot = owner.capture(context, at, policy=policy)
+        # This prompt is sealed before the optional Laya decision runs, so the
+        # native path cannot narrow rules by intent: it pins the rotation's first
+        # ``rules_per_turn`` rules and records exactly those identifiers as the
+        # injection. Selecting a rule that sits behind unrelated ones by intent
+        # belongs to the V2 reply generator, which has the decision in hand.
         return _material_section("表达习惯参考", EXPRESSION_STYLE_INSTRUCTION,
             owner.contributions(snapshot, context, at, policy=policy,
                                 on_injection=expression_signal_ids.extend))

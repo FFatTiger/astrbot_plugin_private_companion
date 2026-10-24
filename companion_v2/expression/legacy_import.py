@@ -11,6 +11,7 @@ import json
 
 from companion_v2.execution.models import TaskError, digest, encode, stamp
 from companion_v2.foundation.refs import RoleOwnerRef
+from . import rule_details
 
 SOURCE = "legacy_expression"
 
@@ -40,6 +41,8 @@ def preview(runtime, profile, context):
         run = runtime.read_one("SELECT material_hash, sample_json FROM expression_style_runs WHERE run_id = ?", (run_id,))
     known = {row["signal_id"] for row in rows}
     ready = [rule for rule in profile["rules"] if signal_id(run_id, rule) not in known]
+    missing_forms = [rule for rule in profile["rules"] if signal_id(run_id, rule) in known
+                     and rule.get("expression") and rule_details.read(runtime, signal_id(run_id, rule)) is None]
     window = json.loads(run["sample_json"]) if run else {}
     existing_samples = {item["source_key"] for item in window.get("legacy", {}).get("samples", [])}
     new_samples = [item for item in profile["samples"] if item["source_key"] not in existing_samples]
@@ -48,7 +51,8 @@ def preview(runtime, profile, context):
         "pending_count": sum(r["state"] == "pending" for r in profile["rules"]),
         "rejected_count": sum(r["state"] in ("rejected", "retired") for r in profile["rules"]),
         "sample_count": len(profile["samples"]), "skipped_count": len(profile["rejected"]),
-        "remaining": len(ready) + len(new_samples),
+        "remaining": len(ready) + len(new_samples) + len(missing_forms),
+        "details_remaining": len(missing_forms),
         "token": digest([profile, [dict(row) for row in rows], dict(run) if run else None])}
 
 
@@ -89,6 +93,9 @@ def import_profile(runtime, profile, context, at, *, expected_token):
                                      (run_id,)).fetchone()[0] + 1
         for rule in profile["rules"]:
             identifier = signal_id(run_id, rule)
+            if rule.get("expression") and rule_details.read(runtime, identifier) is None:
+                rule_details.write(runtime, identifier, rule["expression"], at=at,
+                    actor="legacy_migration", operation_key="legacy:" + digest(rule), legacy=rule["legacy"])
             if connection.execute("SELECT 1 FROM expression_style_signals WHERE signal_id = ?", (identifier,)).fetchone():
                 continue
             handles = []

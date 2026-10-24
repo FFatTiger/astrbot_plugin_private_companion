@@ -20,8 +20,10 @@ from companion_v2.identity_policy.object_access import ObjectAccessPolicy
 from ..role_work.growth.management import RoleGrowthManagement
 from . import feedback as style_feedback
 from . import style_rotation
+from . import rule_details
+from . import rule_support
 from .configuration import read_settings
-from .learning import DIMENSIONS, candidate_signature, normalize_applicability
+from .learning import DIMENSIONS, candidate_signature, form_identity, normalize_applicability
 from .sharing import MAX_IMPORT_SIGNALS, build_pack, normalize_pack
 
 
@@ -46,6 +48,10 @@ class ExpressionStyleManagement:
     def learn(self, **arguments):
         from .sample_management import ExpressionSampleManagement
         return ExpressionSampleManagement(self).learn(**arguments)
+
+    def revise(self, **arguments):
+        from .rule_management import revise
+        return revise(self, **arguments)
 
     @staticmethod
     def _token(operator, context, row, policy_revision):
@@ -170,6 +176,9 @@ class ExpressionStyleManagement:
                 (digest(owner), digest(context.scope)))
             capacity = {"active": int(active_count["count"]) if active_count is not None else 0,
                         "limit": read_settings(self.runtime, context).active_signal_limit}
+            counts = {item["state"]: item["count"] for item in self.runtime.read_all("""SELECT state, COUNT(*) AS count
+                FROM expression_style_signals WHERE owner_key = ? AND scope_key = ? GROUP BY state""",
+                (digest(owner), digest(context.scope)))}
             for row in rows[:limit]:
                 unavailable, evidence = None, []
                 applicability = None
@@ -189,6 +198,18 @@ class ExpressionStyleManagement:
                             sample_context = self._evidence_context(window, context)
                             evidence = self.samples.describe_handles(handles, opened_at, closed_at,
                                 sample_context, at, source_kind=source_kind)
+                            if source_kind == "conversation_input":
+                                for extra in rule_support.observations(self.runtime, row["signal_id"]):
+                                    try:
+                                        extra_window, extra_handles = extra["window"], extra["handles"]
+                                        extra_start, extra_end = self._window(extra_window, at)
+                                        extra_context = self._evidence_context(extra_window, context)
+                                        if self.samples.reviews.allows_handles(extra_context, extra_handles):
+                                            evidence.extend(self.samples.describe_handles(extra_handles,
+                                                extra_start, extra_end, extra_context, at,
+                                                source_kind="conversation_input"))
+                                    except (TaskError, KeyError, TypeError, ValueError):
+                                        continue
                     except TaskError as error:
                         unavailable = error.code
                     except (TypeError, ValueError):
@@ -203,12 +224,16 @@ class ExpressionStyleManagement:
                 elif state == "retired":
                     actions = [] if unavailable is not None else ["restore"]
                 else:
-                    actions = []
+                    actions = [] if unavailable is not None else ["reconsider"]
                 injections, last = usage_map.get(row["signal_id"], (0, None))
                 feedback = feedback_map.get(row["signal_id"], {})
+                detail = rule_details.read(self.runtime, row["signal_id"])
+                legacy = rule_details.legacy_counts(detail)
+                injections += legacy["use_count"]
                 items.append({"signal_id": row["signal_id"], "run_id": row["run_id"],
                     "dimension": row["dimension"], "source_kind": source_kind,
                     "applicability": applicability,
+                    "expression": detail["form"] if detail and unavailable is None else None,
                     "observation": row["observation"] if unavailable is None else None,
                     "proposal": row["proposal"] if unavailable is None else None,
                     "evidence": evidence if unavailable is None else [],
@@ -216,21 +241,22 @@ class ExpressionStyleManagement:
                     "created_at": row["created_at"], "decided_at": row["decided_at"],
                     "injections": injections,
                     "last_injected_at": last.isoformat() if last is not None else None,
-                    "positive_feedback": feedback.get("positive_count", 0),
-                    "negative_feedback": feedback.get("negative_count", 0),
+                    "positive_feedback": feedback.get("positive_count", 0) + legacy.get("positive_feedback", 0),
+                    "negative_feedback": feedback.get("negative_count", 0) + legacy.get("negative_feedback", 0),
                     "last_feedback": feedback.get("last_feedback"),
                     "last_feedback_at": feedback.get("last_feedback_at"),
                     "review_reason": feedback.get("review_reason"),
                     "source_title": run["summary"] if unavailable is None and source_kind in (SHARE_PACK_SOURCE, "legacy_expression") else None,
                     "unavailable_reason": unavailable, "actions": actions,
+                    "can_revise": unavailable is None,
                     "view_token": self._token(operator, context, row, policy_revision)})
             return {"items": items, "state": state,
                 "next_cursor": rows[limit - 1]["signal_id"] if len(rows) > limit else None,
-                "context_key": context.key, "role_id": owner.persona_id, "capacity": capacity}
+                "context_key": context.key, "role_id": owner.persona_id, "capacity": capacity, "counts": counts}
 
     @outcome
     def command(self, *, operator, context, signal_id, action, view_token, operation_key):
-        if action not in ("adopt", "reject", "retire", "restore"):
+        if action not in ("adopt", "reject", "retire", "restore", "reconsider"):
             raise TaskError("expression_command_invalid", "select adopt, reject, retire or restore")
         self.management._validate_operation_key(operation_key)
         at = self.management.ledger.now()
@@ -246,14 +272,20 @@ class ExpressionStyleManagement:
                 "pending": {"adopt", "reject"},
                 "adopted": {"retire"},
                 "retired": {"restore"},
-                "rejected": set(),
+                "rejected": {"reconsider"},
             }
             if action not in allowed.get(row["state"], set()):
                 if row["state"] == "rejected":
                     raise TaskError("expression_decided", "style signal has already been rejected")
                 raise TaskError("expression_command_invalid", "this style signal cannot use that action")
-            if action in ("adopt", "restore"):
+            if action in ("adopt", "restore", "reconsider"):
                 self._basis(row, owner, context, at)
+            if action in ("restore", "reconsider"):
+                capacity = self.runtime.read_one("""SELECT COUNT(*) AS count FROM expression_style_signals
+                    WHERE owner_key = ? AND scope_key = ? AND state IN ('pending', 'adopted')""",
+                    (digest(owner), digest(context.scope)))
+                if capacity["count"] >= read_settings(self.runtime, context).active_signal_limit:
+                    raise TaskError("expression_capacity_reached", "retire an unused rule before restoring another")
             changed = connection.execute("""UPDATE expression_style_signals
                 SET state = ?, decided_at = ?, decided_by = ?, decision_key = ?
                 WHERE signal_id = ? AND owner_key = ? AND scope_key = ? AND state = ?""",
@@ -271,23 +303,36 @@ class ExpressionStyleManagement:
             (owner_key, scope_key))
         active_count = int(active["count"]) if active is not None else 0
         limit = read_settings(self.runtime, context).active_signal_limit
-        rows = self.runtime.read_all("""SELECT dimension, observation, proposal, applicability_json FROM expression_style_signals
-            WHERE owner_key = ? AND scope_key = ? AND state IN ('pending', 'adopted')""",
+        rows = self.runtime.read_all("""SELECT signal_id, dimension, observation, proposal,
+                applicability_json, state FROM expression_style_signals
+            WHERE owner_key = ? AND scope_key = ?""",
             (owner_key, scope_key))
         existing = {candidate_signature(row["dimension"], row["observation"], row["proposal"],
-                    normalize_applicability(json.loads(row["applicability_json"])))
-                    for row in rows}
+                    normalize_applicability(json.loads(row["applicability_json"])),
+                    rule_details.form_for(self.runtime, row))
+                    for row in rows if row["state"] in ("pending", "adopted")}
+        # The same situation and pattern is the same rule here just as it is in
+        # learning, so a reworded observation cannot import a second live copy.
+        # Rejected and retired rules stay dormant: importing a pack again is the
+        # operator's explicit recovery path once the original evidence is gone.
+        known_forms = {identity for identity in
+            (form_identity(rule_details.form_for(self.runtime, row)) for row in rows
+             if row["state"] in ("pending", "adopted"))
+            if identity is not None}
         rejected = list(pack["rejected"])
         in_pack_duplicates = sum(item["reason"] == "duplicate_in_pack" for item in rejected)
         candidates, duplicate_count, blocked_count = [], in_pack_duplicates, 0
         remaining = max(0, limit - active_count)
         for signal in pack["signals"]:
             signature = candidate_signature(signal["dimension"], signal["observation"], signal["proposal"],
-                                            signal["applicability"])
-            if signature in existing:
+                                            signal["applicability"], signal.get("expression"))
+            identity = form_identity(signal.get("expression"))
+            if (identity is not None and identity in known_forms) or signature in existing:
                 duplicate_count += 1
                 continue
             existing.add(signature)
+            if identity is not None:
+                known_forms.add(identity)
             if len(candidates) < remaining:
                 candidates.append(signal)
             else:
@@ -335,6 +380,7 @@ class ExpressionStyleManagement:
                     continue
                 signals.append({"dimension": row["dimension"], "observation": row["observation"],
                                 "proposal": row["proposal"],
+                                "expression": rule_details.form_for(self.runtime, row),
                                 "applicability": normalize_applicability(json.loads(row["applicability_json"])),
                                 "confidence": row["confidence"]})
         if not signals:
@@ -409,6 +455,9 @@ class ExpressionStyleManagement:
                      signal["confidence"], encode([]),
                      stamp(at), ordinal))
                 inserted += 1
+                if signal.get("expression") is not None:
+                    rule_details.write(self.runtime, signal_id, signal["expression"], at=at,
+                                       actor=operator.subject.subject_id, operation_key=operation_key)
         self.app.notify()
         return {"imported_count": inserted, "state": "pending_review", "replayed": False,
                 "capacity": {"active": preview["capacity"]["active"] + inserted,
@@ -417,4 +466,4 @@ class ExpressionStyleManagement:
     @staticmethod
     def _target(action):
         return {"adopt": "adopted", "reject": "rejected", "retire": "retired",
-                "restore": "adopted"}[action]
+                "restore": "adopted", "reconsider": "pending"}[action]

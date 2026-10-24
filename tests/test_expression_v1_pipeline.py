@@ -44,7 +44,9 @@ from tests.test_role_tool_loop import answered
 
 
 RULE = {"dimension": "sentence_rhythm", "observation": "回应计划时常用短句收束",
-        "proposal": "回应计划时先给简短回应，再用短句自然收束", "confidence": 0.8}
+        "proposal": "回应计划时先给简短回应，再用短句自然收束", "confidence": 0.8,
+        "expression": {"kind": "grammar", "situation": "确认计划或约定时",
+            "pattern": "先用短句确认，再用短句自然收束", "avoid": "需要交代条件或细节时"}}
 ORIGINAL = "嗯嗯，收到。\n晚点再聊。"
 REVISED = "收到啦。\n晚点再聊。"
 

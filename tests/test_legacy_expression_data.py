@@ -71,6 +71,8 @@ class LegacyExpressionTests(HostFixture, unittest.IsolatedAsyncioTestCase):
             adopted = styles.list(operator=self.core, context=context, state="adopted").unwrap()["items"]
             self.assertEqual(len(adopted), 1)
             self.assertEqual(adopted[0]["evidence"], ["好，等会见。"])
+            self.assertEqual(adopted[0]["expression"]["kind"], "grammar")
+            self.assertEqual(adopted[0]["expression"]["pattern"], "简短地结束")
             self.assertEqual(adopted[0]["source_kind"], "legacy_expression")
             self.assertIsNone(adopted[0]["unavailable_reason"])
             catalog = host.application.expression_style_context
