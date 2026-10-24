@@ -1092,6 +1092,39 @@ test('reply diagnostics show bounded metadata without batch IDs or prompt text',
   assert.match(rendered, /不含提示词正文与消息原文/);
 });
 
+test('diagnostics put the failing model line, fallback and wait time in the summary', async () => {
+  const harnessed = harness();
+  harnessed.page.mount(harnessed.root);
+  await drains();
+  const failed = {batch_id: 'turn-failed', created_at: '2026-10-24T05:40:36.918433+00:00',
+    execution_path: 'astrbot_core', state: 'completed', response_type: 'no_reply', send_returns: 0,
+    delivery_state: 'not_started', turn_type: 'astrbot.core.reply', current_inputs: 1, rounds: [],
+    injected_materials: [], offered_tools: [], filtered_tools: [], tool_calls: [],
+    calls: [{position: 1, state: 'unknown', provider: 'deepseek/deepseek-v4.1-flash-expires-on-0910',
+      failure_code: 'UnprocessableEntityError', response_diagnostics: null}]};
+  const recovered = {...failed, batch_id: 'turn-recovered', state: 'complete', response_type: 'native_reply',
+    send_returns: 2, delivery_state: 'returned', created_at: '2026-10-24T12:13:32.489373+00:00',
+    calls: [{...failed.calls[0], state: 'returned'}, {position: 2, state: 'returned', provider: 'deepseek/deepseek-v4-flash',
+      failure_code: null, response_diagnostics: null}]};
+  const waiting = {...failed, batch_id: 'turn-waiting', state: 'generating', response_type: 'no_reply',
+    created_at: new Date(Date.now() - 3 * 3600 * 1000).toISOString(), calls: []};
+  const silent = {...failed, batch_id: 'turn-silent', state: 'completed', send_returns: 0, calls: []};
+  harnessed.requests[0].resolve({...status(), recent: [failed, recovered, waiting, silent]});
+  await drains();
+  const rendered = harnessed.slots.diagnostics.innerHTML;
+  /* 摘要行必须自己说明原因，而不是把失败码留在展开后的细节里。 */
+  assert.match(rendered, /生成完成<\/span><span>未发送<\/span><span class="reply-record-note is-warn">模型线路拒绝请求 422/);
+  assert.match(rendered, /首次请求失败 422 · 已回退/);
+  assert.match(rendered, /本轮未发言/);
+  assert.match(rendered, /已等待 3 小时/);
+  /* 时间按本地时区渲染，不再把 UTC 原样当成当地时间。 */
+  assert.match(rendered, /<time>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}<\/time>/);
+  assert.doesNotMatch(rendered, /\+\d{2}:\d{2}<\/time>|T\d{2}:\d{2}<\/time>/);
+  /* 失败详情保留具体线路，便于对照配置。 */
+  assert.match(rendered, /deepseek\/deepseek-v4\.1-flash-expires-on-0910/);
+  assert.match(rendered, /发送已返回/);
+});
+
 test('a route outside the plugin prefix is refused instead of half-mounting', async () => {
   const requests = [], listeners = {};
   const node = {dataset: {}, isConnected: true, textContent: '', innerHTML: '',

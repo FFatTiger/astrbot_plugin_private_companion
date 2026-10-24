@@ -496,7 +496,6 @@
     const badges = node("span", undefined, "card-badges");
     if (person.private_chat) badges.append(badge("私聊", "private"));
      if (person.group_member) badges.append(badge(`群聊 ${groupIdsOf(person).length}`, "group"));
-     if (person.legacy_private_contact) badges.append(badge("旧版用户"));
      if (!person.private_chat && !person.group_member) badges.append(badge(person.private_contact ? "已维护" : "未有往来"));
      badges.append(badge(TIER_LABELS[person.identity_tier] || "普通用户", person.identity_tier === "core" ? "companion" : ""));
      if (person.identity_tier === "core") badges.append(badge("管理员", "administrator"));

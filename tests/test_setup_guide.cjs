@@ -1494,7 +1494,7 @@ test('旧版私聊用户单独试算和迁入，不必同时选择世界书或�
   page.change('', 'r-first', {setupLegacy: 'role'});
   page.click('legacy-data-plan');
   await settle();
-  assert.match(page.html, /旧版私聊用户（2 位待迁入）/);
+  assert.match(page.html, /私聊用户与权限（2 位用户 · 0 位权限待迁入）/);
   assert.match(page.html, /旧称呼 · 200 · 手动维护 · 12 条历史消息/);
   assert.doesNotMatch(page.html, /data-setup-legacy-action="legacy-data-apply"[^>]*disabled/);
   page.click('legacy-data-apply');
@@ -1503,6 +1503,23 @@ test('旧版私聊用户单独试算和迁入，不必同时选择世界书或�
   assert.equal(applied.body.import_private_contacts, true);
   assert.equal(applied.body.import_worldbook, false);
   assert.match(page.html, /旧版私聊用户/);
+});
+
+test('私聊用户卡已存在时，迁入页仍允许补迁管理员和私聊权限', async () => {
+  const route = 'host/targets/t-first/roles/r-first/legacy';
+  const targets = [{target_id:'t-first',roles:[{role_id:'r-first',legacy_api:'/astrbot_plugin_private_companion/'+route}]}];
+  const plan = {plan_token:'authority-only',reaction_assets:{},journals:{},worldbook:{},
+    private_contacts:{ready:0,already_present:4,authorization:{ready:1,core_users:1,permission_count:2}},
+    persona_sources:[],group_networks:[],memory_database:{state:'absent'},target_private_available:true};
+  const page = harness({status:readyStatus(),targets,responses:{['GET '+route+'/data-plan']:plan,
+    ['POST '+route+'/data-apply']:{private_contacts:{created:0,authorization:{identity_restored:1,permissions_restored:2}}}}});
+  page.mountMigration();await settle();
+  page.change('','t-first',{setupLegacy:'target'});page.change('','r-first',{setupLegacy:'role'});
+  page.click('legacy-data-plan');await settle();
+  assert.match(page.html,/0 位用户 · 1 位权限待迁入/);
+  assert.doesNotMatch(page.html,/data-setup-legacy-action="legacy-data-apply"[^>]*disabled/);
+  page.click('legacy-data-apply');await settle();
+  assert.equal(page.calls.find(item=>item.method==='POST'&&item.route===route+'/data-apply').body.import_private_contacts,true);
 });
 
 test('关闭独立记忆库后不携带已自动选中的群记忆映射，不阻断单独迁入用户', async () => {
@@ -1859,8 +1876,8 @@ test('member-profile-only group sources can be selected and mapped through the g
   page.change('', '789', {setupLegacy: 'data-group'});
   await settle();
   page.clickMigrationView('groups', true);
-  assert.match(page.html, /群资料需另选当前版本群目标/);
-  assert.match(page.html, /个人关系账户不在此处迁移/);
+  assert.match(page.html, /选择对应的当前群与角色，核对群号后迁入群资料和已学表达/);
+  assert.match(page.html, /表达只进入同号群/);
   page.change('', 'group', {setupLegacy: 'group-target'});
   page.change('', 'role', {setupLegacy: 'group-role'});
   page.click('legacy-group-data-plan');

@@ -3998,6 +3998,10 @@ function learningScopeControls(key,label){
   const targets=[...new Map(choices.map(item=>[item.target.target_id,item.target])).values()];
   const targetLabel=target=>product?.targetLabel?.(target)||product?.subjectLabel?.(target)||target.target_id;
   const roleLabel=(role,index)=>product?.roleLabel?.(role,index)||role.role_name||role.role_id;
+  if(key==='expression'){
+    const roles=[...new Map(choices.map(item=>[item.role.role_id,item.role])).values()];
+    return `<div class="learning-scope-controls"><label><span>角色</span><select data-learning-scope-role="expression" aria-label="表达学习角色">${roles.map((role,index)=>`<option value="${escapeHTML(role.role_id)}" ${role.role_id===selected?.role.role_id?'selected':''}>${escapeHTML(roleLabel(role,index))}</option>`).join('')}</select></label></div>`;
+  }
   return `<div class="learning-scope-controls" aria-label="${escapeHTML(label)}范围">
     <label><span>对象</span><select data-learning-scope-target="${escapeHTML(key)}" aria-label="筛选对象">
       ${targets.map(target=>`<option value="${escapeHTML(target.target_id)}" ${target.target_id===selected?.target.target_id?'selected':''}>${escapeHTML(targetLabel(target))}</option>`).join('')}
@@ -4021,7 +4025,7 @@ function changeLearningScope(key,field,value){
     learningScopes[key]={target_id:first.target.target_id,role_id:first.role.role_id};
     return true;
   }
-  const found=choices.find(item=>item.target.target_id===learningScopes[key]?.target_id&&item.role.role_id===value);
+  const found=choices.find(item=>(key==='expression'||item.target.target_id===learningScopes[key]?.target_id)&&item.role.role_id===value);
   if(!found)return false;
   learningScopes[key]={target_id:found.target.target_id,role_id:found.role.role_id};
   return true;
@@ -4057,8 +4061,8 @@ function learningExpressionSources(){
       scopeKey:JSON.stringify([target.target_id,role.role_id]),replyApi:role.reply_api,target,role,
       label:learningRecordLabel(product,target,role,index)})));
   const selected=learningScope('expression');
-  return selected?sources.filter(item=>item.target.target_id===selected.target.target_id
-    &&item.role.role_id===selected.role.role_id):[];
+  return selected?sources.filter(item=>item.role.role_id===selected.role.role_id
+    &&item.target.bot_id===selected.target.bot_id):[];
 }
 window.addEventListener('companion:learning-open',event=>{
   learningRecordFocus={target_id:event.detail?.target_id,role_id:event.detail?.role_id,

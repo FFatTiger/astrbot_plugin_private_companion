@@ -16,7 +16,8 @@ test("规则库导出与 V1 分享包预览/导入使用已选择角色路由", 
       gets.push({route, query});
       const items = query?.state === "adopted" ? [{signal_id:"signal-1",run_id:"run-1",dimension:"diction",
         source_kind:"conversation_input",observation:"晚间问候时使用轻松短句",proposal:"用轻松短句问候",
-        state:"adopted",created_at:"2026-10-08T10:00:00+00:00",actions:["retire"],injections:3,
+        state:"adopted",created_at:"2026-10-08T10:00:00+00:00",actions:["retire"],injections:3,can_revise:true,
+        expression:{kind:"style",situation:"彼此有默契",pattern:"懂的都懂",avoid:"认真求助时不用"},
         positive_feedback:1,negative_feedback:2,evidence:[],view_token:"token"}] : [];
       return {status:"ok", data:{items, capacity:{active:1,limit:60}}};
     },
@@ -43,10 +44,25 @@ test("规则库导出与 V1 分享包预览/导入使用已选择角色路由", 
   assert.ok(gets.length);
   assert.ok(gets.every(call=>call.route===`targets/profile-a/roles/role-a/reply/style`));
   assert.ok(root.innerHTML.includes("明确反馈 · 认可 1 / 不喜欢 2"));
+  assert.match(root.innerHTML,/懂的都懂/);
+  assert.match(root.innerHTML,/彼此有默契/);
+  for(const dimension of ["表情符号","标点","直接程度","排版","其他"])assert.ok(root.innerHTML.includes(dimension));
+  assert.match(root.innerHTML,/已拒绝/);
 
   const click = async selector => listeners.get("click")?.({target:{closest:value=>value===selector?{}:null}});
   const change = target => listeners.get("change")?.({target});
   const input = target => listeners.get("input")?.({target});
+  listeners.get("click")({target:{closest:selector=>selector==="[data-signal-edit]"?{dataset:{signalEdit:"scope-a::signal-1"}}:null}});
+  assert.match(root.innerHTML,/编辑表达规则/);
+  const field={value:"原来如此呀",dataset:{ruleField:"pattern"},closest:selector=>selector==="[data-rule-field]"?field:null};
+  input(field);
+  await click("[data-rule-save]");
+  for(let index=0;index<30&&!root.innerHTML.includes("表达规则已更新");index++)await flush();
+  const edit=posts.find(call=>call.route.endsWith("/style/revise"));
+  assert.equal(edit.route,`targets/profile-a/roles/role-a/reply/style/revise`);
+  assert.equal(edit.body.view_token,"token");
+  assert.equal(edit.body.changes.expression.pattern,"原来如此呀");
+  assert.equal(edit.body.changes.expression.avoid,"认真求助时不用");
   await click("[data-share-toggle]");
   await click("[data-share-export]");
   for(let index=0;index<30&&!root.innerHTML.includes("分享包已生成");index++)await flush();

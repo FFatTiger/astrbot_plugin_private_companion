@@ -39,7 +39,8 @@ test("学习工作台按导航加载每个真实数据模块", () => {
   assert.match(app, /CompanionLearningOverviewPage\?\.mount/);
   assert.match(app, /CompanionLearningReviewPage\?\.mount/);
   assert.match(app, /globalSettingsOnly:true/);
-  assert.match(app, /'\/astrbot_plugin_private_companion\/config',true/);
+  assert.match(app, /endpoint=roleConfigApi\(current\)/);
+  assert.match(app, /configEditors\('expressionLearningConfigWorkspace',\['expression.learning'\]/);
   assert.match(review, /state:"active"/);
   assert.match(review, /state:"decided"/);
   assert.doesNotMatch(review, /CompanionProduct\.role|CompanionProduct\.target/);

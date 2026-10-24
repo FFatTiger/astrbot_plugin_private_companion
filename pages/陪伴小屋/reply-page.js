@@ -504,14 +504,48 @@ window.CompanionReplyPage = (() => {
     diagnostics: root?.querySelector('[data-reply-part="diagnostics"]'),
   });
 
+  /* 摘要行是这张面板唯一一眼能看到的信息，必须直接回答「为什么没有发出去」，
+     失败码、回退和等待时长不再只藏在展开后的细节里。 */
+  function diagnosticTime(value) {
+    if (!value) return "时间未知";
+    /* 宿主与 V2 的时间都带 +00:00 偏移、微秒级小数；截到毫秒后交给本地时区渲染，
+       不再把 UTC 原样当成本地时间。 */
+    const date = new Date(String(value).replace(/(\.\d{3})\d+/, "$1"));
+    if (!Number.isFinite(date.getTime())) return "时间未知";
+    const pad = number => String(number).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} `
+      + `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  }
+
+  function waitingText(value) {
+    const started = Date.parse(String(value || "").replace(/(\.\d{3})\d+/, "$1"));
+    if (!Number.isFinite(started)) return "";
+    const minutes = Math.floor((Date.now() - started) / 60000);
+    if (minutes < 1) return "刚开始";
+    if (minutes < 60) return `已等待 ${minutes} 分钟`;
+    if (minutes < 1440) return `已等待 ${Math.floor(minutes / 60)} 小时`;
+    return `已等待 ${Math.floor(minutes / 1440)} 天`;
+  }
+
   function renderDiagnostics() {
     const host = parts().diagnostics;
     if (!host) return;
     const recent = Array.isArray(state.status?.recent) ? state.status.recent : [];
     const stateLabels = {complete: "已完成", blocked: "受阻", closed: "已关闭", ready: "待投递",
-      sealed: "已封存", collecting: "收集中", generating: "生成中", delivering: "投递中",
-      failed: "未完成", completed: "生成完成", awaiting_request: "等待宿主请求"};
+      sealed: "已封存", collecting: "收集中", generating: "生成中", running: "生成中", delivering: "投递中",
+      failed: "未完成", completed: "生成完成", awaiting_request: "等待宿主请求", prepared: "已准备"};
     const responseLabels = {no_reply: "未发送", image_only: "仅图片", text_or_mixed: "文字或混合内容", native_reply: "宿主回应"};
+    const deliveryLabels = {not_started: "未发送", started: "正在发送", returned: "发送已返回",
+      partial: "部分返回", failed: "发送失败", unknown: "结果未知"};
+    const failureLabels = {UnprocessableEntityError: "模型线路拒绝请求 422", ClientError: "模型调用被拒绝",
+      provider_request_failed: "模型请求失败", model_request_failed: "模型请求失败",
+      native_response_parse_failed: "宿主回复解析失败", response_parse_failed: "回复解析失败",
+      response_contract_rejected: "回复格式校验失败", stream_rejected: "流式校验失败",
+      provider_timeout: "模型请求超时", model_timeout: "模型请求超时"};
+    const failureShort = {UnprocessableEntityError: "422", ClientError: "4xx",
+      provider_timeout: "超时", model_timeout: "超时"};
+    const failureText = code => failureLabels[code] || `请求失败 ${code}`;
+    const failureTag = code => failureShort[code] || code;
     const parseLabels = {not_received: "未收到完整响应", raw_observed: "已收到原始响应",
       native_parsed: "宿主已解析", native_rejected: "宿主解析失败", stream_rejected: "流式校验失败",
       contract_rejected: "回复格式校验失败", validated: "回复已通过校验", tools: "工具请求已通过校验",
@@ -528,18 +562,31 @@ window.CompanionReplyPage = (() => {
       const materials = Array.isArray(item.injected_materials) ? item.injected_materials : [];
       const tools = Array.isArray(item.tool_calls) ? item.tool_calls : [];
       const filtered = Array.isArray(item.filtered_tools) ? item.filtered_tools : [];
-      const failures = (Array.isArray(item.calls) ? item.calls : []).filter(call => call.failure_code);
-      const responses = (Array.isArray(item.calls) ? item.calls : []).filter(call => call.response_diagnostics);
-      const when = item.created_at ? e(String(item.created_at).replace("T", " ").slice(0, 19)) : "时间未知";
+      const calls = Array.isArray(item.calls) ? item.calls : [];
+      const failures = calls.filter(call => call.failure_code);
+      const responses = calls.filter(call => call.response_diagnostics);
+      const sent = Number(item.send_returns) || 0;
+      const waiting = item.state === "generating" || item.state === "awaiting_request";
+      const failure = failures.length ? failures[0] : null;
+      const note = waiting ? waitingText(item.created_at)
+        : failure ? (sent > 0 ? `首次请求失败 ${failureTag(failure.failure_code)} · 已回退`
+          : failureText(failure.failure_code))
+        : item.response_type === "no_reply"
+          ? (item.execution_path === "astrbot_core" ? "本轮未发言" : "本轮未生成分段")
+          : "";
+      const when = e(diagnosticTime(item.created_at));
       return `<details class="reply-record"><summary><span>${e(stateLabels[item.state] || "状态未知")}</span>`
-        + `<span>${e(responseLabels[item.response_type] || "回应类型未知")}</span><time>${when}</time></summary>`
+        + `<span>${e(responseLabels[item.response_type] || "回应类型未知")}</span>`
+        + (note ? `<span class="reply-record-note${failure ? " is-warn" : ""}">${e(note)}</span>` : "")
+        + `<time>${when}</time></summary>`
         + `<p>任务 ${e(item.turn_type || "conversation.reply")} · 有效输入 ${Number(item.current_inputs) || 0} 条 · 轮次 ${rounds.length} · 群历史 ${Number(item.group_history_items) || 0} 条 · 注入材料 ${materials.length} 项</p>`
         + `<p>提供工具：${actionList(item.offered_tools)}</p>`
         + (filtered.length ? `<p>未提供：${filtered.map(tool => `${e(tool.action || "未知工具")} · ${e(tool.reason || "原因未知")}`).join("；")}</p>` : "")
         + (rounds.length ? `<ul>${rounds.map(round => `<li>第 ${Number(round.round_no) + 1} 轮 · ${e(round.state || "状态未知")} · 请求 ${actionList(round.tool_actions)}</li>`).join("")}</ul>` : "")
         + (tools.length ? `<ul>${tools.map(tool => `<li>${e(tool.action || "未知工具")} · ${e(tool.state || "状态未知")} · ${e(tool.effect || "效果未知")}</li>`).join("")}</ul>` : "")
         + (materials.length ? `<p>材料：${materials.map(item => `${e(item.owner || "未知来源")} / ${e(item.purpose || "未分类")} · ${e(item.state || "状态未知")}`).join("；")}</p>` : "")
-        + (failures.length ? `<p>模型失败分类：${failures.map(call => e(call.failure_code)).join("、")}</p>` : "")
+        + (failures.length ? `<p>模型失败分类：${failures.map(call => e(call.failure_code)
+          + (call.provider ? `（${e(call.provider)}）` : "")).join("、")}</p>` : "")
         + (responses.length ? `<ul>${responses.map(call => {
           const diagnostic = call.response_diagnostics;
           const hashes = ["raw", "parsed", "visible"].map((name, index) => diagnostic[name]?.sha256
@@ -550,10 +597,14 @@ window.CompanionReplyPage = (() => {
             + (hashes.length ? `<details><summary>内容指纹</summary><p>${hashes.join("<br>")}</p></details>` : "") + "</li>";
         }).join("")}</ul>` : "")
         + (item.execution_path === "astrbot_core"
-          ? `<p>宿主发送返回 ${Number(item.send_returns) || 0} 次 · ${e(item.delivery_state || "未观察发送")} · 不含提示词正文与消息原文</p></details>`
+          ? `<p>宿主发送返回 ${sent} 次 · ${e(deliveryLabels[item.delivery_state] || "未观察发送")} · 不含提示词正文与消息原文</p></details>`
           : `<p>分段 ${Array.isArray(item.parts) ? item.parts.length : 0} 条 · 不含提示词正文与消息原文</p></details>`);
     }).join("") : '<p class="reply-empty">暂无近期回复记录。</p>';
-    host.innerHTML = `<section class="reply-diagnostics"><header><h3>回复诊断</h3><span>${recent.length} 轮</span></header>${html}</section>`;
+    host.innerHTML = `<section class="reply-diagnostics"><header><h3>回复诊断</h3>`
+      + `<span>最近 ${recent.length} 轮 · 本地时间</span></header>`
+      + (recent.length ? '<p class="reply-diag-note">「未发送」表示这一轮没有发出任何消息，'
+        + "不等于发送失败。展开任意一行可以看模型请求、工具调用与分段回执。</p>" : "")
+      + html + `</section>`;
   }
 
   function summary(v) {

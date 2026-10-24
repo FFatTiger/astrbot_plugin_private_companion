@@ -149,7 +149,7 @@ window.CompanionStateContact = (() => {
     background_capacity_exhausted:["后台执行槽位暂时占满","等待现有后台任务结束后会继续评估。"],
     contact_attempt_budget:["旧版本的模型调用次数上限已触发","当前版本已取消该独立上限，请查看窗口每日实际联系额度。"],
     delivery_history_unavailable:["当前私聊历史无法完成核验","检查 AstrBot 会话历史是否可读取后再重新评估。"],
-    contact_conversation_changed:["原私聊已变化，旧候选被安全取消","等待当前私聊完成后重新评估。"],
+    contact_conversation_changed:["私聊已变化，待发送计划已取消","等待当前私聊完成后重新评估。"],
     scheduler_heartbeat_missing:["尚未收到主动调度心跳","确认插件已启动且主动联系模型已登记。"],
     scheduler_heartbeat_stale:["主动调度心跳已中断","检查插件调度器是否异常或已停止。"],
   };

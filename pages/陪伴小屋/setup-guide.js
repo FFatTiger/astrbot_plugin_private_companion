@@ -146,8 +146,10 @@ window.CompanionSetup = (() => {
   let legacyGroupError = "";
   let legacyGroupImportNetwork = true;
   let legacyGroupImportWorldbook = true;
+  let legacyGroupImportExpressions = true;
   let legacyGroupConfirmMapping = false;
   let legacyGroupConfirmMemberIds = false;
+  let legacyGroupConfirmExpressionMapping = false;
   let legacyPersonaMappings = new Map();
   let legacyPersonaDestinationSequence = 0;
   let legacyPersonaBatchError = "";
@@ -961,7 +963,7 @@ window.CompanionSetup = (() => {
     legacyConfirmReferencePersonaMapping = legacyConfirmMemoryMapping = false;
     legacyGroupPlan = legacyGroupResult = null;
     legacyGroupError = legacyDataError = "";
-    legacyGroupConfirmMapping = legacyGroupConfirmMemberIds = false;
+    legacyGroupConfirmMapping = legacyGroupConfirmMemberIds = legacyGroupConfirmExpressionMapping = false;
   }
 
   function legacyArchiveCanApply(archive) {
@@ -1123,7 +1125,7 @@ window.CompanionSetup = (() => {
       || (destination.include_journals && Number(journals.batch_count) > 0
         && destination.confirm_persona_mapping)
       || (destination.include_expressions && expressions.remaining > 0 && destination.confirm_expression_mapping)
-      || (destination.include_private_contacts && Number(plan.private_contacts?.ready) > 0)
+      || (destination.include_private_contacts && legacyPrivateContactsReady(plan) > 0)
       || worldbookReady || (referencesReady && destination.confirm_reference_persona_mapping);
   }
 
@@ -1185,7 +1187,7 @@ window.CompanionSetup = (() => {
           ${summary ? `<div class="setup-legacy-persona-options">
             <label><input type="checkbox" data-setup-legacy-batch-option="reactions" data-persona-id="${escape(sourceId)}" data-destination-id="${escape(destination.destination_id)}" ${destination.include_reactions ? "checked" : ""} ${!reactionCount || locked ? "disabled" : ""}><span>表情 ${reactionCount} 张</span></label>
             <label><input type="checkbox" data-setup-legacy-batch-option="worldbook" data-persona-id="${escape(sourceId)}" data-destination-id="${escape(destination.destination_id)}" ${destination.include_worldbook ? "checked" : ""} ${!worldbookCount || locked ? "disabled" : ""}><span>世界书 ${worldbookCount} 条</span></label>
-            <label><input type="checkbox" data-setup-legacy-batch-option="contacts" data-persona-id="${escape(sourceId)}" data-destination-id="${escape(destination.destination_id)}" ${destination.include_private_contacts ? "checked" : ""} ${!Number(summary?.private_contacts?.ready) || locked ? "disabled" : ""}><span>旧版私聊用户 ${Number(summary?.private_contacts?.ready) || 0} 位</span></label>
+            <label><input type="checkbox" data-setup-legacy-batch-option="contacts" data-persona-id="${escape(sourceId)}" data-destination-id="${escape(destination.destination_id)}" ${destination.include_private_contacts ? "checked" : ""} ${!legacyPrivateContactsReady(summary) || locked ? "disabled" : ""}><span>私聊用户与权限（${Number(summary?.private_contacts?.ready) || 0} 位用户 · ${Number(summary?.private_contacts?.authorization?.ready) || 0} 位权限）</span></label>
             ${destination.include_worldbook && worldbook.requires_id_confirmation ? `<label><input type="checkbox" data-setup-legacy-batch-option="confirm-members" data-persona-id="${escape(sourceId)}" data-destination-id="${escape(destination.destination_id)}" ${destination.confirm_member_ids ? "checked" : ""} ${locked ? "disabled" : ""}><span>确认成员账号映射与目标平台一致</span></label>` : ""}
             <label><input type="checkbox" data-setup-legacy-batch-option="expressions" data-persona-id="${escape(sourceId)}" data-destination-id="${escape(destination.destination_id)}" ${destination.include_expressions ? "checked" : ""} ${!summary.expressions?.remaining || locked ? "disabled" : ""}><span>表达 ${Number(summary.expressions?.rule_count) || 0} 条 / 样本 ${Number(summary.expressions?.sample_count) || 0} 份</span></label>
             ${destination.include_expressions ? `<label><input type="checkbox" data-setup-legacy-batch-option="confirm-expressions" data-persona-id="${escape(sourceId)}" data-destination-id="${escape(destination.destination_id)}" ${destination.confirm_expression_mapping ? "checked" : ""} ${locked ? "disabled" : ""}><span>确认表达所属角色与私聊对象</span></label>` : ""}
@@ -1242,7 +1244,8 @@ window.CompanionSetup = (() => {
     const role = roles.find(item => item.role_id === legacyGroupRoleId) || null;
     const inventory = legacyDataPlan || legacyDataInventory;
     const persona = (inventory?.persona_sources || []).find(item =>
-      item.persona_id === legacyDataPersonaId) || null;
+      item.persona_id === legacyDataPersonaId) || (!legacyDataPersonaId
+        ? {persona_id:"", label:"主角色（companions.json）"} : null);
     const group = (inventory?.group_networks || []).find(item =>
       item.source_group_id === legacyDataGroupId) || null;
     const worldbookGroup = (inventory?.worldbook?.groups || []).find(item =>
@@ -1257,15 +1260,21 @@ window.CompanionSetup = (() => {
     const choices = legacyGroupSelection();
     const counts = legacyGroupPlan?.group_worldbook || {};
     const network = legacyGroupPlan?.source_group_network;
+    const expression = legacyGroupPlan?.group_expression || {};
+    const networkReady = Boolean(legacyGroupImportNetwork && network);
+    const worldbookReady = Boolean(legacyGroupImportWorldbook
+      && Number(counts.entries) + Number(counts.members) > 0 && !counts.conflict);
+    const expressionReady = Boolean(legacyGroupImportExpressions && expression.available
+      && Number(expression.remaining) > 0);
     const canPlan = Boolean(choices.persona && legacyDataGroupId && choices.target && choices.role && !legacyWriting());
     const canApply = Boolean(legacyGroupPlan?.plan_token && choices.role && !legacyWriting()
       && legacyGroupConfirmMapping
-      && (legacyGroupImportNetwork && network || legacyGroupImportWorldbook
-        && Number(counts.entries) + Number(counts.members) > 0 && !counts.conflict)
-      && (!legacyGroupImportNetwork && !legacyGroupImportWorldbook ? false : legacyGroupConfirmMemberIds));
+      && (networkReady || worldbookReady || expressionReady)
+      && (!(networkReady || worldbookReady) || legacyGroupConfirmMemberIds)
+      && (!expressionReady || legacyGroupConfirmExpressionMapping));
     return `<section class="setup-legacy-persona-batch setup-legacy-group-mapping">
       <h5>旧版群记录映射</h5>
-      <p>群资料需另选当前版本群目标；群内互动图和群范围资料会映射到对应当前版本群。核对平台、Bot、群号和成员 ID；个人关系账户不在此处迁移。当前支持 OneBot。</p>
+      <p>选择对应的当前群与角色，核对群号后迁入群资料和已学表达。表达只进入同号群，原审核状态会保留。</p>
       <div class="setup-legacy-persona-row">
         <strong>${escape(legacyPersonaLabel(choices.persona, "先选择可读取的旧版人格"))}</strong>
         <strong>${escape(legacyDataGroupId ? `旧版群 ${legacyDataGroupId}` : "先选择旧版群记录")}</strong>
@@ -1277,14 +1286,18 @@ window.CompanionSetup = (() => {
         <p>试算目标：${escape(legacyGroupPlan.target?.platform_id || "")} / ${escape(legacyGroupPlan.target?.account_id || "")} / 群 ${escape(legacyGroupPlan.target?.group_id || "")} · 角色 ${escape(legacyGroupPlan.target?.role_id || "")}</p>
         ${network ? `<p>旧版群成员互动图：${Number(network.member_count) || 0} 位成员 / ${Number(network.edge_count) || 0} 条互动边；超限或无效项已从导入数量中排除。</p>` : `<p>所选人格没有这条群成员互动图。</p>`}
         <p>旧版群资料：${Number(counts.entries) || 0} 条群范围知识，${Number(counts.members) || 0} 条群成员线索。${counts.conflict ? "当前版本已存在其他归属的同名来源，不能覆盖。" : counts.already_present ? "内容已存在。" : ""}</p>
+        <p>旧版群表达：${Number(expression.rule_count) || 0} 条规则、${Number(expression.sample_count) || 0} 份样本；${Number(expression.remaining) || 0} 项待导入。${legacyDataGroupId !== choices.target?.group_id ? "表达仅迁入同号群。" : "保留原审核状态。"}</p>
+        ${legacyGroupResult?.group_expression ? `<p class="setup-recorded">群表达新增 ${Number(legacyGroupResult.group_expression.created) || 0} 条，保留已迁 ${Number(legacyGroupResult.group_expression.preserved) || 0} 条；样本 ${Number(legacyGroupResult.group_expression.sample_count) || 0} 份。</p>` : ""}
         ${legacyGroupResult ? `<p class="setup-recorded">${legacyGroupResult.group_network ? `群成员互动图新增 ${Number(legacyGroupResult.group_network.members_added) || 0} 位成员、${Number(legacyGroupResult.group_network.edges_added) || 0} 条边。` : ""}${legacyGroupResult.group_worldbook ? `群资料 ${legacyGroupResult.group_worldbook.state === "unchanged" ? "已存在" : "已导入"} ${Number(legacyGroupResult.group_worldbook.entries_imported) || 0} 条知识、${Number(legacyGroupResult.group_worldbook.members_imported) || 0} 条成员线索。` : ""}</p>` : ""}
       </div>` : ""}
       <div class="setup-legacy-data-checks">
         <label><input type="checkbox" data-setup-legacy="group-import-network" ${legacyGroupImportNetwork ? "checked" : ""} ${network ? "" : "disabled"}><span>导入群成员互动图</span></label>
         <label><input type="checkbox" data-setup-legacy="group-import-worldbook" ${legacyGroupImportWorldbook ? "checked" : ""} ${Number(counts.entries) + Number(counts.members) > 0 ? "" : "disabled"}><span>导入群范围资料</span></label>
+        <label><input type="checkbox" data-setup-legacy="group-import-expressions" ${legacyGroupImportExpressions ? "checked" : ""} ${expression.available && Number(expression.remaining) > 0 ? "" : "disabled"}><span>导入旧版群表达与样本</span></label>
       </div>
       ${legacyGroupPlan ? `<label class="setup-legacy-confirm"><input type="checkbox" data-setup-legacy="group-confirm-mapping" ${legacyGroupConfirmMapping ? "checked" : ""}><span>确认旧版群 ${escape(legacyGroupPlan.source_group_id)} 对应当前版本平台 ${escape(legacyGroupPlan.target?.platform_id || "")}、账号 ${escape(legacyGroupPlan.target?.account_id || "")}、群 ${escape(legacyGroupPlan.target?.group_id || "")}</span></label>
-        ${(legacyGroupImportNetwork || legacyGroupImportWorldbook) ? `<label class="setup-legacy-confirm"><input type="checkbox" data-setup-legacy="group-confirm-member-ids" ${legacyGroupConfirmMemberIds ? "checked" : ""}><span>确认所选目标平台中的成员账号 ID 与旧版历史记录一致</span></label>` : ""}` : ""}
+        ${(networkReady || worldbookReady) ? `<label class="setup-legacy-confirm"><input type="checkbox" data-setup-legacy="group-confirm-member-ids" ${legacyGroupConfirmMemberIds ? "checked" : ""}><span>确认所选目标平台中的成员账号 ID 与旧版历史记录一致</span></label>` : ""}
+        ${expressionReady ? `<label class="setup-legacy-confirm"><input type="checkbox" data-setup-legacy="group-confirm-expression-mapping" ${legacyGroupConfirmExpressionMapping ? "checked" : ""}><span>确认旧版群表达归入所选角色及同号群，保留原审核状态</span></label>` : ""}` : ""}
       ${legacyGroupResult ? `<p>最近一次群迁移结果已记录；重复执行将按原有来源标识去重。</p>` : ""}
       <div class="setup-actions">${legacyButton("legacy-group-data-plan", legacyGroupPlan ? "重新试算群映射" : "试算群映射", {primary: !legacyGroupPlan, disabled: !canPlan})}${canApply ? legacyButton("legacy-group-data-apply", "导入所选群数据", {primary: true}) : ""}</div>
     </section>`;
@@ -1635,6 +1648,10 @@ window.CompanionSetup = (() => {
     if ("reaction_created" in result) rows.push(["表情素材", `${Number(result.reaction_created) || 0} 张`, `${Number(result.reaction_remaining) || 0} 张`]);
     if ("journal_created" in result) rows.push(["日记与梦境", `${Number(result.journal_created) || 0} 条`, `${(Number(result.journal_remaining) || 0) + (Number(result.journal_derivatives_remaining) || 0)} 条`]);
     if (result.private_contacts) rows.push(["旧版私聊用户", `${Number(result.private_contacts.created) || 0} 位`, `已存在 ${Number(result.private_contacts.already_present) || 0} 位 · 身份待识别 ${result.private_contacts.pending?.length || 0} 位`]);
+    if (result.private_contacts?.authorization) {
+      const access = result.private_contacts.authorization;
+      rows.push(["身份与私聊权限", `${Number(access.identity_restored) || 0} 位核心身份 · ${Number(access.permissions_restored) || 0} 项权限`, `保留当前设置 ${Number(access.preserved) || 0} 项 · ${Number(access.deferred) || 0} 位等待私聊接续`]);
+    }
     if (result.expressions) rows.push(["已学表达", `${Number(result.expressions.created) || 0} 条`, `保留已迁 ${Number(result.expressions.preserved) || 0} 条、样本 ${Number(result.expressions.sample_count) || 0} 份`]);
     if (result.reference_images) {
       const images = result.reference_images;
@@ -1693,6 +1710,11 @@ window.CompanionSetup = (() => {
     </div>`;
   }
 
+  function legacyPrivateContactsReady(plan) {
+    return (Number(plan?.private_contacts?.ready) || 0)
+      + (Number(plan?.private_contacts?.authorization?.ready) || 0);
+  }
+
   function legacyDataCheckMarkup() {
     const plan = legacyDataPlan;
     if (!plan) return `<p class="setup-migration-empty">${legacyDataRefreshing ? "正在刷新当前选择；上次清单保留在资料映射页。" : "尚未试算。读取资料清单后，按类型查看待导入、已存在和需映射的资料。"}</p><button type="button" class="button" data-setup-legacy-view="mapping">选择资料与映射</button>`;
@@ -1701,6 +1723,7 @@ window.CompanionSetup = (() => {
       ["表情素材", `${count(plan.reaction_assets?.batch_count)} 张`, `${count(plan.reaction_assets?.already_present)} 张`, `${count(plan.reaction_assets?.remaining_after_batch)} 张`],
       ["日记与梦境", `${count(plan.journals?.batch_count)} 条`, `${count(plan.journals?.already_present)} 个日期`, `${count(plan.journals?.remaining_after_batch)} 条`],
       ["旧版私聊用户", `${count(plan.private_contacts?.ready)} 位`, `${count(plan.private_contacts?.already_present)} 位`, `${plan.private_contacts?.pending?.length || 0} 位身份待识别`],
+      ["身份与私聊权限", `${count(plan.private_contacts?.authorization?.ready)} 位`, `${count(plan.private_contacts?.authorization?.already_present)} 位`, `${count(plan.private_contacts?.authorization?.core_users)} 位核心用户 · ${count(plan.private_contacts?.authorization?.deferred)} 位等待私聊接续`],
       ["世界知识与熟人", `${count(plan.worldbook?.available_count)} 条`, plan.worldbook?.base_entries_matches && plan.worldbook?.base_members_matches ? "已存在" : "按来源去重", `${count(plan.worldbook?.group_count)} 条群知识需映射`],
       ["已学表达", `${count(plan.expressions?.remaining)} 条`, `${count(plan.expressions?.already_present)} 条`, `${count(plan.expressions?.sample_count)} 份样本`],
       ["参考图库", `${count(plan.reference_images?.batch_count)} 张`, `${count(plan.reference_images?.already_present)} 张`, `${count(plan.reference_images?.remaining_after_batch)} 张`],
@@ -1765,7 +1788,7 @@ window.CompanionSetup = (() => {
     const count = value => Number(value) || 0;
     const rows = [];
     if (legacyImportReactions && count(plan.reaction_assets?.batch_count)) rows.push(["表情素材", `${count(plan.reaction_assets.batch_count)} 张`]);
-    if (legacyImportPrivateContacts && count(plan.private_contacts?.ready)) rows.push(["旧版私聊用户", `${count(plan.private_contacts.ready)} 位`]);
+    if (legacyImportPrivateContacts && legacyPrivateContactsReady(plan)) rows.push(["私聊用户与权限", `${count(plan.private_contacts.ready)} 位用户 · ${count(plan.private_contacts.authorization?.ready)} 位权限`]);
     if (legacyImportWorldbook && count(plan.worldbook?.available_count)) rows.push(["世界书与关系", `${count(plan.worldbook.available_count)} 条`]);
     if (legacyImportExpressions && count(plan.expressions?.remaining)) rows.push(["已学表达", `${count(plan.expressions.remaining)} 条 / 样本 ${count(plan.expressions.sample_count)} 份`]);
     if (legacyImportJournals && count(plan.journals?.batch_count)) rows.push(["日记与梦境", `${count(plan.journals.batch_count)} 条`]);
@@ -1954,7 +1977,7 @@ window.CompanionSetup = (() => {
           && legacyDataPlan.target_private_available && legacyConfirmPersonaMapping)
         || ((referencesReady || wardrobeReady) && legacyConfirmReferencePersonaMapping)
         || (legacyImportExpressions && expressionSummary.available && expressionSummary.remaining > 0 && legacyConfirmExpressionMapping)
-        || (legacyImportPrivateContacts && Number(contactSummary.ready) > 0 && legacyDataPlan.target_private_available)
+        || (legacyImportPrivateContacts && legacyPrivateContactsReady(legacyDataPlan) > 0 && legacyDataPlan.target_private_available)
         || worldbookCanApply));
     legacyDataCanApply = canApplyData;
     const dataReasons = {target_image_limit: "超过当前版本单张图片限制", unsupported_image_type: "当前版本不支持此图片格式",
@@ -2041,7 +2064,7 @@ window.CompanionSetup = (() => {
           <section class="setup-legacy-option-group"><header><strong>直接导入当前版本</strong><span>会写入当前已选目标；重复内容按来源标识去重。</span></header><div class="setup-legacy-data-checks">
             ${legacyDataChoiceMarkup("import-reactions", `表情素材（${Number(reactionSummary.batch_count) || 0} 张）`, {checked: legacyImportReactions, disabled: !Number(reactionSummary.batch_count), disabledReason: unavailableReason(reactionSummary), detail: "角色共用素材"})}
             ${legacyDataChoiceMarkup("import-group-network", "所选群成员互动图", {checked: legacyImportGroupNetwork, disabled: !(selectedNetworkGroup && inventory?.group_target_available), disabledReason: !selectedNetworkGroup ? "先选择含互动图的旧版群记录。" : "到「群资料映射」选择对应群目标。", detail: "按所选群和角色导入"})}
-            ${legacyDataChoiceMarkup("import-private-contacts", `旧版私聊用户（${Number(contactSummary.ready) || 0} 位待迁入）`, {checked: legacyImportPrivateContacts, disabled: !Number(contactSummary.ready) || !inventory?.target_private_available, disabledReason: Number(contactSummary.already_present) ? "这些用户已经迁入。" : "当前角色与账号下没有待迁入的旧版私聊用户。", detail: `手动维护 ${Number(contactSummary.maintained_count) || 0} 位；保留称呼与真实私聊往来汇总。`})}
+            ${legacyDataChoiceMarkup("import-private-contacts", `私聊用户与权限（${Number(contactSummary.ready) || 0} 位用户 · ${Number(contactSummary.authorization?.ready) || 0} 位权限待迁入）`, {checked: legacyImportPrivateContacts, disabled: !legacyPrivateContactsReady(inventory) || !inventory?.target_private_available, disabledReason: Number(contactSummary.already_present) ? "这些用户已经迁入。" : "当前角色与账号下没有待迁入的旧版私聊用户。", detail: `手动维护 ${Number(contactSummary.maintained_count) || 0} 位；保留称呼与私聊往来，并接续已确认的核心身份、私聊回复和主动联系权限。`})}
             ${legacyDataChoiceMarkup("import-worldbook", "世界书条目", {checked: legacyImportWorldbook, disabled: !worldbookImportableCount, disabledReason: unavailableReason(worldbookSummary), detail: "人物、关系和群范围知识按可映射范围导入。"})}
             ${legacyDataChoiceMarkup("import-expressions", `已学表达与样本（${Number(expressionSummary.rule_count) || 0} 条规则 / ${Number(expressionSummary.sample_count) || 0} 份样本）`, {checked: legacyImportExpressions, disabled: !expressionSummary.available || !expressionSummary.remaining, disabledReason: unavailableReason(expressionSummary), detail: `已采用 ${Number(expressionSummary.adopted_count) || 0} · 待审 ${Number(expressionSummary.pending_count) || 0} · 驳回或停用 ${Number(expressionSummary.rejected_count) || 0}；按原状态接续。`})}
             ${legacyDataChoiceMarkup("import-journals", `该人格的日记与梦境（${Number(journalSummary.batch_count) || 0} 条）`, {checked: legacyImportJournals, disabled: !Number(journalSummary.batch_count) || !privateTargetAvailable, disabledReason: !privateTargetAvailable && inventory ? "需在上方选择该角色对应的私聊目标。" : unavailableReason(journalSummary), detail: "需对应私聊目标"})}
@@ -2755,7 +2778,7 @@ window.CompanionSetup = (() => {
         confirm_expression_mapping: legacyConfirmExpressionMapping,
         confirm_persona_mapping: legacyConfirmPersonaMapping,
         import_worldbook: legacyImportWorldbook,
-        import_private_contacts: Boolean(legacyImportPrivateContacts && Number(legacyDataPlan?.private_contacts?.ready) > 0 && legacyDataPlan.target_private_available),
+        import_private_contacts: Boolean(legacyImportPrivateContacts && legacyPrivateContactsReady(legacyDataPlan) > 0 && legacyDataPlan.target_private_available),
         import_reference_images: legacyImportReferenceImages,
         import_wardrobe_items: legacyImportWardrobeItems,
         confirm_reference_persona_mapping: legacyConfirmReferencePersonaMapping,
@@ -2894,7 +2917,7 @@ window.CompanionSetup = (() => {
             import_journals: destination.include_journals && Number(journals.batch_count) > 0,
             confirm_persona_mapping: destination.confirm_persona_mapping,
             import_worldbook: Boolean(worldbookReady),
-            import_private_contacts: Boolean(destination.include_private_contacts && Number(fresh.private_contacts?.ready) > 0),
+            import_private_contacts: Boolean(destination.include_private_contacts && legacyPrivateContactsReady(fresh) > 0),
             import_reference_images: destination.include_reference_images
               && Number(references.batch_count) > 0,
             import_wardrobe_items: destination.include_wardrobe_items
@@ -2947,6 +2970,7 @@ window.CompanionSetup = (() => {
       legacyGroupError = "";
       legacyGroupConfirmMapping = false;
       legacyGroupConfirmMemberIds = false;
+      legacyGroupConfirmExpressionMapping = false;
     } else if (action === "legacy-group-data-apply") {
       const choices = legacyGroupSelection();
       if (!choices.api || !legacyGroupPlan?.plan_token) throw new Error("先完成当前版本群目标的映射试算。");
@@ -2957,6 +2981,10 @@ window.CompanionSetup = (() => {
         import_group_network: Boolean(legacyGroupImportNetwork && legacyGroupPlan.source_group_network),
         import_group_worldbook: Boolean(legacyGroupImportWorldbook
           && Number(legacyGroupPlan.group_worldbook?.entries) + Number(legacyGroupPlan.group_worldbook?.members) > 0),
+        import_group_expression: Boolean(legacyGroupImportExpressions
+          && legacyGroupPlan.group_expression?.available
+          && Number(legacyGroupPlan.group_expression?.remaining) > 0),
+        confirm_expression_mapping: legacyGroupConfirmExpressionMapping,
         confirm_member_ids: legacyGroupConfirmMemberIds,
         confirm_group_mapping: legacyGroupConfirmMapping,
         ...(legacyRootDraft.trim() ? {v1_root: legacyRootDraft.trim()} : {})});
@@ -3372,7 +3400,7 @@ window.CompanionSetup = (() => {
       legacyMemoryGroupMappings = new Map();
       legacyMemoryGroupMappingSeeded = legacyMemoryPlanDirty = legacyConfirmMemoryMapping = false;
       legacyGroupPlan = legacyGroupResult = null;
-      legacyGroupConfirmMapping = legacyGroupConfirmMemberIds = false;
+      legacyGroupConfirmMapping = legacyGroupConfirmMemberIds = legacyGroupConfirmExpressionMapping = false;
       legacyImportGroupNetwork = legacyImportJournals = legacyImportExpressions = false;
       legacyConfirmExpressionMapping = false;
     }
@@ -3524,6 +3552,7 @@ window.CompanionSetup = (() => {
       legacyGroupError = "";
       legacyGroupConfirmMapping = false;
       legacyGroupConfirmMemberIds = false;
+      legacyGroupConfirmExpressionMapping = false;
       render();
     }
     if (input?.dataset?.setupLegacy === "group-role") {
@@ -3532,6 +3561,7 @@ window.CompanionSetup = (() => {
       legacyGroupError = "";
       legacyGroupConfirmMapping = false;
       legacyGroupConfirmMemberIds = false;
+      legacyGroupConfirmExpressionMapping = false;
       render();
     }
     if (input?.dataset?.setupLegacy === "group-import-network") {
@@ -3544,12 +3574,21 @@ window.CompanionSetup = (() => {
       legacyGroupConfirmMemberIds = false;
       render();
     }
+    if (input?.dataset?.setupLegacy === "group-import-expressions") {
+      legacyGroupImportExpressions = Boolean(input.checked);
+      legacyGroupConfirmExpressionMapping = false;
+      render();
+    }
     if (input?.dataset?.setupLegacy === "group-confirm-mapping") {
       legacyGroupConfirmMapping = Boolean(input.checked);
       render();
     }
     if (input?.dataset?.setupLegacy === "group-confirm-member-ids") {
       legacyGroupConfirmMemberIds = Boolean(input.checked);
+      render();
+    }
+    if (input?.dataset?.setupLegacy === "group-confirm-expression-mapping") {
+      legacyGroupConfirmExpressionMapping = Boolean(input.checked);
       render();
     }
     if (input?.dataset?.setupLegacyBatchTarget !== undefined) {
@@ -3842,8 +3881,8 @@ window.CompanionSetup = (() => {
     legacyGroupTargetId = legacyGroupRoleId = "";
     legacyGroupPlan = legacyGroupResult = null;
     legacyGroupError = "";
-    legacyGroupImportNetwork = legacyGroupImportWorldbook = true;
-    legacyGroupConfirmMapping = legacyGroupConfirmMemberIds = false;
+    legacyGroupImportNetwork = legacyGroupImportWorldbook = legacyGroupImportExpressions = true;
+    legacyGroupConfirmMapping = legacyGroupConfirmMemberIds = legacyGroupConfirmExpressionMapping = false;
     legacyDataGroupId = "";
     legacyDataPersonaId = "";
     legacyImportReactions = true;
