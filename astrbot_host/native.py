@@ -346,7 +346,7 @@ class NativeProbeService:
         self.now = now
 
     def _streaming_report(self, settings: HostSettings, provider) -> dict[str, Any]:
-        available = type(provider) is self.native_types.provider and callable(
+        available = isinstance(provider, self.native_types.provider) and callable(
             getattr(provider, "_query_stream", None)
         )
         return {
@@ -385,7 +385,7 @@ class NativeProbeService:
             native_config = getattr(provider, "provider_config", {})
             candidate = native_config.get("id") if isinstance(native_config, dict) else None
             provider_id = candidate if isinstance(candidate, str) else ""
-            if type(provider) is self.native_types.provider:
+            if isinstance(provider, self.native_types.provider):
                 provider_hash = provider_fingerprint(provider)
         return {
             "platform_id": metadata.id,
@@ -397,7 +397,7 @@ class NativeProbeService:
             "resolved_provider_id": provider_id or None,
             "provider_type": type(provider).__module__ + "." + type(provider).__qualname__ if provider else None,
             "provider_fingerprint": provider_hash,
-            "provider_supported": type(provider) is self.native_types.provider,
+            "provider_supported": isinstance(provider, self.native_types.provider),
             "streaming": self._streaming_report(settings, provider),
             "target_ready": bool(
                 settings.account_id and settings.participant_id and settings.provider_id
@@ -454,7 +454,7 @@ class NativeProbeService:
         instruction = persona_instruction(persona)
 
         provider = self.context.get_provider_by_id(settings.provider_id)
-        if type(provider) is not self.native_types.provider:
+        if not isinstance(provider, self.native_types.provider):
             raise HostControlError("staging_provider_unsupported", "the configured provider does not use the verified AstrBot adapter")
         assemble_providers(self.context, bridge=None, native_types=self.native_types,
                            primary_id=settings.provider_id, additional=settings.additional_providers,

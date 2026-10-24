@@ -250,7 +250,7 @@ class AstrBotStagingSession:
         self.identity = PersistentIdentityDirectory(runtime)
         # These identities are stable across a restart of the same native config.
         native = context.get_provider_by_id(profile.provider_id)
-        if type(native) is not native_types.provider:
+        if not isinstance(native, native_types.provider):
             raise ValueError("staging provider is unavailable or has an unverified native type")
         binding = ProviderBinding("model.text", profile.provider_id, native_types.version,
             provider_fingerprint(native))

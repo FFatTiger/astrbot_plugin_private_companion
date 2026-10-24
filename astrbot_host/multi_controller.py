@@ -475,7 +475,7 @@ class AstrBotMultiController:
         provider_id = settings.common.provider_id
         provider = self.context.get_provider_by_id(provider_id) if provider_id else None
         model_issue = None
-        if type(provider) is not self.native_types.provider:
+        if not isinstance(provider, self.native_types.provider):
             model_issue = "host_provider_unavailable" if provider_id else "host_provider_required"
             if not allow_unavailable_model:
                 reason = ("the configured model has no verified native adapter" if provider_id
@@ -495,7 +495,7 @@ class AstrBotMultiController:
         manifest = {"binding_contract": settings.binding_contract,
                     "settings_fingerprint": settings.fingerprint,
                     "provider_fingerprint": provider_fingerprint(provider) if model_issue != "host_provider_required"
-                        and provider is not None and type(provider) is self.native_types.provider else "",
+                        and provider is not None and isinstance(provider, self.native_types.provider) else "",
                     "personas": [asdict(persona) for persona in personas]}
         manifest["fingerprint"] = digest(manifest)
         # Account/persona mappings have their own validity. Keep a pending model

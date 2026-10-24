@@ -402,7 +402,7 @@ class ModelWebAPI:
                 raise TaskError("model_catalog_unavailable", "AstrBot text provider type is unavailable")
             providers = []
             for provider in list(context.get_all_providers() or []):
-                if type(provider) is not expected_type:
+                if not isinstance(provider, expected_type):
                     continue
                 meta = provider.meta() if callable(getattr(provider, "meta", None)) else None
                 identifier = str(getattr(meta, "id", "") or getattr(provider, "id", "") or "").strip()

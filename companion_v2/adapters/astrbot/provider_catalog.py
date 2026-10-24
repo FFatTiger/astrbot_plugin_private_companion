@@ -71,9 +71,9 @@ def assemble_providers(context, *, bridge, native_types, primary_id, additional=
     candidates = []
     seen = set()
     for native in inventory:
-        if type(native) is native_types.provider:
+        if isinstance(native, native_types.provider):
             adapter_kind = "text"
-        elif native_types.video_provider_type is not None and type(native) is native_types.video_provider_type:
+        elif native_types.video_provider_type is not None and isinstance(native, native_types.video_provider_type):
             adapter_kind = "video"
         else:
             continue

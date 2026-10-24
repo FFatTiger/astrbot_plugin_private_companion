@@ -437,7 +437,7 @@ class AstrBotStagingBootstrap:
             persona_snapshot_lookup=types.persona_snapshot_lookup,
             persona_selection_lookup=types.persona_selection_lookup)
         native = self.context.get_provider_by_id(config.provider_id)
-        if type(native) is not types.provider or provider_fingerprint(native) != config.provider_fingerprint:
+        if not isinstance(native, types.provider) or provider_fingerprint(native) != config.provider_fingerprint:
             raise TaskError("staging_provider_mismatch", "configured native provider fingerprint does not match")
         provider = AstrBotTextProvider(self.context, bridge=bridge,
             binding=ProviderBinding("model.text", config.provider_id, types.version, config.provider_fingerprint),
@@ -530,7 +530,7 @@ class AstrBotStagingBootstrap:
         target = self._target(self._time())
         config = self.configuration
         native = self.context.get_provider_by_id(config.provider_id)
-        if type(native) is not self.native_types.provider or provider_fingerprint(native) != config.provider_fingerprint:
+        if not isinstance(native, self.native_types.provider) or provider_fingerprint(native) != config.provider_fingerprint:
             raise TaskError("staging_provider_mismatch", "configured native provider fingerprint does not match")
         profile = StagingProfile(target=target,
             runtime_identity=RuntimeIdentity(config.ecosystem_id, runtime_instance_id, "astrbot", config.host_id),

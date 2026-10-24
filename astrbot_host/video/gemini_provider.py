@@ -18,7 +18,7 @@ from companion_v2.model_gateway.models import Amount, LocalProvider, ProviderRes
 
 class GeminiNativeVideoProvider:
     def __init__(self, context, bridge, native_types, native, *, settings):
-        if type(native) is not native_types.video_provider_type:
+        if not isinstance(native, native_types.video_provider_type):
             raise ValueError("native video requires the verified Google GenAI provider type")
         self.context, self.bridge, self.native = context, bridge, native
         self.native_types = native_types
@@ -42,7 +42,7 @@ class GeminiNativeVideoProvider:
 
     def _current(self):
         if (self.context.get_provider_by_id(self.provider_id) is not self.native
-                or type(self.native) is not self.native_types.video_provider_type
+                or not isinstance(self.native, self.native_types.video_provider_type)
                 or self.native.get_model() != self.model
                 or provider_fingerprint(self.native) != self.fingerprint):
             raise TaskError("host_provider_changed", "native video model changed during the request")

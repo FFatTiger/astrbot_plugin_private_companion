@@ -277,7 +277,7 @@ class SetupWebAPI:
                     continue
                 name = str(getattr(meta, "name", "") or getattr(provider, "name", "") or identifier)
                 expected_type = getattr(getattr(self.controller, "native_types", None), "provider", None)
-                if expected_type is not None and type(provider) is expected_type:
+                if expected_type is not None and isinstance(provider, expected_type):
                     providers.append({"id": identifier, "name": name[:120]})
             except (AttributeError, TypeError, ValueError):
                 continue
@@ -429,7 +429,7 @@ class SetupWebAPI:
             available = {item["id"] for item in status["model"]["providers"]}
             provider = self.controller.context.get_provider_by_id(provider_id)
             expected_type = getattr(getattr(self.controller, "native_types", None), "provider", None)
-            if provider_id not in available or expected_type is None or type(provider) is not expected_type:
+            if provider_id not in available or expected_type is None or not isinstance(provider, expected_type):
                 raise TaskError("host_provider_unavailable", "choose a loaded AstrBot text provider supported by V2")
             config = self.controller.config
             if not isinstance(config, dict):

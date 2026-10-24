@@ -184,7 +184,7 @@ class AstrBotTextProvider:
             raise ValueError("input estimate ceiling is outside this adapter profile")
         self.context, self.bridge, self.binding, self.provider_id = context, bridge, binding, provider_id
         self.native = context.get_provider_by_id(provider_id)
-        if type(self.native) is not provider_type:
+        if not isinstance(self.native, provider_type):
             raise ValueError("provider needs the verified native provider class")
         self.provider_type = provider_type
         self.config = deepcopy(self.native.provider_config)
