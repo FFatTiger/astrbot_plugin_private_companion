@@ -12,6 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Check patch whitespace
+        run: git show --check --oneline HEAD
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -29,5 +33,3 @@ jobs:
         run: python -X utf8 tools/build_v2_release.py --output "$RUNNER_TEMP/companion-release"
       - name: Verify assembled archive
         run: python -X utf8 tools/verify_v2_release.py --release "$RUNNER_TEMP/companion-release" --extract-to "$RUNNER_TEMP/companion-verify"
-      - name: Check patch whitespace
-        run: git show --check --oneline HEAD
