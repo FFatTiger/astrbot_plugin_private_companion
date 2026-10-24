@@ -97,6 +97,48 @@ class ContactSchedulingTests(ContactScheduleFixture, unittest.IsolatedAsyncioTes
         self.assertEqual(diagnostic["evaluation"]["reason_code"], "automatic_contact_disabled")
         self.assertNotIn("conversation_ref", diagnostic["evaluation"])
 
+    async def test_scheduler_waits_for_a_completed_conversation_before_planning(self):
+        host, batch = await self.scheduled(automatic=True)
+        app = host.application
+        schedule = app.contact_schedule
+        with app.runtime.transaction() as connection:
+            connection.execute("UPDATE conversation_batches SET state = 'open' WHERE batch_id = ?", (batch,))
+        self.assertEqual(tuple(schedule._legacy_rows(0)), ())
+        with app.runtime.transaction() as connection:
+            connection.execute("UPDATE conversation_batches SET state = 'ready' WHERE batch_id = ?", (batch,))
+        self.assertTrue(tuple(schedule._legacy_rows(0)))
+
+    async def test_persisted_superseded_contact_is_read_as_a_wait(self):
+        host, _ = await self.scheduled(automatic=True)
+        app = host.application
+        context = self.contact_context()
+        schedule = app.contact_schedule
+        latest = schedule.latest_conversation(context)
+        schedule._note_window(context, latest, self.clock.now(), "validation", "failed",
+                              "contact_conversation_changed")
+
+        diagnostic = schedule.diagnostic_for(context, at=self.clock.now(), host_state="running")
+        self.assertEqual(diagnostic["evaluation"]["outcome"], "stale")
+        self.assertEqual(diagnostic["evaluation"]["stage"], "conversation")
+        self.assertEqual(diagnostic["evaluation"]["reason_code"], "newer_conversation_not_evaluated")
+
+    async def test_scheduler_does_not_persist_a_superseded_conversation_as_failure(self):
+        host, _ = await self.scheduled(automatic=True)
+        app = host.application
+        context = self.contact_context()
+        schedule = app.contact_schedule
+        with app.runtime.transaction() as connection:
+            connection.execute("DELETE FROM proactive_schedule_diagnostics")
+        with patch.object(schedule, "_peek", return_value=False), patch.object(
+                schedule, "_plan",
+                side_effect=TaskError("contact_conversation_changed", "a newer turn superseded this row")):
+            schedule.advance()
+
+        failed = app.runtime.read_all("""SELECT stage, outcome, reason_code FROM proactive_schedule_diagnostics
+            WHERE diagnostic_key = ? AND outcome = 'failed'""",
+            (schedule._diagnostic_key("window", context.key),))
+        self.assertEqual(tuple(failed), ())
+
     async def test_scheduler_heartbeat_coalesces_unchanged_diagnostic_writes(self):
         host, _ = await self.scheduled(automatic=False)
         app = host.application

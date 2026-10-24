@@ -210,19 +210,46 @@ class ContactSchedule:
         evaluation = {"outcome": "not_evaluated", "stage": "scheduler",
                       "reason_code": "never_evaluated", "purpose": None,
                       "observed_at": None, "next_at": None}
+        latest = self.latest_conversation(context)
+        latest_ready = self._conversation_ready(latest)
         if window is not None:
             evaluation = {"outcome": window["outcome"], "stage": window["stage"],
                           "reason_code": window["reason_code"],
                           "purpose": PURPOSES.get(window["purpose"], window["purpose"])
                           if window["purpose"] else None,
                           "observed_at": window["observed_at"], "next_at": window["next_at"]}
-            latest = self.latest_conversation(context)
-            if self._conversation_ref(latest) != window["conversation_ref"]:
+            if (self._conversation_ref(latest) != window["conversation_ref"]
+                    or not latest_ready or window["reason_code"] == "contact_conversation_changed"):
+                # 旧一轮被新一轮取代，或最新一轮仍在生成：这是一次等待，不是失败。
+                # 旧版本曾把 contact_conversation_changed 记成 validation/failed，
+                # 这里在读取时纠正，已有的失败记录也不会继续显示成红色故障。
                 evaluation.update(outcome="stale", stage="conversation",
                                   reason_code="newer_conversation_not_evaluated", purpose=None, next_at=None)
+        elif not latest_ready:
+            evaluation.update(outcome="stale", stage="conversation",
+                              reason_code="newer_conversation_not_evaluated", purpose=None, next_at=None)
         return {"scheduler": {"state": scheduler_state, "reason_code": scheduler_reason,
                                "last_seen_at": coordinator["observed_at"] if coordinator else None},
                 "evaluation": evaluation}
+
+    @staticmethod
+    def _conversation_ready(row):
+        """Return whether the selected conversation has finished generating.
+
+        Native turns expose ``generation_state``; legacy batches expose
+        ``flow_state``/``state``. An unfinished latest conversation is a wait
+        condition, not a validation failure.
+        """
+        if row is None:
+            return True
+        keys = row.keys() if hasattr(row, "keys") else ()
+        if "generation_state" in keys:
+            return row["generation_state"] == "completed"
+        if "flow_state" in keys and "state" in keys:
+            return row["flow_state"] == "complete" and row["state"] == "ready"
+        if "state" in keys:
+            return row["state"] == "ready"
+        return True
 
     def bind_context(self, context):
         """Bind the active staging target for source maintenance.
@@ -1337,6 +1364,7 @@ class ContactSchedule:
         return self.runtime.read_all("""SELECT f.sequence, b.* FROM conversation_flows f
             JOIN conversation_batches b ON b.batch_id = f.batch_id WHERE f.sequence > ?
             AND json_extract(b.context_json, '$.audience.scope.kind') = 'private'
+            AND f.state = 'complete' AND b.state = 'ready'
             AND NOT EXISTS (SELECT 1 FROM conversation_flows newer WHERE newer.route_key = f.route_key AND newer.sequence > f.sequence)
             ORDER BY f.sequence LIMIT 16""", (cursor,))
 
@@ -1383,6 +1411,7 @@ class ContactSchedule:
         from companion_v2.conversation.native_turns import project, turns_available
         native_rows = self.runtime.read_all("""SELECT n.rowid AS sequence, n.* FROM conversation_native_turns n
             WHERE n.rowid > ? AND json_extract(n.context_json, '$.audience.scope.kind') = 'private'
+            AND n.generation_state = 'completed'
             AND NOT EXISTS (SELECT 1 FROM conversation_native_turns newer
                 WHERE newer.context_key = n.context_key
                 AND (newer.observed_at > n.observed_at OR newer.observed_at = n.observed_at AND newer.rowid > n.rowid))
@@ -1405,6 +1434,10 @@ class ContactSchedule:
                     plan = self._plan(row, now)
             except TaskError as error:
                 context = TaskContext.restore(json.loads(row["context_json"]))
+                if error.code == "contact_conversation_changed":
+                    # 这一行已被更新的一轮私聊取代：不写失败诊断。读取时
+                    # diagnostic_for 会按最新会话返回「等待新会话评估」。
+                    continue
                 self._note_window(context, row, now, "validation", "failed", error.code)
                 if error.code in ("supervisor_fenced", "supervisor_generation_conflict"):
                     raise
