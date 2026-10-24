@@ -4,24 +4,23 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from astrbot_host.identity_derivation import derive_role_id
 from astrbot_host.legacy_api import LegacyMigrationWebAPI
 from companion_v2.foundation.outcome import Outcome
 
 
 class ScopePreviewTests(unittest.TestCase):
-    def api(self):
+    def api(self, role_id):
         api = LegacyMigrationWebAPI.__new__(LegacyMigrationWebAPI)
         api.controller = SimpleNamespace(
-            role_id="role-a",
-            config={"multi_host": {"personas": [{"persona_id": "astrbot", "role_id": "role-a"}]}},
+            role_id=role_id,
+            config={"multi_host": {"personas": [{"persona_id": "astrbot", "role_id": role_id}]}},
             web_api=SimpleNamespace(target_inventory=lambda: [
                 {"scope_kind": "group", "target_id": "group-109", "group_id": "109",
                  "platform_id": "qq", "account_id": "100",
-                 "roles": [{"role_id": "role-a", "legacy_group_data_api": "/api/group"}]},
+                 "roles": [{"role_id": role_id, "legacy_group_data_api": "/api/group"}]},
                 {"scope_kind": "group", "target_id": "group-915", "group_id": "915",
                  "platform_id": "qq", "account_id": "100", "roles": []},
-                {"scope_kind": "group", "target_id": "group-elsewhere", "group_id": "109",
-                 "platform_id": "qq", "account_id": "999", "roles": []},
                 {"scope_kind": "private", "target_id": "private", "roles": []},
             ]))
         return api
@@ -35,29 +34,39 @@ class ScopePreviewTests(unittest.TestCase):
                                application=SimpleNamespace(semantics=object()))
 
     def test_scope_previews_personas_groups_and_counts_without_writing(self):
-        api = self.api()
-        document = {"persona_sources": [{"persona_id": "astrbot", "state": "ready"},
-                                        {"persona_id": "old", "state": "ready"}],
-                    "group_networks": [{"source_group_id": "109", "members": 3, "edges": 2}],
-                    "private_contacts": {"importable": 2, "rejected": []}}
+        role_id = derive_role_id("100", "[%None]")
+        api = self.api(role_id)
+        documents = [
+            {"persona_sources": [{"persona_id": "astrbot", "state": "ready"},
+                                 {"persona_id": "old", "state": "ready"}],
+             "group_networks": [], "private_contacts": {"importable": 2, "rejected": []}},
+            {"group_networks": [{"source_group_id": "109", "members": 3, "edges": 2}],
+             "private_contacts": {"importable": 0}},
+            {"group_networks": [], "private_contacts": {}},
+        ]
         migration = SimpleNamespace(discover=lambda: Outcome.success(True), v1_configuration=None)
         with patch("companion_v2.legacy.data_migration.build_data_plan",
-                   return_value=SimpleNamespace(document=lambda: document)):
+                   side_effect=[SimpleNamespace(document=lambda item=item: item) for item in documents]):
             result = api._scope(migration, None, self.session())
         self.assertTrue(result.is_success)
         payload = result.unwrap()
+        self.assertEqual(payload["counts"]["personas"], 3)
+        self.assertEqual(payload["counts"]["personas_auto"], 2)
+        self.assertEqual(payload["counts"]["groups"], 1)
         self.assertEqual(payload["counts"]["groups_auto"], 1)
+        self.assertEqual(payload["groups"][0]["persona_id"], "astrbot")
         self.assertEqual(payload["groups"][0]["target_id"], "group-109")
         self.assertEqual(payload["groups"][0]["counts"]["members"], 3)
         self.assertEqual(payload["private"], {"contacts": 2, "rejected": 0})
         personas = {item["source_id"]: item for item in payload["personas"]}
+        self.assertTrue(personas[""]["auto"])
         self.assertTrue(personas["astrbot"]["auto"])
         self.assertFalse(personas["old"]["auto"])
-        self.assertEqual([item["kind"] for item in payload["review"]], ["persona"])
+        self.assertEqual([item["source_id"] for item in payload["review"]], ["old"])
         self.assertTrue(payload["token"])
 
     def test_scope_rejects_unreadable_sources_instead_of_inventing_windows(self):
-        api = self.api()
+        api = self.api("role-a")
         migration = SimpleNamespace(discover=lambda: Outcome.failed("legacy_source_missing", "gone"),
                                     v1_configuration=None)
         result = api._scope(migration, None, self.session())

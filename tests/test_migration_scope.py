@@ -93,10 +93,13 @@ class ScopeDocumentTests(unittest.TestCase):
         }
 
     def test_preview_lists_what_will_move_and_what_asks_for_review(self):
-        scope = build_scope(self.plan(), [target("109"), target("915")], {"astrbot": "role-a"},
+        scope = build_scope([("astrbot", self.plan()), ("other", {"group_networks": [], "private_contacts": {}})],
+                            [target("109"), target("915")], {"astrbot": "role-a"},
                             role_id="role-a", platform_id="qq-main", account_id="100")
-        self.assertEqual([item["source_id"] for item in scope["groups"]], ["109", "555"])
+        self.assertEqual([(item["persona_id"], item["source_id"]) for item in scope["groups"]],
+                         [("astrbot", "109"), ("astrbot", "555")])
         self.assertTrue(scope["groups"][0]["auto"])
+        self.assertEqual(scope["groups"][0]["target_id"], "group-109")
         self.assertEqual(scope["groups"][0]["counts"],
                          {"members": 397, "edges": 80, "knowledge_entries": 1, "member_profiles": 88})
         self.assertFalse(scope["groups"][1]["auto"])
@@ -109,15 +112,23 @@ class ScopeDocumentTests(unittest.TestCase):
         self.assertEqual(scope["private"], {"contacts": 3, "rejected": 1})
         self.assertEqual({item["kind"] for item in scope["review"]}, {"persona", "group"})
 
-    def test_review_token_tracks_the_reviewed_source(self):
-        first = build_scope(self.plan(), [target("109")], {"astrbot": "role-a"},
+    def test_a_persona_outside_the_role_never_makes_its_groups_automatic(self):
+        scope = build_scope([("other", self.plan())], [target("109")], {"astrbot": "role-a"},
                             role_id="role-a", platform_id="qq-main", account_id="100")
-        again = build_scope(self.plan(), [target("109")], {"astrbot": "role-a"},
+        self.assertEqual(scope["counts"]["groups_auto"], 0)
+        self.assertEqual(scope["groups"][0]["reason"], REVIEW_PERSONA_UNASSIGNED)
+        self.assertIsNone(scope["groups"][0]["target_id"])
+
+    def test_review_token_tracks_the_reviewed_source(self):
+        plans = lambda: [("astrbot", self.plan())]
+        first = build_scope(plans(), [target("109")], {"astrbot": "role-a"},
+                            role_id="role-a", platform_id="qq-main", account_id="100")
+        again = build_scope(plans(), [target("109")], {"astrbot": "role-a"},
                             role_id="role-a", platform_id="qq-main", account_id="100")
         self.assertEqual(first["token"], again["token"])
-        plan = self.plan()
-        plan["group_networks"][0]["members"] = 398
-        changed = build_scope(plan, [target("109")], {"astrbot": "role-a"},
+        changed_plans = plans()
+        changed_plans[0][1]["group_networks"][0]["members"] = 398
+        changed = build_scope(changed_plans, [target("109")], {"astrbot": "role-a"},
                               role_id="role-a", platform_id="qq-main", account_id="100")
         self.assertNotEqual(first["token"], changed["token"])
 

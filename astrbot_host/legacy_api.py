@@ -522,7 +522,7 @@ class LegacyMigrationWebAPI:
         planned = migration.discover()
         if not planned.is_success:
             return planned
-        document = build_data_plan(root, v1_configuration=migration.v1_configuration).document()
+        main_document = build_data_plan(root, v1_configuration=migration.v1_configuration).document()
         context, _service = self._data_context(session)
         scope_ref = context.scope
         platform_id, account_id = scope_ref.platform, scope_ref.account_id
@@ -542,7 +542,28 @@ class LegacyMigrationWebAPI:
             if (isinstance(row, dict) and type(row.get("persona_id")) is str and row["persona_id"]
                     and type(row.get("role_id")) is str and row["role_id"]):
                 persona_roles[row["persona_id"]] = row["role_id"]
-        return Outcome.success(build_scope(document, group_targets, persona_roles,
+        # The profile without an id still owns a role: it is the default persona
+        # of the account, derived the same way the host derives it.
+        from .identity_derivation import derive_role_id
+        try:
+            persona_roles.setdefault("", derive_role_id(account_id, "[%None]"))
+        except (TypeError, ValueError):
+            pass
+        plans = [("", main_document)]
+        seen = set()
+        for item in main_document.get("persona_sources") or ():
+            persona_id = item.get("persona_id") if isinstance(item, dict) else None
+            if (type(persona_id) is not str or not persona_id or persona_id in seen
+                    or item.get("state") != "ready"):
+                continue
+            seen.add(persona_id)
+            try:
+                document = build_data_plan(root, source_persona_id=persona_id,
+                                           v1_configuration=migration.v1_configuration).document()
+            except (OSError, ValueError, TypeError, KeyError):
+                continue
+            plans.append((persona_id, document))
+        return Outcome.success(build_scope(plans, group_targets, persona_roles,
             role_id=role_id, platform_id=platform_id, account_id=account_id))
 
     async def data_plan(self):

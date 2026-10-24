@@ -102,11 +102,13 @@ def map_personas(source_personas, persona_roles, *, role_id):
     """
     owner = _platform(role_id)
     result = []
+    mapped_roles = persona_roles or {}
     for item in source_personas or ():
         persona_id = _platform(item.get("persona_id") if isinstance(item, dict) else item)
-        if not persona_id:
+        # The main profile has no id; it is still a persona with its own role.
+        if not persona_id and "" not in mapped_roles:
             continue
-        assigned = _platform((persona_roles or {}).get(persona_id))
+        assigned = _platform(mapped_roles.get(persona_id))
         if not assigned:
             result.append(WindowMapping(persona_id, None, False, REVIEW_PERSONA_UNASSIGNED))
         elif owner and assigned != owner:
@@ -149,38 +151,64 @@ def _group_counts(plan):
     return counts
 
 
-def build_scope(plan, target_groups, persona_roles, *, role_id, platform_id, account_id):
+def build_scope(plans, target_groups, persona_roles, *, role_id, platform_id, account_id):
     """Compose the review document a role-driven migration shows before writing.
 
-    ``plan`` is the V1 data plan document (persona sources plus the per-group
-    inventories). Nothing here reads or writes storage: the page and the batch
-    importer call this same function, so what was reviewed is what gets applied.
+    ``plans`` is one ``(source_persona_id, plan_document)`` pair per V1 persona.
+    Groups are planned per persona because the importer is addressed by a
+    (persona, group) pair: merging them first would let one persona's group
+    stand in for another's. Nothing here reads or writes storage: the page and
+    the batch importer call this same function, so what was reviewed is what
+    gets applied.
     """
     from companion_v2.execution.models import digest
 
-    plan = plan or {}
-    personas = map_personas(plan.get("persona_sources") or (), persona_roles, role_id=role_id)
-    counts = _group_counts(plan)
-    groups = map_groups(list(counts), target_groups,
-                        platform_id=platform_id, account_id=account_id)
-    review = [{"kind": "persona", **item.document()}
-              for item in personas if not item.auto] + \
-             [{"kind": "group", **item.document()} for item in groups if not item.auto]
-    contacts = plan.get("private_contacts") or {}
+    entries = []
+    for item in plans or ():
+        if isinstance(item, dict):
+            persona_id, plan = item.get("persona_id"), item.get("document")
+        else:
+            persona_id, plan = item
+        persona_id = _platform(persona_id)
+        entries.append((persona_id, plan or {}))
+    personas = map_personas([{"persona_id": persona_id} for persona_id, _ in entries],
+                            persona_roles, role_id=role_id)
+    persona_by_id = {item.source_id: item for item in personas}
+    groups, review, contacts, rejected = [], [], 0, 0
+    for persona_id, plan in entries:
+        counts = _group_counts(plan)
+        mapped = map_groups(list(counts), target_groups,
+                            platform_id=platform_id, account_id=account_id)
+        owner = persona_by_id.get(persona_id)
+        for item in mapped:
+            persona_auto = bool(owner and owner.auto)
+            auto = persona_auto and item.auto
+            reason = item.reason if not item.auto else (AUTO_SAME_ID if persona_auto
+                                                        else owner.reason)
+            entry = {"persona_id": persona_id, "source_id": item.source_id,
+                     "target_id": item.target_id if auto else None, "auto": auto,
+                     "reason": reason, "counts": counts.get(item.source_id, {})}
+            groups.append(entry)
+            if not auto:
+                review.append({"kind": "group", "persona_id": persona_id, **{
+                    key: entry[key] for key in ("source_id", "target_id", "reason")}})
+        private = plan.get("private_contacts") or {}
+        contacts += int(private.get("importable") or private.get("count") or 0)
+        rejected += len(private.get("rejected") or ())
+    review = [{"kind": "persona", **item.document()} for item in personas if not item.auto] + review
     document = {
         "role_id": _platform(role_id),
         "personas": [item.document() for item in personas],
-        "groups": [{**item.document(), "counts": counts.get(item.source_id, {})} for item in groups],
-        "private": {"contacts": int(contacts.get("importable") or contacts.get("count") or 0),
-                    "rejected": len(contacts.get("rejected") or ())},
+        "groups": groups,
+        "private": {"contacts": contacts, "rejected": rejected},
         "review": review,
         "counts": {
             "personas": len(personas),
             "personas_auto": sum(1 for item in personas if item.auto),
             "groups": len(groups),
-            "groups_auto": sum(1 for item in groups if item.auto),
+            "groups_auto": sum(1 for item in groups if item["auto"]),
             "review": len(review),
         },
     }
-    document["token"] = digest(["legacy-role-scope.v1", document])
+    document["token"] = digest(["legacy-role-scope.v2", document])
     return document
