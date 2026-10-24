@@ -1,4 +1,4 @@
-import unittest
+﻿import unittest
 
 from companion_v2.legacy.migration_scope import (
     AUTO_SAME_ID, REVIEW_ACCOUNT_DIFFERS, REVIEW_AMBIGUOUS, REVIEW_GROUP_MISSING,
@@ -85,11 +85,11 @@ class ScopeDocumentTests(unittest.TestCase):
         return {
             "persona_sources": [{"persona_id": "astrbot", "label": "默认人格", "state": "ready"},
                                 {"persona_id": "other", "label": "旧人格", "state": "ready"}],
-            "group_networks": [{"source_group_id": "109", "members": 397, "edges": 80},
+            "group_networks": [{"source_group_id": "109", "member_count": 397, "edge_count": 80},
                                {"source_group_id": "555", "members": 283, "edges": 80}],
             "worldbook": {"groups": [{"source_group_id": "109", "entry_count": 1}],
                           "member_profile_groups": [{"source_group_id": "109", "member_count": 88}]},
-            "private_contacts": {"importable": 3, "rejected": [{"reason": "x"}]},
+            "private_contacts": {"total": 3, "rejected": [{"reason": "x"}]},
         }
 
     def test_preview_lists_what_will_move_and_what_asks_for_review(self):
@@ -127,7 +127,7 @@ class ScopeDocumentTests(unittest.TestCase):
                             role_id="role-a", platform_id="qq-main", account_id="100")
         self.assertEqual(first["token"], again["token"])
         changed_plans = plans()
-        changed_plans[0][1]["group_networks"][0]["members"] = 398
+        changed_plans[0][1]["group_networks"][0]["member_count"] = 398
         changed = build_scope(changed_plans, [target("109")], {"astrbot": "role-a"},
                               role_id="role-a", platform_id="qq-main", account_id="100")
         self.assertNotEqual(first["token"], changed["token"])

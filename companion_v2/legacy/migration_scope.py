@@ -134,8 +134,8 @@ def _group_counts(plan):
         record = entry(item.get("source_group_id"))
         if record is None:
             continue
-        record["members"] = max(record["members"], int(item.get("members") or 0))
-        record["edges"] = max(record["edges"], int(item.get("edges") or 0))
+        record["members"] = max(record["members"], int(item.get("member_count") or item.get("members") or 0))
+        record["edges"] = max(record["edges"], int(item.get("edge_count") or item.get("edges") or 0))
     worldbook = (plan or {}).get("worldbook") or {}
     for item in worldbook.get("groups") or ():
         if isinstance(item, dict):
@@ -193,7 +193,7 @@ def build_scope(plans, target_groups, persona_roles, *, role_id, platform_id, ac
                 review.append({"kind": "group", "persona_id": persona_id, **{
                     key: entry[key] for key in ("source_id", "target_id", "reason")}})
         private = plan.get("private_contacts") or {}
-        contacts += int(private.get("importable") or private.get("count") or 0)
+        contacts += int(private.get("importable") or private.get("total") or private.get("count") or 0)
         rejected += len(private.get("rejected") or ())
     review = [{"kind": "persona", **item.document()} for item in personas if not item.auto] + review
     document = {
