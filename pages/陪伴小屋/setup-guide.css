@@ -1315,3 +1315,70 @@
 @media (prefers-reduced-motion: reduce) {
   .setup-migration-workspace * { transition: none !important; }
 }
+
+/* ── 一键迁移：先看清范围，再一键执行 ───────────────────────────── */
+.setup-oneclick { display:grid; gap:var(--sp-3); padding:var(--sp-4); border:1px solid var(--line);
+  border-radius:var(--r-sm); background:linear-gradient(180deg, var(--surface) 0%, var(--surface-soft) 100%); }
+.setup-oneclick-head { display:flex; align-items:flex-start; justify-content:space-between; gap:var(--sp-3); }
+.setup-oneclick-head h5 { margin:0 0 var(--sp-1); font-size:var(--fs-title); color:var(--ink); }
+.setup-oneclick-head p { margin:0; max-width:60ch; color:var(--muted); font-size:var(--fs-body); line-height:1.6; }
+.setup-oneclick-state { flex:0 0 auto; padding:var(--sp-1) var(--sp-2); border-radius:999px; border:1px solid var(--line);
+  font-size:var(--fs-micro); color:var(--muted); background:var(--surface); transition:background .2s ease, color .2s ease; }
+.setup-oneclick-state.is-ready { color:var(--accent); border-color:color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.setup-oneclick-state.is-running { color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.setup-oneclick-state.is-done { color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, var(--surface)); }
+.setup-oneclick-state.is-error { color:var(--danger); border-color:color-mix(in srgb, var(--danger) 35%, var(--line)); }
+.setup-oneclick-progress { position:relative; height:4px; overflow:hidden; border-radius:999px; background:var(--surface-soft); }
+.setup-oneclick-progress span { position:absolute; inset:0 auto 0 0; width:36%; border-radius:999px; background:var(--accent);
+  animation:setup-oneclick-run 1.1s ease-in-out infinite; }
+@keyframes setup-oneclick-run { 0% { transform:translateX(-100%); } 100% { transform:translateX(320%); } }
+.setup-oneclick-stats { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:var(--sp-2); }
+.setup-oneclick-stat { display:grid; gap:0; padding:var(--sp-3); border:1px solid var(--line); border-radius:var(--r-xs); background:var(--surface); }
+.setup-oneclick-stat strong { font-size:calc(var(--fs-title) * 1.35); line-height:1.1; color:var(--ink); font-variant-numeric:tabular-nums; }
+.setup-oneclick-stat span { color:var(--ink); font-size:var(--fs-body); }
+.setup-oneclick-stat small { color:var(--muted); font-size:var(--fs-micro); }
+.setup-oneclick-columns { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:var(--sp-3); }
+.setup-oneclick-column { min-width:0; border:1px solid var(--line); border-radius:var(--r-xs); background:var(--surface); overflow:hidden; }
+.setup-oneclick-column h6 { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-2); margin:0; padding:var(--sp-2) var(--sp-3);
+  font-size:var(--fs-micro); color:var(--muted); background:var(--surface-soft); border-bottom:1px solid var(--line); }
+.setup-oneclick-column.is-auto h6 { color:var(--accent); }
+.setup-oneclick-column ul { list-style:none; margin:0; padding:0; max-height:260px; overflow:auto; }
+.setup-oneclick-column li { display:grid; grid-template-columns:auto minmax(0, 1fr); align-items:center; gap:var(--sp-2);
+  padding:var(--sp-2) var(--sp-3); border-bottom:1px solid var(--line); font-size:var(--fs-body); color:var(--ink); }
+.setup-oneclick-column li:last-child { border-bottom:0; }
+.setup-oneclick-column li small { grid-column:2; color:var(--muted); font-size:var(--fs-micro); }
+.setup-oneclick-column li.is-auto { border-left:2px solid var(--accent); }
+.setup-oneclick-column li.is-review { border-left:2px solid color-mix(in srgb, var(--danger) 55%, var(--line)); }
+.setup-oneclick-column li.is-empty { grid-template-columns:1fr; color:var(--muted); font-size:var(--fs-micro); border-left:0; }
+.setup-oneclick-chip { padding:0 var(--sp-2); border-radius:999px; font-style:normal; font-size:var(--fs-micro); white-space:nowrap; }
+.setup-oneclick-chip.is-auto { color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent); }
+.setup-oneclick-chip.is-review { color:var(--danger); background:color-mix(in srgb, var(--danger) 10%, transparent); }
+.setup-oneclick-chip.is-error { color:var(--danger); background:color-mix(in srgb, var(--danger) 16%, transparent); }
+.setup-oneclick-empty, .setup-oneclick-notice { margin:0; padding:var(--sp-3); border:1px dashed var(--line); border-radius:var(--r-xs);
+  color:var(--muted); font-size:var(--fs-body); }
+.setup-oneclick-notice.is-error { color:var(--danger); border-style:solid; }
+.setup-oneclick-result { display:grid; gap:var(--sp-2); }
+.setup-oneclick-result > strong { font-size:var(--fs-micro); color:var(--muted); }
+.setup-oneclick-result ul { list-style:none; margin:0; padding:0; display:grid; gap:0; }
+.setup-oneclick-result li { display:grid; grid-template-columns:auto minmax(0, 1fr); align-items:center; gap:var(--sp-2);
+  padding:var(--sp-2) var(--sp-3); border-radius:var(--r-xs); background:var(--surface); font-size:var(--fs-body);
+  animation:setup-oneclick-rise .28s ease both; }
+.setup-oneclick-result li:nth-child(2) { animation-delay:.05s; }
+.setup-oneclick-result li:nth-child(3) { animation-delay:.1s; }
+.setup-oneclick-result li:nth-child(4) { animation-delay:.15s; }
+.setup-oneclick-result li small { grid-column:2; color:var(--muted); font-size:var(--fs-micro); }
+@keyframes setup-oneclick-rise { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+.setup-oneclick-actions { display:flex; flex-wrap:wrap; gap:var(--sp-2); justify-content:flex-end; }
+.setup-oneclick-actions .button { transition:transform .15s ease, box-shadow .15s ease; }
+.setup-oneclick-actions .button:not(:disabled):hover { transform:translateY(-1px); }
+.setup-oneclick-actions .button:not(:disabled):active { transform:translateY(0); }
+.setup-oneclick-actions .button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+@media (max-width: 720px) {
+  .setup-oneclick-stats { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  .setup-oneclick-columns { grid-template-columns:1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .setup-oneclick-progress span, .setup-oneclick-result li { animation:none; }
+  .setup-oneclick-actions .button { transition:none; }
+  .setup-oneclick-actions .button:not(:disabled):hover { transform:none; }
+}

@@ -976,24 +976,47 @@ window.CompanionSetup = (() => {
   function renderLegacyOneClick() {
     const scope = legacyScope, result = legacyBatchResult;
     const counts = scope?.counts || {};
-    const review = scope?.review || [];
-    const badge = auto => auto ? `<em class="setup-legacy-auto">自动</em>` : `<em class="setup-legacy-review">需确认</em>`;
-    const rows = [].concat(
-      (scope?.personas || []).map(item => `<li>${badge(item.auto)}人格 ${escape(item.source_id || "主角色")}${item.auto ? "" : " · " + escape(legacyScopeReason(item.reason))}</li>`),
-      (scope?.groups || []).map(item => `<li>${badge(item.auto)}群 ${escape(item.source_id)}${item.auto ? "" : " · " + escape(legacyScopeReason(item.reason))}</li>`)).slice(0, 40);
-    const resultLines = (result?.items || []).map(item => `<li>${item.state === "imported" ? "已导入" : item.state === "review" ? "需确认" : "失败"} · ${item.kind === "group" ? "群 " + escape(item.group_id) : "人格 " + escape(item.persona_id || "主角色")}${item.reason ? " · " + escape(legacyScopeReason(item.reason)) : ""}</li>`);
-    return `<div class="setup-legacy-oneclick">
-      <h5>一键迁移</h5>
-      <p>先按当前角色读取范围：同平台、同账号、同号的窗口自动归入；其余只列出来等你确认，不会被自动写入。</p>
-      <div class="setup-legacy-persona-row">
-        <button type="button" class="button" data-setup-legacy-run="scope" ${legacyScopeBusy || legacyWriting() ? "disabled" : ""}>${legacyScopeBusy ? "正在读取…" : scope ? "重新读取范围" : "读取迁移范围"}</button>
-        <button type="button" class="button primary" data-setup-legacy-run="batch" ${!scope || legacyBatchBusy || legacyWriting() || !(counts.personas_auto || counts.groups_auto) ? "disabled" : ""}>${legacyBatchBusy ? "正在迁移…" : "开始迁移"}</button>
-      </div>
-      ${scope ? `<p>将处理 ${Number(counts.personas_auto) || 0} 个人格、${Number(counts.groups_auto) || 0} 个群；私聊联系人 ${Number(scope.private?.contacts) || 0} 位；需确认 ${Number(counts.review) || 0} 项。</p>` : ""}
-      ${result?.error ? `<p class="setup-migration-error">${escape(result.error)}</p>` : ""}
-      ${rows.length ? `<ul class="setup-legacy-scope-list">${rows.join("")}</ul>` : ""}
-      ${review.length ? `<p class="setup-migration-hint">需确认的原因：${escape(legacyScopeReason(review[0].reason))}${review.length > 1 ? ` 等 ${review.length} 项` : ""}</p>` : ""}
-      ${result?.items ? `<div class="setup-legacy-batch-result"><strong>本次结果</strong><ul>${resultLines.join("")}</ul>${result.memory_database_skipped ? `<p class="setup-migration-hint">记忆库未迁移：需要先在上方「记忆身份映射」核对归属。</p>` : ""}</div>` : ""}
+    const busy = legacyScopeBusy || legacyBatchBusy;
+    const state = legacyBatchBusy ? ["is-running", "正在迁移"]
+      : legacyScopeBusy ? ["is-running", "正在读取"]
+        : result?.error ? ["is-error", "需要处理"]
+          : result?.items ? ["is-done", result.counts?.failed ? "部分完成" : "已完成"]
+            : scope ? ["is-ready", "范围已读取"] : ["is-idle", "尚未读取"];
+    const stat = (value, label, note) => `<div class="setup-oneclick-stat"><strong>${Number(value) || 0}</strong><span>${label}</span>${note ? `<small>${note}</small>` : ""}</div>`;
+    const chip = (kind, text) => `<em class="setup-oneclick-chip ${kind}">${text}</em>`;
+    const personaRows = (scope?.personas || []).map(item => `<li class="${item.auto ? "is-auto" : "is-review"}">${chip(item.auto ? "is-auto" : "is-review", item.auto ? "自动" : "需确认")}<span>人格 ${escape(item.source_id || "主角色")}</span>${item.auto ? "" : `<small>${escape(legacyScopeReason(item.reason))}</small>`}</li>`);
+    const groupRows = (scope?.groups || []).map(item => `<li class="${item.auto ? "is-auto" : "is-review"}">${chip(item.auto ? "is-auto" : "is-review", item.auto ? "自动" : "需确认")}<span>群 ${escape(item.source_id)}</span><small>${Number(item.counts?.members) || 0} 位成员 · ${Number(item.counts?.edges) || 0} 条关系边 · ${Number(item.counts?.knowledge_entries) || 0} 条知识${item.auto ? "" : " · " + escape(legacyScopeReason(item.reason))}</small></li>`);
+    const resultRows = (result?.items || []).map(item => {
+      const kind = item.state === "imported" ? ["is-auto", "已导入"] : item.state === "review" ? ["is-review", "需确认"] : ["is-error", "失败"];
+      const label = item.kind === "group" ? `群 ${escape(item.group_id)}` : `人格 ${escape(item.persona_id || "主角色")}`;
+      return `<li class="${kind[0]}">${chip(kind[0], kind[1])}<span>${label}</span>${item.reason ? `<small>${escape(legacyScopeReason(item.reason))}</small>` : ""}</li>`;
+    });
+    const autoEmpty = scope && !(scope.personas || []).some(item => item.auto) && !(scope.groups || []).some(item => item.auto);
+    return `<div class="setup-oneclick ${busy ? "is-busy" : ""}">
+      <header class="setup-oneclick-head">
+        <div>
+          <h5>一键迁移</h5>
+          <p>按当前角色读取旧版范围：同平台、同账号、同号的窗口自动归入；对不上的只列出来等你确认，不会被自动写入。</p>
+        </div>
+        <span class="setup-oneclick-state ${state[0]}">${state[1]}</span>
+      </header>
+      ${busy ? `<div class="setup-oneclick-progress" role="progressbar" aria-label="正在处理"><span></span></div>` : ""}
+      ${scope ? `<div class="setup-oneclick-stats">
+        ${stat(counts.personas_auto, "人格自动", `共 ${Number(counts.personas) || 0} 个`)}
+        ${stat(counts.groups_auto, "群自动", `共 ${Number(counts.groups) || 0} 个`)}
+        ${stat(scope.private?.contacts, "私聊联系人", "按账号自动对应")}
+        ${stat(counts.review, "待确认", counts.review ? "不会自动执行" : "没有遗留")}
+      </div>` : ""}
+      ${result?.error ? `<p class="setup-oneclick-notice is-error">${escape(result.error)}</p>` : ""}
+      ${scope ? `<div class="setup-oneclick-columns">
+        <section class="setup-oneclick-column is-auto"><h6>自动归入 <span>${Number(counts.personas_auto) + Number(counts.groups_auto)}</span></h6><ul>${[...personaRows, ...groupRows].filter(row => row.includes("is-auto")).join("") || `<li class="is-empty">没有可自动迁移的窗口</li>`}</ul></section>
+        <section class="setup-oneclick-column is-review"><h6>需要确认 <span>${Number(counts.review) || 0}</span></h6><ul>${[...personaRows, ...groupRows].filter(row => row.includes("is-review")).join("") || `<li class="is-empty">没有需要确认的窗口</li>`}</ul></section>
+      </div>` : `<p class="setup-oneclick-empty">还没有读取迁移范围。点「读取迁移范围」，先看清哪些会自动迁移、哪些需要你决定。</p>`}
+      ${result?.items ? `<div class="setup-oneclick-result"><strong>本次结果</strong><ul>${resultRows.join("")}</ul>${result.memory_database_skipped ? `<p class="setup-oneclick-notice">记忆库未迁移：需要先在上方「记忆身份映射」核对归属。</p>` : ""}</div>` : ""}
+      <footer class="setup-oneclick-actions">
+        <button type="button" class="button" data-setup-legacy-run="scope" ${busy || legacyWriting() ? "disabled" : ""}>${legacyScopeBusy ? "正在读取…" : scope ? "重新读取范围" : "读取迁移范围"}</button>
+        <button type="button" class="button primary" data-setup-legacy-run="batch" ${!scope || busy || legacyWriting() || autoEmpty ? "disabled" : ""}>${legacyBatchBusy ? "正在迁移…" : "开始迁移"}</button>
+      </footer>
     </div>`;
   }
 
