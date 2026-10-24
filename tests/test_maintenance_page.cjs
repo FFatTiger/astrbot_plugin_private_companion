@@ -1456,8 +1456,8 @@ test('proactive diagnostic localizes exhausted attempt budget and identifies the
     voice: {providers: []}, image: {actions: []}, model: {tasks: [], providers: []},
     posts: {'/setup/proactive-diagnostic': {state: 'failed', purpose: 'care', purpose_label: '情绪关怀',
       stage: 'attempt_budget', code: 'contact_attempt_budget',
-      failure_title: '旧版本的主动模型调用次数上限已触发',
-      suggestion: '当前版本已取消该独立上限。',
+      failure_title: '主动模型调用次数上限已触发',
+      suggestion: '该上限已不再单独限制；现在只按窗口每日实际联系额度限制发送。',
       error: 'contact model-call allowance is exhausted', stages: [
         {stage: 'authorization', state: 'passed'}, {stage: 'settings', state: 'passed'},
         {stage: 'purpose', state: 'passed'}, {stage: 'trusted_candidate', state: 'passed'},
@@ -1469,10 +1469,11 @@ test('proactive diagnostic localizes exhausted attempt budget and identifies the
   root.click('[data-proactive-test]');
   root.click('[data-proactive-confirm]');
   await flush();
-  assert.match(root.innerHTML, /测试未通过 · 旧版本的主动模型调用次数上限已触发/);
-  assert.match(root.innerHTML, /当前版本已取消该独立上限/);
+  assert.match(root.innerHTML, /测试未通过 · 主动模型调用次数上限已触发/);
+  assert.match(root.innerHTML, /该上限已不再单独限制/);
   assert.doesNotMatch(root.innerHTML, /模型决策调用额度已用 12 \/ 12/);
-  assert.match(root.innerHTML, /旧版本模型调用次数上限<\/span><strong>失败/);
+  assert.match(root.innerHTML, /模型调用次数上限<\/span><strong>失败/);
+  assert.doesNotMatch(root.innerHTML, /旧版本的主动模型调用/, 'diagnostics must not label the record as old-version data');
   assert.match(root.innerHTML, /展开技术详情/);
   page.unmount();
 });

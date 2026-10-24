@@ -1336,7 +1336,7 @@ window.CompanionContactPage = (() => {
     settings:"主动联系设置", purpose:"联系目的", trusted_candidate:"联系机会/来源", contact_admission:"主动联系准入",
     news_fetch:"真实资讯抓取", weather_fetch:"真实天气获取", screen_capture:"本次真实截图", screen_interpretation:"本次视觉分析",
     mobile_location_fetch:"手机地点读取", image_attachment:"主动图片素材与投递",
-    attempt_budget:"旧版本的主动模型调用上限",
+    attempt_budget:"主动模型调用次数上限",
     delivery_budget:"本窗口今日实际联系额度",
     model_route:"主动联系模型路由", model_generation:"模型生成", persona_review:"人格复核",
     delivery:"平台投递", receipt:"投递回执", execution:"端到端执行",

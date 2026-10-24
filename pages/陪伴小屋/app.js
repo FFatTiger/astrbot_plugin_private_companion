@@ -445,7 +445,7 @@ async function probeHost(){
   void window.CompanionSetup?.promptUpgradeAtStartup?.(async upgrade=>{
     await window.CompanionSetup.continueUpgrade(upgrade);
   }).catch(error=>{
-    toast(error?.message||'旧版配置接续失败，请在「开始使用」页查看状态后重试。');
+    toast(error?.message||'配置接续失败，请在「开始使用」页查看状态后重试。');
     navigate('manage','setup');
   });
 }
@@ -3708,7 +3708,7 @@ function renderConfigEditors(){
     knowledge:{sectionIds:['import','inject'],presentation:'journal',navigationLimit:0}
   }));
   if($('#memberClueWorkspace'))configEditorMounts.push(mountConfigEditor('memberClueWorkspace',['knowledge'],{
-    knowledge:{sectionIds:['members'],title:'群聊成员线索',note:'按账号读取 V1 学习关系网的人物描述、相处边界与重要印象；群范围资料只用于对应群。'}
+    knowledge:{sectionIds:['members'],title:'群聊成员线索',note:'按账号读取群成员的人物描述、相处边界与重要印象；群范围资料只用于对应群。'}
   }));
   if($('#roleProfileConfigWorkspace')){
     roleProfileConfigMount=mountConfigEditor('roleProfileConfigWorkspace',['role_profile'],{
@@ -3921,7 +3921,7 @@ function renderIdentityFeelingsPage(){
 const identitySettingsSpecs={
   person:{title:'用户默认资料',intro:'新用户会从这里继承默认资料；已经登记的用户仍以用户详情里的资料为准。',id:'identityPersonSettingsWorkspace',kinds:['person']},
   'private-access':{title:'私聊用户权限',intro:'这里只设置新私聊用户的默认准入。已有用户的单独权限仍在用户详情中调整。',id:'identityPrivateAccessSettingsWorkspace',kinds:['private_access']},
-  'group-clues':{title:'群成员线索',intro:'为群聊提供已登记成员的线索，辅助理解发言来源，不自动确认身份或授予权限。',id:'identityMemberClueSettingsWorkspace',kinds:['knowledge'],views:{knowledge:{sectionIds:['members'],title:'群聊成员线索',note:'按账号读取 V1 学习关系网的人物描述、相处边界与重要印象；群范围资料只用于对应群。'}}},
+  'group-clues':{title:'群成员线索',intro:'为群聊提供已登记成员的线索，辅助理解发言来源，不自动确认身份或授予权限。',id:'identityMemberClueSettingsWorkspace',kinds:['knowledge'],views:{knowledge:{sectionIds:['members'],title:'群聊成员线索',note:'按账号读取群成员的人物描述、相处边界与重要印象；群范围资料只用于对应群。'}}},
 };
 function identitySettingsTarget(kind,field='',section=''){
   const spec=identitySettingsSpecs[kind];

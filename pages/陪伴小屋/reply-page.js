@@ -257,7 +257,7 @@ window.CompanionReplyPage = (() => {
       file_understanding_enabled: "开启后读取当前窗口允许格式的正文；附件正文不会写入长期存储。",
       file_understanding_private_enabled: "角色级权限，适用于该角色绑定的所有私聊窗口。关闭后不读取私聊附件正文。",
       file_understanding_group_enabled: "角色级权限，适用于该角色绑定的所有群聊窗口。关闭后不读取群聊附件正文。",
-      file_understanding_formats: "旧版兼容项；请使用下方格式类别多选。",
+      file_understanding_formats: "兼容项；请使用下方格式类别多选。",
       file_understanding_format_groups: "可多选。文本包括 .txt、.md、.csv、.json、.log、.py、.js、.ts、.yaml、.yml、.xml、.html、.ini、.toml、.sql；另支持 PDF、DOCX、XLSX、PPTX 的文字提取。扫描件不做 OCR。",
       file_understanding_max_size_mb: "超过大小限制的文件会标记为未读取。",
       file_understanding_max_chars: "所有附件共用本轮正文预算；超出部分会标记为部分正文。",

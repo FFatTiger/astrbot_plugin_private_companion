@@ -1972,7 +1972,7 @@ window.CompanionMaintenancePage = (() => {
       authorization_expired: "当前 Dashboard 身份的管理授权已过期",
       authorization_not_active: "当前 Dashboard 身份的管理授权尚未生效",
       setup_binding_confirmation_required: "核心管理员窗口尚未绑定确认",
-      contact_attempt_budget: "旧版本的主动模型调用次数上限已触发",
+      contact_attempt_budget: "主动模型调用次数上限已触发",
       contact_delivery_budget: "本私聊今日实际联系额度已用完",
       contact_permission_required: "主动联系授权未通过",
       contact_purpose_paused: "所选联系目的当前已暂停",
@@ -1995,7 +1995,7 @@ window.CompanionMaintenancePage = (() => {
       authorization_expired: "这项管理授权已经过期；请由仍有核心权限的管理员重新授权后再测。",
       authorization_not_active: "这项管理授权尚未生效；刷新状态或等待授权生效后再测。",
       setup_binding_confirmation_required: "用户页的“管理员权限”决定谁是核心管理员；“开始使用”里的私聊窗口确认决定消息投递到哪扇可信窗口，两者是独立前置条件。本次失败表示窗口确认缺失：回到开始使用确认同一私聊窗口；若用户页仍显示未开启，再把目标成员设为核心用户并保存。",
-      contact_attempt_budget: "这条记录来自旧版本的模型调用次数上限；当前版本已取消该独立上限，仅按每日实际联系额度限制发送。",
+      contact_attempt_budget: "这条记录来自早先的模型调用次数上限；现在仅按每日实际联系额度限制发送。",
       contact_delivery_budget: "本私聊今日实际联系额度已用完；已确认发送计联系，待回执发送暂时占位，明确未发送后释放。",
       contact_diagnostic_source_required: "关系表达类不要求固定关键词，但需要已完成的私聊窗口；事件类需要所选生产器的当前有效来源。没有可测试机会时不会调用模型。",
     };
@@ -2007,7 +2007,7 @@ window.CompanionMaintenancePage = (() => {
         ? '模型把握度 ' + confidence.toFixed(2) + ' 低于沉默阈值 ' + threshold.toFixed(2)
         : result?.judge_reason && skipReason === "persona_review" ? result.judge_reason : "";
     const stageNames = {authorization: "Dashboard 身份与核心权限", settings: "主动联系授权", purpose: "目的开关", execution: "端到端执行",
-      trusted_candidate: "测试机会", contact_admission: "主动联系准入", attempt_budget: "旧版本模型调用次数上限",
+      trusted_candidate: "测试机会", contact_admission: "主动联系准入", attempt_budget: "模型调用次数上限",
       delivery_budget: "本窗口每日实际联系额度", model_route: "主动联系模型任务", model_generation: "模型生成",
       persona_review: "人格复核", delivery: "消息投递"};
     const stageStates = {passed: "通过", failed: "失败", pending: "处理中", skipped: "未执行",

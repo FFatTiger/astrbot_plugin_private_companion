@@ -720,7 +720,7 @@ window.CompanionConfigEditors = (() => {
         platform_names: "保留原来的平台转写文字；逐个平台的对应称呼在上方填写。",
         world_adaptation_mode: "自动参考世界设定，也可以指定现代、幻想、科幻、自定义规则或关闭转写。",
         world_adaptation: "说明日程、资料柜、屏幕和外部平台如何用设定内说法自然表达；现代日常角色可留空。",
-        main_companion_subject: "对应 V1 的 owner 身份。只从当前角色已绑定的私聊对象中选择；AstrBot 管理员身份不会自动成为 owner。",
+        main_companion_subject: "对应角色的 owner 身份。只从当前角色已绑定的私聊对象中选择；AstrBot 管理员身份不会自动成为 owner。",
         expression_private_source_mode: "决定哪些私聊可作为表达学习来源；每段关系自己的学习开关、授权和素材撤回仍然有效。",
         expression_private_source_subject_ids: "仅在来源设为“指定对象”时使用。只会读取目录中属于当前角色的私聊关系。",
         expression_private_application_mode: "决定哪些私聊可以使用本角色在获准来源关系中学到的规则。群聊仍只使用本群规则。",

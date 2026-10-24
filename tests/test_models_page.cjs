@@ -708,7 +708,7 @@ test('image page separates generation and editing model queues and saves paramet
   assert.match(node.innerHTML, /<legend>连接<\/legend>/);
   assert.match(node.innerHTML, /<legend>工作流<\/legend>/);
   assert.match(node.innerHTML, /已绑定 · 1 个节点/);
-  assert.match(node.innerHTML, /旧版工作流与网络选项/);
+  assert.match(node.innerHTML, /工作流与网络选项/);
   assert.match(node.innerHTML, /old-text\.json/);
   assert.match(node.innerHTML, /data-img-config-json="sd\.generate"/);
   assert.doesNotMatch(node.innerHTML, /data-img-view="mask_edit"/,

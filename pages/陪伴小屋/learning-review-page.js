@@ -124,7 +124,7 @@ window.CompanionLearningReviewPage = (() => {
         <span>记录归属 · ${e(current._source.label)}</span><strong>${e(title(current))}</strong></header>
         ${body?`<section class="lh-review-observation"><small>${current._type==="growth"?"申报进展":current._type==="style"?"观察":"建议"}</small><p>${e(body)}</p></section>`:""}
         ${current._type==="style"&&current.dimension?`<p class="lh-review-meta">${e(DIMENSION[current.dimension]||current.dimension)} · ${(Number(current.confidence||0)*100).toFixed(0)}%</p>`:""}
-        ${current._type==="style"&&current.source_kind==="legacy_expression"?`<p class="lh-review-meta">旧版学习成果</p>`:""}${current._type==="style"&&current.source_kind==="shared_pack"?`<p class="lh-review-meta">分享包 · ${e(current.source_title||"导入规则")}</p>`:""}
+        ${current._type==="style"&&current.source_kind==="shared_pack"?`<p class="lh-review-meta">分享包 · ${e(current.source_title||"导入规则")}</p>`:""}
         ${current._type==="style"&&(current.positive_feedback||current.negative_feedback)?`<p class="lh-review-meta">明确反馈 · 认可 ${e(current.positive_feedback||0)} / 不喜欢 ${e(current.negative_feedback||0)}</p>`:""}
         ${current._type==="style"&&current.review_reason?`<p class="lh-review-feedback-reason">${e(current.review_reason)}</p>`:""}
         ${current.unavailable_reason?`<p class="lh-review-unavailable">依据已不可读取，只能驳回。</p>`:""}

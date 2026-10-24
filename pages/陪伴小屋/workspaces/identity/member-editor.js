@@ -102,7 +102,7 @@
   // 渲染顺序就是视觉顺序：核心在最上，逐级向下收窄。
   const tierOrder = ["core", "important", "standard"];
   // 名字来源：后端 directory_display_name 回传的 basis，用于说明这一行名字是怎么来的。
-  const nameBasisLabels = {administrator: "管理员备注", platform: "平台昵称", legacy: "旧版称呼", account: "账号回退"};
+  const nameBasisLabels = {administrator: "管理员备注", platform: "平台昵称", legacy: "已保存称呼", account: "账号回退"};
   const nameBasisOf = person => person.name_basis || (person.admin_nickname ? "administrator"
     : person.display_name && person.display_name !== person.native_account_id ? "platform" : "account");
   const tierHelp = {standard: "普通用户，没有管理员权限。", important: "重要用户，可用普通功能；管理操作仍需核心身份。",
@@ -867,7 +867,7 @@
     candidate_queued: ["候选已进入后台执行", "若没有发出，请查看任务执行和投递回执诊断。"],
     contact_model_unregistered: ["主动联系模型任务尚未登记", "检查模型路由配置并重启插件。"],
     background_capacity_exhausted: ["后台执行槽位暂时占满", "等待现有后台任务结束后会继续评估。"],
-    contact_attempt_budget: ["旧版本的模型调用次数上限已触发", "当前版本已取消该独立上限，请查看窗口每日实际联系额度。"],
+    contact_attempt_budget: ["模型调用次数上限已触发", "请查看窗口每日实际联系额度。"],
     delivery_history_unavailable: ["当前私聊历史无法完成核验", "检查 AstrBot 会话历史是否可读取后再重新评估。"],
     contact_conversation_changed: ["私聊已变化，待发送计划已取消", "等待当前私聊完成后重新评估。"],
     scheduler_heartbeat_missing: ["尚未收到主动调度心跳", "确认插件已启动且主动联系模型已登记。"],

@@ -1286,7 +1286,7 @@ window.CompanionModelsPage = (() => {
     const legacyLabels = {sdgen: "SDGen", tool_call: "自定义工具", nai: "NovelAI", anima_master: "Anima Master"};
     const legacyLabel = legacyLabels[config.legacy_backend];
     const migrationBanner = legacyLabel && !config.enabled && !routes.length
-      ? `<div class="model-img-migration" role="status"><strong>旧版 ${legacyLabel} 方式待接入</strong><span>旧配置已保留。请在下方添加可用模型并补齐连接，再启用生图后端。</span></div>`
+      ? `<div class="model-img-migration" role="status"><strong>${legacyLabel} 方式待接入</strong><span>原配置已保留。请在下方添加可用模型并补齐连接，再启用生图后端。</span></div>`
       : "";
     return `<section class="model-img-route-editor" aria-label="生图模型与优先级">
       ${migrationBanner}
@@ -1294,7 +1294,7 @@ window.CompanionModelsPage = (() => {
       <div class="model-img-main"><div class="model-img-sectionhead"><div><b>当前功能的模型顺序</b><span>数字越小越先尝试 · 使用上下移按钮调整优先级</span></div><span class="model-tag">${routes.length} 个模型</span></div>
         <div class="model-img-routes">${routes.map((route, index) => imageRouteCard(i, route, index, config)).join("") || '<div class="model-img-empty">此功能尚未配置模型。添加在线图片模型或本地后端后，调用会按此列表顺序尝试。</div>'}</div>
         <div class="model-img-addbar"><label><span>添加已配置模型</span><select data-img-route-choice aria-label="选择要加入当前功能的模型"${locked || !choices.length ? " disabled" : ""}><option value="">选择模型或后端</option>${choices.map(([value, label]) => `<option value="${esc(value)}">${esc(label)}</option>`).join("")}</select></label><button type="button" class="button small" data-img-route-add${locked || !choices.length ? " disabled" : ""}>添加</button><button type="button" class="button small primary" data-img-model-add${locked || config.endpoints.length >= (i.config.limits?.max_endpoints || 24) ? " disabled" : ""}>新增在线模型</button></div>
-        <details class="model-img-advanced"><summary>旧版工作流与网络选项</summary>${legacySummary}<div class="model-img-route-grid"><label class="model-img-field"><span>图片下载代理</span><input type="url" data-img-config-field="network.download_proxy" value="" placeholder="${config.network?.download_proxy_set ? "已保存 · 留空保留" : "可选，例如 http://127.0.0.1:7890"}"${locked ? " disabled" : ""}><small>留空保留已保存代理</small></label><label class="model-img-field model-img-inline"><span>继承环境代理</span><input type="checkbox" data-img-config-field="network.use_environment_proxy"${config.network?.use_environment_proxy ? " checked" : ""}${locked ? " disabled" : ""}></label>${config.network?.download_proxy_set ? `<label class="model-img-field model-img-inline"><span>代理</span><span><input type="checkbox" data-img-config-field="network.clear_download_proxy"${config.network?.clear_download_proxy ? " checked" : ""}${locked ? " disabled" : ""}>清除已保存代理</span></label>` : ""}</div>${config.legacy_backend ? `<p class="model-note">旧版生图方式：${esc(config.legacy_backend)}</p>` : ""}${Object.keys(legacyOptions).length ? `<details class="model-img-workflow model-img-legacy-raw"><summary><span>查看旧版兼容参数</span></summary><pre>${esc(JSON.stringify(legacyOptions, null, 2))}</pre></details>` : ""}</details>
+        <details class="model-img-advanced"><summary>工作流与网络选项</summary>${legacySummary}<div class="model-img-route-grid"><label class="model-img-field"><span>图片下载代理</span><input type="url" data-img-config-field="network.download_proxy" value="" placeholder="${config.network?.download_proxy_set ? "已保存 · 留空保留" : "可选，例如 http://127.0.0.1:7890"}"${locked ? " disabled" : ""}><small>留空保留已保存代理</small></label><label class="model-img-field model-img-inline"><span>继承环境代理</span><input type="checkbox" data-img-config-field="network.use_environment_proxy"${config.network?.use_environment_proxy ? " checked" : ""}${locked ? " disabled" : ""}></label>${config.network?.download_proxy_set ? `<label class="model-img-field model-img-inline"><span>代理</span><span><input type="checkbox" data-img-config-field="network.clear_download_proxy"${config.network?.clear_download_proxy ? " checked" : ""}${locked ? " disabled" : ""}>清除已保存代理</span></label>` : ""}</div>${config.legacy_backend ? `<p class="model-note">已保存的生图方式：${esc(config.legacy_backend)}</p>` : ""}${Object.keys(legacyOptions).length ? `<details class="model-img-workflow model-img-legacy-raw"><summary><span>查看兼容参数</span></summary><pre>${esc(JSON.stringify(legacyOptions, null, 2))}</pre></details>` : ""}</details>
         <div class="model-img-savebar"><span role="status" class="${i.configBad ? "is-error" : ""}">${esc(i.configNotice || (dirty ? "有未保存的改动" : "已保存"))}</span><div><button type="button" class="button small" data-img-config-refresh${locked || dirty ? " disabled" : ""}>重新读取</button><button type="button" class="button small primary" data-img-config-save${locked || !dirty ? " disabled" : ""}>${i.configSaving ? "保存中…" : "保存模型配置"}</button></div></div>
         <p class="model-note">普通改图与蒙版局部改图共用此模型顺序；不支持当前操作的模型会跳过。密钥留空保留原值。测试会发送真实文生图请求，可能产生费用；结果只显示状态，不会发到聊天。</p>${imageSchemaBlock(i, i.configDraft)}</div></section>`;
   }
@@ -1995,7 +1995,7 @@ window.CompanionModelsPage = (() => {
       comfyui:'ComfyUI', sd_webui:'SD WebUI', network:'下载网络', download_proxy:'下载代理',
       clear_download_proxy:'清除已保存代理', use_environment_proxy:'使用系统代理',
       parameters:'生图参数', operation_routes:'调用顺序', generate:'文生图', edit:'改图',
-      mask_edit:'蒙版局部改图', workflows:'工作流', legacy_options:'旧版兼容参数'};
+      mask_edit:'蒙版局部改图', workflows:'工作流', legacy_options:'兼容参数'};
     const compare = (base, draft, prefix) => {
       for (const name of new Set([...Object.keys(base || {}), ...Object.keys(draft || {})])) {
         if (same(base?.[name], draft?.[name])) continue;
@@ -2016,7 +2016,7 @@ window.CompanionModelsPage = (() => {
     }
     const textLabels = {'sd.generate':'SD WebUI · 文生图高级参数', 'sd.edit':'SD WebUI · 改图高级参数',
       'comfy.generate':'ComfyUI · 文生图工作流', 'comfy.edit':'ComfyUI · 改图工作流',
-      'comfy.mask_edit':'ComfyUI · 蒙版局部改图工作流', 'legacy.options':'旧版兼容参数'};
+      'comfy.mask_edit':'ComfyUI · 蒙版局部改图工作流', 'legacy.options':'兼容参数'};
     for (const name of new Set([...Object.keys(i.configTextBase || {}), ...Object.keys(i.configText || {})])) {
       if (same(i.configTextBase?.[name], i.configText?.[name])) continue;
       const endpoint = name.startsWith('headers.') && [...after, ...before].find(item => item.id === name.slice(8));
