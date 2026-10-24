@@ -266,7 +266,13 @@ class ObjectAccessPolicy:
                 and scope.kind is ScopeKind.PRIVATE
             ) else None
             private_owner_feature = route is not None and route.user == actor.subject
-            if tier is AuthorizationTier.STANDARD and not private_owner_feature:
+            from .grants import PERSON_PERMISSION_GRANT_PREFIX
+            explicit_private_decision = scope.kind is ScopeKind.PRIVATE and action in (
+                "conversation.reply", "proactive.contact") and any(
+                    grant.scope == scope and grant.capability == action
+                    and grant.grant_id.startswith(PERSON_PERMISSION_GRANT_PREFIX)
+                    for grant in self.identity.grants_for_subject(actor.subject))
+            if explicit_private_decision or tier is AuthorizationTier.STANDARD and not private_owner_feature:
                 granted = self.identity.authorize(actor, scope=scope, capability=action, observed_at=observed_at)
                 if not granted.is_success:
                     return Outcome(failure=granted.failure)

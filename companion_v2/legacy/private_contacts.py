@@ -4,13 +4,14 @@ import hashlib
 import json
 
 from .private_memory import moment
+from .private_authorization import private_authorization, merge_authorization
 
 
 SOURCE_ID = "private.core_profiles.users"
 GENERIC_NAMES = frozenset(("用户", "主人", "主要用户", "默认用户", "临时会话"))
 
 
-def private_contacts(payload):
+def private_contacts(payload, *, v1_configuration=None):
     users = payload.get("users", {})
     if not isinstance(users, dict):
         return (), ({"reason": "users_invalid"},)
@@ -51,7 +52,8 @@ def private_contacts(payload):
         last_seen = moment(user.get("last_private_inbound_at"))
         item = {"source_id": SOURCE_ID, "platform": platform, "account_id": account,
             "native_account_id": participant, "nickname": nickname, "maintained": maintained,
-            "message_count": count, "last_seen": last_seen or None}
+            "message_count": count, "last_seen": last_seen or None,
+            "authorization": private_authorization(key, user, v1_configuration)}
         identity = platform, account, participant
         previous = found.get(identity)
         if previous is not None:
@@ -60,6 +62,7 @@ def private_contacts(payload):
             item["message_count"] = max(count, previous["message_count"])
             item["maintained"] |= previous["maintained"]
             item["nickname"] = previous["nickname"] or nickname
+            item["authorization"] = merge_authorization(previous["authorization"], item["authorization"])
         found[identity] = item
     items = []
     for identity in sorted(found):

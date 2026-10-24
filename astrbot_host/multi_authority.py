@@ -299,6 +299,8 @@ class MultiAuthority:
                         self.identities.issue_grant(grant_id=self.grant_id(scope, capability), subject=actor.subject,
                             scope=scope, capability=capability, tier=AuthorizationTier.STANDARD, valid_from=at,
                             expected_revision=self.identities.revision)
+            from companion_v2.identity_policy.legacy_import import apply_pending_private_authorization
+            apply_pending_private_authorization(self.runtime, actor, scope, role.subject_id, self.now())
             self.write(self.context_key(target, role.subject_id), scope.document())
             template = self.settings.template_for(target)
             if template is not None and template.target_id != target.target_id:

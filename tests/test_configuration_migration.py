@@ -464,6 +464,17 @@ class BehaviorConfigurationMigrationTests(unittest.TestCase):
             "expression.learning.group_daily_batch_limit": 6,
             "expression.learning.group_new_messages": 20})
 
+    def test_expression_capacity_preserves_approved_and_pending_room(self):
+        source = "memory_habit_config.max_learned_expression_items"
+        for previous in (60, 240):
+            result = self.convert({"memory_habit_config": {"max_learned_expression_items": previous}})
+            self.assertEqual(result.changes["expression.learning.active_signal_limit"], previous * 2)
+            self.assertEqual([item.kind for item in result.differences if item.source_key == source],
+                             ["partial_mapping"],
+                             "a hand-mapped capacity must not also be reported as an unmapped setting")
+        audit = next(item for item in configuration_audit_sources() if item["source"] == source)
+        self.assertEqual(audit["target"], "expression.learning.active_signal_limit")
+
     def test_selected_group_learning_is_never_expanded_to_all_groups(self):
         for mode, enabled in (("selected", False), ("disabled", False), ("all", True)):
             with self.subTest(mode=mode):

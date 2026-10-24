@@ -1672,7 +1672,7 @@ def build_data_plan(v1_root: str | Path, *, source_persona_id="", v1_configurati
     member_profiles, member_profile_rejected = _member_profiles(profile)
     profile_data = _profile_data(profile)
     from .private_contacts import private_contacts
-    contacts, contact_rejected = private_contacts(profile_data)
+    contacts, contact_rejected = private_contacts(profile_data, v1_configuration=v1_configuration)
     from .expression_data import expression_profiles
     learned_expressions = expression_profiles(profile_data, source_persona_id)
     reference_images, reference_image_rejected = _reference_assets(

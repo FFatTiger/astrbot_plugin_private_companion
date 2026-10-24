@@ -803,6 +803,9 @@ class LegacyMigrationWebAPI:
                                       wardrobe_slots_available=wardrobe_slots_available)
         from companion_v2.memory.person.legacy_import import contact_plan
         contact_state = contact_plan(self.controller.runtime, context, data_plan.private_contacts)
+        from companion_v2.identity_policy.legacy_import import authorization_plan
+        contact_state["authorization"] = authorization_plan(
+            self.controller.runtime, context, data_plan.private_contacts, self.controller.now())
         document["private_contacts"] = {**contact_state, "rejected": list(data_plan.private_contact_rejected)}
         document["archive"] = archive_plan.document()
         expression_state = self._expression_state(data_plan, context, source_group_id)
@@ -1235,6 +1238,9 @@ class LegacyMigrationWebAPI:
         expression_state = self._expression_state(data_plan, context, source_group_id)
         from companion_v2.memory.person.legacy_import import contact_plan, import_contacts
         contact_state = contact_plan(self.controller.runtime, context, data_plan.private_contacts)
+        from companion_v2.identity_policy.legacy_import import authorization_plan, import_authorizations
+        contact_state["authorization"] = authorization_plan(
+            self.controller.runtime, context, data_plan.private_contacts, self.controller.now())
         if plan_token != self._data_plan_token(data_plan, context, service, source_group_id,
                                                source_persona_id, existing_ids, existing_heads,
                                                worldbook_state, archive_plan.inventory_fingerprint,
@@ -1456,6 +1462,11 @@ class LegacyMigrationWebAPI:
 
         contact_result = import_contacts(self.controller.runtime, context, data_plan.private_contacts,
             self.controller.now()) if import_private_contacts else None
+        if contact_result is not None:
+            authorization = import_authorizations(self.controller.runtime, context,
+                data_plan.private_contacts, self.controller.now())
+            contact_result["authorization"] = authorization
+            contact_result["permissions_restored"] = bool(authorization["permissions_restored"])
 
         refreshed_ids = self._reaction_ids(service, owner)
         remaining = sum(1 for item in data_plan.reaction_assets if item.sha256 not in refreshed_ids)

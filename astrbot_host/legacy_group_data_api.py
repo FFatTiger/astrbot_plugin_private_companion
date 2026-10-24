@@ -54,6 +54,7 @@ class LegacyGroupDataWebAPI:
         allowed = {"v1_root", "source_persona_id", "source_group_id"}
         if body:
             allowed.update({"plan_token", "import_group_network", "import_group_worldbook",
+                            "import_group_expression", "confirm_expression_mapping",
                             "confirm_member_ids", "confirm_group_mapping"})
             if not {"plan_token", "source_persona_id", "source_group_id", "import_group_network",
                     "import_group_worldbook", "confirm_member_ids", "confirm_group_mapping"}.issubset(query):
@@ -72,12 +73,17 @@ class LegacyGroupDataWebAPI:
         if body and (type(query.get("plan_token")) is not str or not query["plan_token"]
                 or any(type(query.get(name)) is not bool for name in (
                     "import_group_network", "import_group_worldbook", "confirm_member_ids",
-                    "confirm_group_mapping"))):
+                    "confirm_group_mapping"))
+                or any(name in query and type(query[name]) is not bool for name in (
+                    "import_group_expression", "confirm_expression_mapping"))):
             raise ValueError("group migration confirmation is invalid")
         root = query.get("v1_root")
         if root is not None and (type(root) is not str or not root.strip()):
             raise ValueError("V1 data path is invalid")
-        return {**query, "v1_root": root}
+        return {**query, "v1_root": root,
+                **({"import_group_expression": query.get("import_group_expression", False),
+                    "confirm_expression_mapping": query.get("confirm_expression_mapping", False)}
+                   if body else {})}
 
     def _scope_context(self, target):
         scope = ScopeRef(self.controller.runtime.installation_id, target.platform_id, ScopeKind.GROUP,
@@ -102,10 +108,14 @@ class LegacyGroupDataWebAPI:
                          if item["source_group_id"] == source_group_id), None)
         groups = data.document().get("worldbook", {}).get("groups", [])
         member_groups = data.document().get("worldbook", {}).get("member_profile_groups", [])
-        if selected is None and not any(item.get("source_group_id") == source_group_id
-                                        for item in (*groups, *member_groups)):
-            raise TaskError("legacy_group_not_found", "the selected V1 persona has no records for this group")
+        from companion_v2.legacy.expression_data import selected_profile
+        from companion_v2.expression.legacy_import import preview as expression_preview
         context = self._scope_context(target)
+        expression_profile = selected_profile(data.expression_profiles, context, source_group_id)
+        expression = expression_preview(self.controller.runtime, expression_profile, context)
+        if selected is None and not any(item.get("source_group_id") == source_group_id
+                                        for item in (*groups, *member_groups)) and not expression["available"]:
+            raise TaskError("legacy_group_not_found", "the selected V1 persona has no records for this group")
         from companion_v2.relationships.group_network import metadata_key, route_owner_key
         owner_key = route_owner_key(context.scope.installation_id, target.platform_id,
                                     target.bot_id, target.account_id, target.group_id, self.role_id)
@@ -129,6 +139,7 @@ class LegacyGroupDataWebAPI:
             "source_group_id": source_group_id, "target": [target.target_id, target.platform_id,
                 target.account_id, target.bot_id, target.group_id, self.role_id],
             "graph_fingerprint": graph_fingerprint,
+            "expression": expression.get("token"),
             "worldbook": [existing.revision if existing else 0, existing.digest if existing else "",
                           worldbook_digest],
         }
@@ -139,6 +150,7 @@ class LegacyGroupDataWebAPI:
         return {"plan_token": token, "source_fingerprint": data.source_fingerprint,
             "source_persona_id": source_persona_id, "source_group_id": source_group_id,
             "source_group_network": selected_doc,
+            "group_expression": expression,
             "target": {"target_id": target.target_id, "platform_id": target.platform_id,
                 "account_id": target.account_id, "bot_id": target.bot_id,
                 "group_id": target.group_id, "role_id": self.role_id},
@@ -188,9 +200,10 @@ class LegacyGroupDataWebAPI:
                 if arguments["plan_token"] != plan["plan_token"]:
                     return outcome_response(Outcome.failed("legacy_plan_stale",
                         "V1 source or V2 group target changed after preview; preview again."))
-                if not arguments["import_group_network"] and not arguments["import_group_worldbook"]:
+                if (not arguments["import_group_network"] and not arguments["import_group_worldbook"]
+                        and not arguments["import_group_expression"]):
                     return outcome_response(Outcome.failed("legacy_nothing_to_import",
-                        "select a group relationship network or group knowledge source."))
+                        "select group relationships, knowledge or expression."))
                 if arguments["confirm_group_mapping"] is not True:
                     return outcome_response(Outcome.failed("legacy_group_mapping_confirmation_required",
                         "confirm that this V1 group ID maps to the selected V2 platform, account and group."))
@@ -198,6 +211,11 @@ class LegacyGroupDataWebAPI:
                         arguments["import_group_network"] or arguments["import_group_worldbook"]):
                     return outcome_response(Outcome.failed("legacy_member_mapping_confirmation_required",
                         "confirm that member account IDs match within the selected V2 platform."))
+                if arguments["import_group_expression"] and (
+                        not plan["group_expression"]["available"]
+                        or arguments["confirm_expression_mapping"] is not True):
+                    return outcome_response(Outcome.failed("legacy_expression_mapping_confirmation_required",
+                        "confirm the same group and role for the imported expression rules."))
 
                 data = build_data_plan(root, source_persona_id=arguments["source_persona_id"])
                 selected = next((item for item in data.group_networks
@@ -228,6 +246,7 @@ class LegacyGroupDataWebAPI:
                             "the selected V2 group already has a knowledge source with another owner."))
                 network_result = None
                 worldbook_result = None
+                expression_result = None
                 # Both destinations share the V2 SQLite runtime. Compose their
                 # repository writes so a failure cannot leave a partial mapping.
                 with controller.runtime.transaction():
@@ -287,10 +306,19 @@ class LegacyGroupDataWebAPI:
                             "members_imported": len(group_members),
                             "state": "unchanged" if current and current.active and current.digest == fingerprint
                                 else "imported"}
+                    if arguments["import_group_expression"]:
+                        from companion_v2.legacy.expression_data import selected_profile
+                        from companion_v2.expression.legacy_import import import_profile
+                        context = self._scope_context(target)
+                        profile = selected_profile(current_data.expression_profiles, context,
+                                                   arguments["source_group_id"])
+                        expression_result = import_profile(controller.runtime, profile, context,
+                            controller.now(), expected_token=current_plan["group_expression"]["token"])
                 return outcome_response(Outcome.success({"source_persona_id": arguments["source_persona_id"],
                     "source_group_id": arguments["source_group_id"], "target_id": target.target_id,
                     "role_id": self.role_id, "group_network": network_result,
-                    "group_worldbook": worldbook_result, "idempotent": True}))
+                    "group_worldbook": worldbook_result, "group_expression": expression_result,
+                    "idempotent": True}))
             except TaskError as error:
                 return outcome_response(Outcome.failed(error.code, str(error)))
             except (ValueError, TypeError, KeyError, OSError, UnicodeError):

@@ -189,6 +189,9 @@ def automatically_handled_configuration_sources() -> frozenset[str]:
     from .image_configuration_migration import IMAGE_CONFIGURATION_SOURCES
     sources.update(IMAGE_CONFIGURATION_SOURCES)
     sources.add("voice_action_config.tts_frequency_control_mode")
+    # Hand-mapped by behavior_configuration (old per-list capacity ×2); the
+    # audit ledger must not also report it as an unmapped setting.
+    sources.add("memory_habit_config.max_learned_expression_items")
     sources.update(("model_assignment_config.model_replacement_rules",
         "model_assignment_config.model_replacement_scope",
         "model_assignment_config.enable_sensitive_model_replacement",

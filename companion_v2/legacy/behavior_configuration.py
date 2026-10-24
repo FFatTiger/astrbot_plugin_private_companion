@@ -23,6 +23,7 @@ SPECIAL_SOURCES = frozenset({
     "message_debounce_config.context_image_caption_max_items",
     "proactive_reach_config.proactive_share_priority",
     "daily_creative_config.creative_share_probability",
+    "memory_habit_config.max_learned_expression_items",
 })
 _QUIET = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*$")
 _UNREPRESENTED = {
@@ -70,6 +71,21 @@ def append_behavior_configuration(config, registry, candidates, differences):
     for source, (target, kind, message) in _UNREPRESENTED.items():
         if _source_value(config, source)[0]:
             note(source, target, kind, message)
+
+    source = "memory_habit_config.max_learned_expression_items"
+    present, raw = _source_value(config, source)
+    if present:
+        target = "expression.learning.active_signal_limit"
+        try:
+            limit = _number(raw, integer=True)
+            if not 12 <= limit <= 240:
+                raise ValueError()
+            # The old approved and pending lists each had their own bound.
+            add(source, target, limit * 2)
+            note(source, target, "partial_mapping",
+                 "旧已学与待审列表各自的容量，合并为新版待审与启用规则总容量；拒绝和停用记录继续保留。")
+        except (TypeError, ValueError, OverflowError):
+            note(source, target, "invalid_value", "旧表达资料容量不在有效范围内。")
 
     source = "message_debounce_config.context_image_caption_max_items"
     present, raw = _source_value(config, source)

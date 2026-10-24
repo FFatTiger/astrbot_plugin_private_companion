@@ -5944,10 +5944,10 @@
       "source": "memory_habit_config.max_learned_expression_items",
       "source_type": "int",
       "resolved_kind": "registry",
-      "target": "expression.learning.sample_limit",
+      "target": "expression.learning.active_signal_limit",
       "verdict": "not-migrated-by-design",
       "confidence": "medium",
-      "summary": "无每来源保留上限：expression_style_signals 只 INSERT/UPDATE、无裁剪或删除（companion_v2/expression/expression_style_schema.py:22-45 建表与索引；全域 DELETE FROM expression_style_signals 零命中），单批与窗口由 expression.learning.sample_limit(4-64) 与 window_hours(1-720) 约束（companion_v2/expression/configuration.py:25,37、companion_v2/expression/style_evidence.py:160-179），注入侧由 rules_per_turn/payload_chars 约束；驳回与退休记录按设计保留以维持可审计（companion_v2/expression/style_management.py:1-8）"
+      "summary": "旧版每个私聊或群聊来源的已学与待审上限，由行为配置迁移合并为新版待审 + 启用规则总容量（旧值 ×2 写入 expression.learning.active_signal_limit，上限 480）；拒绝与停用记录继续保留以维持可审计。单批样本与时间窗口仍由 sample_limit 与 window_hours 约束，注入侧由 rules_per_turn/payload_chars 约束。"
     },
     {
       "source": "memory_habit_config.expression_private_learning_source_mode",
