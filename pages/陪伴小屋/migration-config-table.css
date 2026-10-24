@@ -26,6 +26,7 @@
 .migration-config-group small { color:var(--muted); font-size:var(--fs-micro); font-weight:400; }
 .migration-config-group th > div > span { display:flex; flex-wrap:wrap; gap:var(--sp-1); margin-left:auto; }
 .migration-config-field > strong { display:block; font-weight:600; }
+.migration-config-field .migration-config-key { display:block; margin-top:2px; color:var(--muted); font-size:var(--fs-micro); font-weight:400; word-break:break-all; }
 .migration-config-field small { display:block; margin-top:3px; color:var(--muted); font-size:var(--fs-micro); font-weight:400; line-height:1.45; }
 .migration-config-diff { display:flex; align-items:baseline; flex-wrap:wrap; gap:var(--sp-1); min-width:0; font-variant-numeric:tabular-nums; }
 .migration-config-diff .old { color:var(--muted); }

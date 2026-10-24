@@ -10,6 +10,34 @@ window.CompanionMigrationConfiguration = (() => {
   ];
   let plan = null, rows = [], decisions = new Map(), filter = "all", query = "", page = 1;
   const PAGE_SIZE = 40;
+  // Every settings page publishes its own field names; the review table must
+  // borrow all of them, not just the generic editor, or the operator only sees
+  // dotted internal paths for whole sections.
+  const LABEL_SOURCES = ["CompanionConfigEditors", "CompanionReplyPage", "CompanionHostOptionsPage",
+    "CompanionStateMaintenance", "CompanionMemorySettingsSection", "CompanionNativePerceptionPage"];
+  function labelIndex() {
+    const index = new Map();
+    for (const name of LABEL_SOURCES) {
+      let entries = [];
+      try { entries = window[name]?.searchEntries?.() || []; } catch (error) { entries = []; }
+      for (const entry of entries) {
+        if (!entry || !entry.field) continue;
+        const key = `${entry.group}.${entry.field}`;
+        if (!index.has(key)) index.set(key, entry);
+      }
+    }
+    return index;
+  }
+  // Generic editors publish groups relative to their domain (a `busy_gate`
+  // group under `conversation.*`), so fall back to dropping leading namespaces.
+  function describeField(index, field) {
+    const parts = String(field || "").split(".");
+    for (let start = 0; start < parts.length - 1; start += 1) {
+      const entry = index.get(parts.slice(start).join("."));
+      if (entry && entry.label && entry.label !== entry.field) return entry;
+    }
+    return null;
+  }
   const supported = () => plan?.configuration_review?.version === 1;
   const groupFor = field => /^(proactive|role\.state|life|weather|calendar|humanized_state|life_schedule|proactive_message)/.test(field)
     ? "life" : /^(memory|semantic|role\.expression|relationship|knowledge|expression|emotion_relationship)/.test(field)
@@ -36,10 +64,9 @@ window.CompanionMigrationConfiguration = (() => {
     const same = plan?.plan_token && next?.plan_token === plan.plan_token;
     plan = next;
     if (!same) { decisions = new Map(); filter = "all"; query = ""; page = 1; }
-    const labels = new Map((window.CompanionConfigEditors?.searchEntries?.() || [])
-      .map(item => [`${item.group}.${item.field}`, item]));
+    const labels = labelIndex();
     rows = (supported() ? plan.configuration_review.rows || [] : []).map(item => {
-      const label = labels.get(item.field);
+      const label = describeField(labels, item.field);
       const reviewed = item.audit ? window.CompanionMigrationConfigReview?.describe(item) : null;
       const noteOutcome = !item.selection_id && !["already_present", "preserved_v2", "already_represented", "host_managed", "mode_preserved"].includes(item.kind)
         ? ["changed_semantics", "partial_mapping", "limit_changed", "mapped_to_custom", "source_precedence", "alias_shadowed"].includes(item.kind)
@@ -48,6 +75,8 @@ window.CompanionMigrationConfiguration = (() => {
       const status = !reviewed ? item.status : reviewed.outcome === "settings" ? "manual"
         : ["retained", "inapplicable"].includes(reviewed.outcome) ? "archive" : "keep";
       return {...item, status, outcome: reviewed?.outcome || noteOutcome, editor: reviewed?.editor, label: name, group: groupFor(item.field),
+        key: name === item.field ? "" : item.field,
+        help: String(label?.help || "").replace(/\bV1\b/g, "旧版").replace(/\bV2\b/g, "7.0.0"),
         oldText: item.before === undefined ? "—" : display(item.before),
         currentText: reviewed && !item.current_known ? "未自动接续" : item.current_known ? display(item.after) : "—",
         note: String(reviewed?.summary || item.note || "").replace(/\bV1\b/g, "旧版").replace(/\bV2\b/g, "7.0.0")};
@@ -129,7 +158,7 @@ window.CompanionMigrationConfiguration = (() => {
       if (!items.length) return "";
       const hasChoices = items.some(row => row.selection_id && row.status !== "confirm");
       return `<tr class="migration-config-group"><th colspan="4" scope="colgroup"><div><strong>${group.title}</strong><small>${group.note}</small>${hasChoices ? `<span>${[["merge", "全部沿用旧版"], ["keep", "全部保留当前"]].map(([choice, label]) => `<button type="button" class="migration-config-mini" data-migration-config-action="bulk" data-group="${group.id}" data-choice="${choice}" ${locked ? "disabled" : ""}>${label}</button>`).join("")}</span>` : ""}</div></th></tr>`
-        + items.map(row => `<tr><th scope="row" class="migration-config-field"><strong>${esc(row.label)}</strong>${row.note ? `<small>${esc(row.note)}</small>` : ""}</th>
+        + items.map(row => `<tr><th scope="row" class="migration-config-field"><strong>${esc(row.label)}</strong>${row.key ? `<code class="migration-config-key">${esc(row.key)}</code>` : ""}${row.help ? `<small>${esc(row.help)}</small>` : ""}${row.note ? `<small>${esc(row.note)}</small>` : ""}</th>
           <td data-label="旧版 → 当前"><div class="migration-config-diff"><span class="old">${esc(row.oldText)}</span><span class="arrow" aria-label="到">→</span><strong>${esc(row.currentText)}</strong></div></td>
           <td data-label="状态">${badge(row)}</td><td data-label="处理方式">${controls(row, locked)}</td></tr>`).join("");
     }).join("");

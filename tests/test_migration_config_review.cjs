@@ -7,6 +7,12 @@ const source = fs.readFileSync(path.resolve(__dirname, '../pages/陪伴小屋/mi
 function review(rows) {
   const sandbox = {window: {CompanionConfigEditors: {searchEntries: () => [
     {group: 'proactive.contact', field: 'enabled', label: '主动联系'},
+    {group: 'busy_gate', field: 'busy_reply_gate_enabled', label: '启用忙碌处理'},
+  ]}, CompanionReplyPage: {searchEntries: () => [
+    {group: 'conversation.presentation', field: 'enable_humanized_expression',
+      label: '追加拟人表达提示', help: '勾选后与所选风格叠加'},
+  ]}, CompanionNativePerceptionPage: {searchEntries: () => [
+    {group: 'conversation.perception', field: 'almanac_enabled', label: '启用老黄历'},
   ]}}};
   vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../pages/陪伴小屋/migration-config-review.js'), 'utf8'), sandbox);
   vm.runInNewContext(source, sandbox);
@@ -16,6 +22,23 @@ function review(rows) {
 }
 const row = (id, status = 'merge', extra = {}) => ({id, selection_id: id, selection_unit: id,
   field: 'proactive.contact.enabled', status, before: true, after: false, current_known: true, ...extra});
+
+test('operator-facing names come from every settings page, with the key as secondary text', () => {
+  const api = review([
+    row('busy', 'merge', {field: 'conversation.busy_gate.busy_reply_gate_enabled'}),
+    row('human', 'merge', {field: 'conversation.presentation.enable_humanized_expression'}),
+    row('almanac', 'merge', {field: 'conversation.perception.almanac_enabled'}),
+    row('unknown', 'merge', {field: 'mystery.config.value'}),
+  ]);
+  const html = api.render();
+  assert.match(html, /启用忙碌处理/);
+  assert.match(html, /追加拟人表达提示/);
+  assert.match(html, /勾选后与所选风格叠加/);
+  assert.match(html, /启用老黄历/);
+  assert.match(html, /conversation\.busy_gate\.busy_reply_gate_enabled/);
+  assert.match(html, /mystery\.config\.value/);
+  assert.doesNotMatch(html, /<strong>conversation\.busy_gate/);
+});
 
 test('comparisons show real values and per-row choices determine the submitted selection', () => {
   const api = review([row('switch'), row('interval', 'merge', {field: 'proactive.contact.interval_seconds', before: 600, after: 900})]);
