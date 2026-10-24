@@ -26,7 +26,13 @@ from companion_v2.conversation.media.video.models import CapturedVideo, MAX_VIDE
 from .files import file_locator, prepare_file_text, MAX_FILES
 
 
-SUPPORTED_VERSIONS = frozenset(("4.27.2", "4.28.2"))
+SUPPORTED_VERSIONS = frozenset(("4.27.2", "4.28.2", "4.29.0", "4.29.1"))
+# Each entry above was exercised against that release's source. The version is
+# never a gate: every host is allowed to start, the native symbols are imported
+# eagerly, and a real surface change fails loudly at import instead of being
+# guessed from a version string. An unreviewed host only earns one warning.
+VERIFIED_SERIES = frozenset(("4.27", "4.28", "4.29"))
+_REPORTED_UNVERIFIED = set()
 NATIVE_LOOKUP_TIMEOUT_SECONDS = 20
 NATIVE_LOOKUP_SLOW_SECONDS = 2
 NATIVE_LOOKUP_SLOW_LOG_INTERVAL_SECONDS = 60
@@ -93,10 +99,39 @@ async def bounded_native_lookup(awaitable, *, operation="", report_slow=True):
 MEDIA_PREPARE_TIMEOUT = 25
 
 
+def _release_tuple(value):
+    """Read major.minor[.patch] from a host version, ignoring pre-release tails."""
+    parts = value.split("-", 1)[0].split("+", 1)[0].split(".")
+    if len(parts) not in (2, 3) or any(not part.isdigit() or len(part) > 3 for part in parts):
+        return None
+    numbers = [int(part) for part in parts]
+    if len(numbers) == 2:
+        numbers.append(0)
+    return tuple(numbers)
+
+
 def check_version(version):
-    if type(version) is not str or version not in SUPPORTED_VERSIONS:
-        supported = ", ".join(sorted(SUPPORTED_VERSIONS))
-        raise ValueError("AstrBot native adapters require a verified contract (supported: " + supported + ")")
+    """Report an unreviewed host; never refuse to start one.
+
+    The review list below only decides whether a warning is worth writing. A
+    version string cannot prove the private surface still matches, and a wrong
+    guess must not make an otherwise working install unusable: the native
+    classes are imported eagerly, so a genuine API change fails at import with
+    the exact missing symbol. Old, new and unparsable versions all continue.
+    """
+    if type(version) is str and version:
+        release = _release_tuple(version)
+        if version in SUPPORTED_VERSIONS or release is not None and "%d.%d" % release[:2] in VERIFIED_SERIES:
+            return
+        label = version
+    else:
+        label = "unknown"
+    if label in _REPORTED_UNVERIFIED:
+        return
+    _REPORTED_UNVERIFIED.add(label)
+    logger.warning("AstrBot %s is outside the reviewed native contract (%s); loading anyway, "
+                   "the native imports decide whether this host still matches", label,
+                   ", ".join(sorted(SUPPORTED_VERSIONS)))
 
 
 def native_id(value):
