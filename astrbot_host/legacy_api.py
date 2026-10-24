@@ -619,11 +619,33 @@ class LegacyMigrationWebAPI:
                                 "memory_database_skipped": not flags["import_memory_database"]})
 
     async def _import_persona(self, migration, root, session, persona_id, flags):
-        plan = await asyncio.to_thread(self._data_plan, migration, root, session, "", persona_id)
+        plan = await asyncio.to_thread(self._data_plan, migration, root, session, "", persona_id,
+            reference_slots_available=24, wardrobe_slots_available=24)
         if not plan.is_success:
             return {"kind": "persona", "persona_id": persona_id, "state": "failed",
                     "reason": plan.failure.code}
         document = plan.unwrap()
+        flags = dict(flags)
+        # Sections without an available V1 source must not be requested: the
+        # importer rejects "import expressions" when the persona has none.
+        if not (document.get("expressions") or {}).get("available"):
+            flags["import_expressions"] = False
+            flags["confirm_expression_mapping"] = False
+        # Only request the sections this persona actually has; an empty section
+        # is a validator error, not a silent no-op.
+        worldbook = document.get("worldbook") or {}
+        network = document.get("group_networks") or ()
+        worldbook_has_data = bool(worldbook.get("general_count") or worldbook.get("member_count")
+            or worldbook.get("groups") or worldbook.get("member_profile_groups"))
+        flags["import_group_network"] = bool(network)
+        flags["import_worldbook"] = worldbook_has_data
+        flags["confirm_member_ids"] = True
+        contacts = document.get("private_contacts") or {}
+        flags["import_private_contacts"] = bool(contacts.get("importable") or contacts.get("total"))
+        flags["import_journals"] = bool((document.get("journals") or {}).get("batch_count"))
+        flags["import_reactions"] = bool((document.get("reaction_assets") or {}).get("batch_count"))
+        flags["import_reference_images"] = bool((document.get("reference_images") or {}).get("image_count"))
+        flags["import_wardrobe_items"] = bool((document.get("wardrobe_items") or {}).get("image_count"))
         result = await self._data_apply(migration, root, session, document["plan_token"], "", persona_id,
             **flags)
         if not result.is_success:
@@ -662,7 +684,13 @@ class LegacyMigrationWebAPI:
         # of the account, derived the same way the host derives it.
         from .identity_derivation import derive_role_id
         try:
-            persona_roles.setdefault("", derive_role_id(account_id, "[%None]"))
+            # The profile without an id still owns a role: it is the profile the
+
+            # operator is migrating into this role, so the target role wins over
+
+            # the account default.
+
+            persona_roles.setdefault("", role_id or derive_role_id(account_id, "[%None]"))
         except (TypeError, ValueError):
             pass
         plans = [("", main_document)]
