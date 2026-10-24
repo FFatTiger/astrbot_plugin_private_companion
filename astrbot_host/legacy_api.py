@@ -141,6 +141,7 @@ class LegacyMigrationWebAPI:
                  "Confirm the migrated configuration after a restart"),
                 (PREFIX + "/data-plan", self.data_plan, ["GET"], "Preview reviewed V1 profile, knowledge, reaction and journal data"),
                 (PREFIX + "/scope", self.scope, ["GET"], "Preview the role-driven migration scope without writing"),
+                (PREFIX + "/batch-apply", self.batch_apply, ["POST"], "Import every automatically mapped window once"),
                 (PREFIX + "/data-apply", self.data_apply, ["POST"], "Import the reviewed V1 data batch")] + PrivateMemoryMigrationAPI(self).routes(PREFIX) + LegacyArchiveWebAPI(self).routes(PREFIX)
 
     # ── 定址 ───────────────────────────────────────────────────────────
@@ -515,6 +516,121 @@ class LegacyMigrationWebAPI:
         return await self._run(
             lambda migration, root, session: self._scope(migration, root, session),
             root_override=root_override, offload_sync=True)
+
+    async def batch_apply(self):
+        """Run every reviewed, automatically mapped window once; never guess."""
+        from .web_api import outcome_response
+        try:
+            raw = await request.body()
+            if len(raw) > MAX_REQUEST_BYTES:
+                raise ValueError()
+            arguments = json.loads(raw.decode("utf-8")) if raw else {}
+            allowed = {"token", "v1_root", "personas", "groups", "options"}
+            if (type(arguments) is not dict or set(arguments) - allowed
+                    or type(arguments.get("token")) is not str or not arguments["token"]
+                    or type(arguments.get("personas", [])) is not list
+                    or type(arguments.get("groups", [])) is not list
+                    or type(arguments.get("options", {})) is not dict):
+                raise ValueError()
+            for item in arguments.get("personas", []):
+                if type(item) is not str or len(item) > 96:
+                    raise ValueError()
+            for item in arguments.get("groups", []):
+                if (type(item) is not dict or set(item) != {"persona_id", "group_id"}
+                        or type(item["persona_id"]) is not str or len(item["persona_id"]) > 96
+                        or type(item["group_id"]) is not str or not item["group_id"]
+                        or len(item["group_id"]) > 256):
+                    raise ValueError()
+            root_override = arguments.get("v1_root")
+            if root_override is not None and (type(root_override) is not str or not root_override.strip()):
+                raise ValueError()
+        except (ValueError, TypeError, UnicodeError, RecursionError):
+            return outcome_response(Outcome.failed("legacy_request_invalid", "invalid batch migration request"))
+        return await self._run(
+            lambda migration, root, session: self._batch_apply(migration, root, session, arguments),
+            root_override=root_override)
+
+    async def _batch_apply(self, migration, root, session, arguments):
+        """Apply the reviewed scope item by item, keeping one receipt per item."""
+        from .legacy_group_data_api import LegacyGroupDataWebAPI
+        scope = await asyncio.to_thread(self._scope, migration, root, session)
+        if not scope.is_success:
+            return scope
+        scope = scope.unwrap()
+        if scope["token"] != arguments["token"]:
+            return Outcome.failed("legacy_scope_stale",
+                "the reviewed migration scope changed; preview the role again before importing.")
+        personas = {item["source_id"]: item for item in scope["personas"]}
+        groups = {(item["persona_id"], item["source_id"]): item for item in scope["groups"]}
+        options = arguments.get("options") or {}
+        flags = {
+            "import_reactions": True, "import_group_network": True, "confirm_member_ids": True,
+            "import_journals": True, "confirm_persona_mapping": True, "import_worldbook": True,
+            "import_archive": options.get("import_archive") is True,
+            "import_memory_database": options.get("import_memory_database") is True,
+            "confirm_memory_mapping": options.get("confirm_memory_mapping") is True,
+            "import_reference_images": True, "import_wardrobe_items": True,
+            "confirm_reference_persona_mapping": True,
+            "import_expressions": True, "confirm_expression_mapping": True,
+            "import_private_contacts": True,
+        }
+        items = []
+        for persona_id in arguments.get("personas", []):
+            entry = personas.get(persona_id)
+            if entry is None or not entry["auto"]:
+                items.append({"kind": "persona", "persona_id": persona_id, "state": "review",
+                              "reason": (entry or {}).get("reason") or "persona_not_in_scope"})
+                continue
+            items.append(await self._import_persona(migration, root, session, persona_id, flags))
+        for request_item in arguments.get("groups", []):
+            key = (request_item["persona_id"], request_item["group_id"])
+            entry = groups.get(key)
+            if entry is None or not entry["auto"]:
+                items.append({"kind": "group", "persona_id": key[0], "group_id": key[1],
+                              "state": "review",
+                              "reason": (entry or {}).get("reason") or "group_not_in_scope"})
+                continue
+            api = LegacyGroupDataWebAPI(self.controller, entry["target_id"],
+                                        getattr(self.controller, "role_id", ""))
+            try:
+                target, group_session = await asyncio.to_thread(api._target)
+            except TaskError as error:
+                items.append({"kind": "group", "persona_id": key[0], "group_id": key[1],
+                              "state": "failed", "reason": error.code})
+                continue
+            plan = await asyncio.to_thread(api._plan, root, key[0], key[1], target, group_session)
+            group_arguments = {
+                "v1_root": str(root), "source_persona_id": key[0],
+                "source_group_id": key[1], "plan_token": plan["plan_token"],
+                "import_group_network": True, "confirm_group_mapping": True, "confirm_member_ids": True,
+                "import_group_worldbook": True,
+                "import_group_expression": bool(plan["group_expression"]["available"]),
+                "confirm_expression_mapping": True,
+            }
+            response = await asyncio.to_thread(api.apply_import, group_arguments, root, target, group_session)
+            items.append({"kind": "group", "persona_id": key[0], "group_id": key[1],
+                          "state": "imported" if response.get("status") == "ok" else "failed",
+                          "reason": None if response.get("status") == "ok" else response.get("message"),
+                          "result": response.get("data")})
+        counts = {"imported": sum(1 for item in items if item["state"] == "imported"),
+                  "review": sum(1 for item in items if item["state"] == "review"),
+                  "failed": sum(1 for item in items if item["state"] == "failed")}
+        return Outcome.success({"token": scope["token"], "items": items, "counts": counts,
+                                "memory_database_skipped": not flags["import_memory_database"]})
+
+    async def _import_persona(self, migration, root, session, persona_id, flags):
+        plan = await asyncio.to_thread(self._data_plan, migration, root, session, "", persona_id)
+        if not plan.is_success:
+            return {"kind": "persona", "persona_id": persona_id, "state": "failed",
+                    "reason": plan.failure.code}
+        document = plan.unwrap()
+        result = await self._data_apply(migration, root, session, document["plan_token"], "", persona_id,
+            **flags)
+        if not result.is_success:
+            return {"kind": "persona", "persona_id": persona_id, "state": "failed",
+                    "reason": result.failure.code}
+        return {"kind": "persona", "persona_id": persona_id, "state": "imported",
+                "result": result.unwrap()}
 
     def _scope(self, migration, root, session):
         from companion_v2.legacy.data_migration import build_data_plan

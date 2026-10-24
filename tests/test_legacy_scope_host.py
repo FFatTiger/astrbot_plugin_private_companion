@@ -2,7 +2,7 @@
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from astrbot_host.identity_derivation import derive_role_id
 from astrbot_host.legacy_api import LegacyMigrationWebAPI
@@ -72,6 +72,76 @@ class ScopePreviewTests(unittest.TestCase):
         result = api._scope(migration, None, self.session())
         self.assertFalse(result.is_success)
         self.assertEqual(result.failure.code, "legacy_source_missing")
+
+
+class BatchApplyTests(unittest.IsolatedAsyncioTestCase):
+    def api(self):
+        api = LegacyMigrationWebAPI.__new__(LegacyMigrationWebAPI)
+        api.controller = SimpleNamespace(role_id="role-a")
+        return api
+
+    async def test_stale_scope_writes_nothing(self):
+        api = self.api()
+        scope = {"token": "new", "personas": [], "groups": []}
+        apply = AsyncMock()
+        with patch.object(LegacyMigrationWebAPI, "_scope", return_value=Outcome.success(scope)), \
+             patch.object(LegacyMigrationWebAPI, "_data_apply", apply):
+            result = await api._batch_apply(None, None, None,
+                                            {"token": "old", "personas": ["p"], "groups": []})
+        self.assertFalse(result.is_success)
+        self.assertEqual(result.failure.code, "legacy_scope_stale")
+        apply.assert_not_called()
+
+    async def test_review_items_are_reported_and_skipped(self):
+        api = self.api()
+        scope = {"token": "t",
+                 "personas": [{"source_id": "auto", "auto": True},
+                              {"source_id": "rev", "auto": False, "reason": "persona_not_assigned_to_role"}],
+                 "groups": []}
+        apply = AsyncMock(return_value=Outcome.success({"contacts": 1}))
+        with patch.object(LegacyMigrationWebAPI, "_scope", return_value=Outcome.success(scope)), \
+             patch.object(LegacyMigrationWebAPI, "_data_plan", return_value=Outcome.success({"plan_token": "pt"})), \
+             patch.object(LegacyMigrationWebAPI, "_data_apply", apply):
+            result = await api._batch_apply(None, None, None,
+                                            {"token": "t", "personas": ["auto", "rev"], "groups": []})
+        payload = result.unwrap()
+        self.assertEqual([(item["persona_id"], item["state"]) for item in payload["items"]],
+                         [("auto", "imported"), ("rev", "review")])
+        self.assertEqual(payload["counts"], {"imported": 1, "review": 1, "failed": 0})
+        self.assertEqual(payload["items"][1]["reason"], "persona_not_assigned_to_role")
+        apply.assert_awaited_once()
+        self.assertEqual(apply.await_args.args[3], "pt")
+
+    async def test_auto_mapped_group_runs_the_shared_importer(self):
+        api = self.api()
+        scope = {"token": "t", "personas": [{"source_id": "auto", "auto": True}],
+                 "groups": [{"persona_id": "auto", "source_id": "109", "target_id": "group-109",
+                             "auto": True}]}
+        calls = []
+
+        class FakeGroupAPI:
+            def __init__(self, controller, target_id, role_id):
+                calls.append((target_id, role_id))
+
+            def _target(self):
+                return SimpleNamespace(target_id="group-109"), object()
+
+            def _plan(self, root, persona_id, group_id, target, session):
+                return {"plan_token": "gpt", "group_expression": {"available": True}}
+
+            def apply_import(self, arguments, root, target, session):
+                calls.append(arguments["source_group_id"], )
+                return {"status": "ok", "data": {"idempotent": True}}
+
+        with patch.object(LegacyMigrationWebAPI, "_scope", return_value=Outcome.success(scope)), \
+             patch("astrbot_host.legacy_group_data_api.LegacyGroupDataWebAPI", FakeGroupAPI):
+            result = await api._batch_apply(None, None, None,
+                                            {"token": "t", "personas": [], "groups": [
+                                                {"persona_id": "auto", "group_id": "109"}]})
+        payload = result.unwrap()
+        self.assertEqual(payload["items"][0]["state"], "imported")
+        self.assertEqual(calls[0], ("group-109", "role-a"))
+        self.assertEqual(calls[1], "109")
 
 
 if __name__ == "__main__":
