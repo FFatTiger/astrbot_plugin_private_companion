@@ -1382,3 +1382,10 @@
   .setup-oneclick-actions .button { transition:none; }
   .setup-oneclick-actions .button:not(:disabled):hover { transform:none; }
 }
+
+.setup-legacy-advanced { margin: var(--sp-3) 0; border: 1px solid var(--line); border-radius: var(--r-xs); background: var(--surface); }
+.setup-legacy-advanced > summary { padding: var(--sp-3); cursor: pointer; color: var(--muted); font-size: var(--fs-body); }
+.setup-legacy-advanced[open] > summary { border-bottom: 1px solid var(--line); }
+.setup-legacy-advanced-note { margin: 0; padding: var(--sp-2) var(--sp-3) 0; color: var(--muted); font-size: var(--fs-micro); }
+.setup-legacy-advanced .setup-legacy-data-controls { border: 0; margin: 0; }
+.setup-migration-oneclick-panel { padding-top: 0; }

@@ -2147,6 +2147,9 @@ window.CompanionSetup = (() => {
         ${legacyDataErrorMarkup()}
         ${!inventory ? `<p class="setup-migration-empty">读取清单后选择旧版人格、资料类型和对应目标。</p>` : ""}
         ${legacyDataRefreshing ? `<p class="setup-migration-refresh" role="status">正在刷新当前选择，可继续调整资料范围与映射。${inventory ? "数量暂按上次清单显示。" : ""}</p>` : ""}
+        <details class="setup-legacy-advanced">
+          <summary>高级：逐项选择旧版人格 / 群（一键迁移不需要）</summary>
+          <p class="setup-legacy-advanced-note">一键迁移会自动读取全部旧版人格与群；这里只在你需要单独核对某一份资料时使用。</p>
         <fieldset class="setup-legacy-data-controls" ${legacyWriting() ? "disabled" : ""}>
           <div class="setup-legacy-data-controls-head"><strong>选择资料来源</strong><span>先选旧版人格；群资料还需要选择旧版群记录。</span></div>
           <label class="setup-legacy-path"><span>旧版人格档案</span><select data-setup-legacy="data-persona" ${personaOptions.length ? "" : "disabled"}><option value="">主角色（companions.json）</option>${personaOptions.filter(item => item.persona_id).map(item => `<option value="${escape(item.persona_id)}" ${legacyDataPersonaId === item.persona_id ? "selected" : ""} ${item.state === "ready" ? "" : "disabled"}>${escape(legacyPersonaLabel(item))}${item.state === "ready" ? "" : " · 不可读取"}</option>`).join("")}</select></label>
@@ -2154,6 +2157,7 @@ window.CompanionSetup = (() => {
           <label class="setup-legacy-path"><span>旧版群记录 / 范围</span><select data-setup-legacy="data-group" ${groupOptions.length ? "" : "disabled"}><option value="">不选择群</option>${groupOptions.map(item => `<option value="${escape(item.source_group_id)}" ${legacyDataGroupId === item.source_group_id ? "selected" : ""}>群 ${escape(item.source_group_id)} · ${Number(item.member_count) || 0} 位成员 / ${Number(item.edge_count) || 0} 条边 / ${Number(item.worldbook_entry_count) || 0} 条知识 / ${Number(item.member_profile_count) || 0} 份成员资料</option>`).join("")}</select></label>
           ${selectedGroup && legacyDataPlan ? `<p class="setup-legacy-scope-note">${selectedNetworkGroup ? `群成员互动图将从旧版群 ${escape(selectedGroup.source_group_id)} 映射到当前版本群 ${escape(legacyDataPlan.target_group_id || "（当前目标不是群）")}，含 ${Number(selectedGroup.member_count) || 0} 位成员和 ${Number(selectedGroup.edge_count) || 0} 条互动边。${Number(selectedGroup.omitted_member_count) || Number(selectedGroup.omitted_edge_count) ? `另有 ${Number(selectedGroup.omitted_member_count) || 0} 位成员、${Number(selectedGroup.omitted_edge_count) || 0} 条互动边超过当前版本上限，不会导入。` : ""}${Number(selectedGroup.rejected_member_count) || Number(selectedGroup.rejected_edge_count) ? `无法识别 ${Number(selectedGroup.rejected_member_count) || 0} 位成员、${Number(selectedGroup.rejected_edge_count) || 0} 条互动边。` : ""}` : ""}${selectedWorldbookGroup ? `所选旧版群还有 ${Number(selectedWorldbookGroup.entry_count) || 0} 条群范围知识条目。` : ""}</p>` : ""}
         </fieldset>
+        </details>
         <div class="setup-migration-subnav" ${legacyWizardStep === 5 ? "" : "hidden"}>${legacyTabs([["current", "当前角色资料"], ["personas", "多角色映射"], ["groups", "群资料映射"], ["memory", "记忆身份映射"]], legacyMappingView, "setup-legacy-mapping-view", "资料映射分区")}</div>
         <fieldset class="setup-migration-mapping-panel" ${legacyWriting() ? "disabled" : ""} ${legacyMappingView === "current" && [4, 5].includes(legacyWizardStep) ? "" : "hidden"}>
         <fieldset class="setup-legacy-option-groups">
@@ -2184,7 +2188,7 @@ window.CompanionSetup = (() => {
         ${!canApplyData ? `<p class="setup-legacy-scope-note" role="status">${!legacyDataPlan ? "先读取资料清单。" : legacyMemoryPlanDirty ? "身份已调整，请重新试算。" : pendingConfirmations.length ? `尚需确认：${escape(pendingConfirmations.join("、"))}。` : "选择至少一项可导入资料。"}</p>` : ""}
       </fieldset>
       ${legacyWizardStep === 5 ? confirmationsMarkup : ""}
-      ${legacyWizardStep === 5 ? `<section class="setup-migration-mapping-panel">${renderLegacyOneClick()}</section>` : ""}
+      ${[4, 5].includes(legacyWizardStep) ? `<section class="setup-migration-mapping-panel setup-migration-oneclick-panel">${renderLegacyOneClick()}</section>` : ""}
       <fieldset class="setup-migration-mapping-panel" ${legacyWriting() ? "disabled" : ""} ${legacyWizardStep === 5 && legacyMappingView === "personas" ? "" : "hidden"}>
         ${inventory ? renderLegacyPersonaBatch(personaOptions) : `<p class="setup-migration-empty">先读取资料清单。</p>`}
       </fieldset>
