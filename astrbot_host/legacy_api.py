@@ -140,6 +140,7 @@ class LegacyMigrationWebAPI:
                 (PREFIX + "/upgrade-confirm", self.confirm_upgrade, ["POST"],
                  "Confirm the migrated configuration after a restart"),
                 (PREFIX + "/data-plan", self.data_plan, ["GET"], "Preview reviewed V1 profile, knowledge, reaction and journal data"),
+                (PREFIX + "/scope", self.scope, ["GET"], "Preview the role-driven migration scope without writing"),
                 (PREFIX + "/data-apply", self.data_apply, ["POST"], "Import the reviewed V1 data batch")] + PrivateMemoryMigrationAPI(self).routes(PREFIX) + LegacyArchiveWebAPI(self).routes(PREFIX)
 
     # ── 定址 ───────────────────────────────────────────────────────────
@@ -500,6 +501,49 @@ class LegacyMigrationWebAPI:
                                    "install": self._install_state(root, [])})
 
         return await self._run(work)
+
+    async def scope(self):
+        """Preview the role-driven migration scope; nothing is written."""
+        from .web_api import outcome_response
+        query = request.query
+        if (set(query.keys()) - {"v1_root"}
+                or any(len(query.getlist(key)) != 1 for key in query.keys())):
+            return outcome_response(Outcome.failed("legacy_request_invalid", "invalid migration scope query"))
+        root_override = query.get("v1_root")
+        if root_override is not None and (type(root_override) is not str or not root_override.strip()):
+            return outcome_response(Outcome.failed("legacy_request_invalid", "invalid migration scope query"))
+        return await self._run(
+            lambda migration, root, session: self._scope(migration, root, session),
+            root_override=root_override, offload_sync=True)
+
+    def _scope(self, migration, root, session):
+        from companion_v2.legacy.data_migration import build_data_plan
+        from companion_v2.legacy.migration_scope import build_scope
+        planned = migration.discover()
+        if not planned.is_success:
+            return planned
+        document = build_data_plan(root, v1_configuration=migration.v1_configuration).document()
+        context, _service = self._data_context(session)
+        scope_ref = context.scope
+        platform_id, account_id = scope_ref.platform, scope_ref.account_id
+        role_id = getattr(self.controller, "role_id", "")
+        group_targets = []
+        for item in self.controller.web_api.target_inventory():
+            if item.get("scope_kind") != "group":
+                continue
+            if (item.get("platform_id"), item.get("account_id")) != (platform_id, account_id):
+                continue
+            roles = [role for role in item.get("roles", ()) if role.get("legacy_group_data_api")]
+            group_targets.append({**item, "has_role": bool(roles)})
+        persona_roles = {}
+        configuration = getattr(self.controller, "config", None) or {}
+        rows = configuration.get("multi_host", {}).get("personas", ()) if isinstance(configuration, dict) else ()
+        for row in rows if isinstance(rows, (list, tuple)) else ():
+            if (isinstance(row, dict) and type(row.get("persona_id")) is str and row["persona_id"]
+                    and type(row.get("role_id")) is str and row["role_id"]):
+                persona_roles[row["persona_id"]] = row["role_id"]
+        return Outcome.success(build_scope(document, group_targets, persona_roles,
+            role_id=role_id, platform_id=platform_id, account_id=account_id))
 
     async def data_plan(self):
         from .web_api import outcome_response
