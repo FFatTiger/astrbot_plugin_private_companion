@@ -20,6 +20,11 @@ function harness() {
     function isEnabled() { return status.enabled === true; }
     function isAccepting() { return status.accepting === true; }
     function stateLabel(value) { return value; }
+    /* stateLabel 与 renderStatus 都会问「角色映射是否已保存」；与页面里同一份判定，
+       少了它渲染阶段就会在 uninitialized 状态下抛 ReferenceError。 */
+    function hasSavedRoleMappings() {
+      return (status?.targets || []).some(target => Array.isArray(target?.roles) && target.roles.length > 0);
+    }
     function paintStatusValue(id, value) { $(id).textContent = value; }
     function notice(message, kind) { notices.push({message, kind}); }
     ${section("  function codeOf(", "  async function api(")}

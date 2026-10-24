@@ -3570,7 +3570,7 @@ function renderIdentityPageOriginal(){
     [
     ['关系网','统一查看私聊成员、群成员与群内互动。熟人卡在人物资料中维护；成员线索只辅助识别发言者。',`${networkSettings}${renderIdentity()}`,
      'identity-network'],
-    ['访问规则','管理新私聊成员的默认权限；逐人权限可在成员详情中调整。',configEditors('privateAccessWorkspace',['private_access'],'私聊默认权限'),
+    ['访问规则','管理新私聊成员的默认权限；逐人权限可在成员详情中调整。',`${configEditors('privateAccessWorkspace',['private_access'],'私聊默认权限')}${configEditors('relayConfigWorkspace',['relay'],'跨窗口递话')}`,
      'identity-access'],
     ['关系与情感','它对你和对别人的理解，以及它自己的感觉。待确认的先过你这一关才生效。',product.workspace('relationships'),
      'identity-feelings'],
@@ -3694,6 +3694,9 @@ function renderConfigEditors(){
   if($('#personConfigWorkspace'))configEditorMounts.push(mountConfigEditor('personConfigWorkspace',['person']));
   /* 兼容旧的访问规则深链接仍保留挂载；正式入口由用户页标题按钮打开弹窗。 */
   if($('#privateAccessWorkspace'))configEditorMounts.push(mountConfigEditor('privateAccessWorkspace',['private_access']));
+  /* 跨窗口递话是窗口级设置：谁能通过本窗口让 bot 带话给白名单私聊。
+     与私聊默认权限同页，缺挂载点会让这组字段在页面上完全点不到。 */
+  if($('#relayConfigWorkspace'))configEditorMounts.push(mountConfigEditor('relayConfigWorkspace',['relay']));
   if($('#growthConfigWorkspace'))configEditorMounts.push(mountConfigEditor('growthConfigWorkspace',['role.growth.skills'],{
     'role.growth.skills':outputConfigView('role.growth.skills',{title:'技能与日程影响',presentation:'journal',
       labels:{enabled:'启用技能域',custom_skills:'自定义技能域',schedule_influence_strength:'日程影响强度'},
@@ -4357,6 +4360,7 @@ const configSearchLocations={
   busy_gate:{next:'manage',tab:'contact',contactView:'gates',root:'#replyGateConfigWorkspace'},budget:{next:'manage',tab:'models',root:'#budgetConfigWorkspace'},
   recall:{next:'manage',tab:'perception',root:'#recallConfigWorkspace'},screen:{next:'manage',tab:'perception',root:'#screenConfigWorkspace'},
   person:{next:'manage',tab:'identity-people',identitySettings:'person',root:'#personConfigWorkspace'},private_access:{next:'manage',tab:'identity-people',identitySettings:'private-access',root:'#privateAccessWorkspace'},
+  relay:{next:'manage',tab:'identity-people',identitySettings:'private-access',root:'#relayConfigWorkspace'},
   role_growth:{next:'manage',tab:'identity-people',identitySettings:'person'},
   'role.growth.skills':{next:'manage',tab:'learning',subtab:'strategy',root:'#growthConfigWorkspace'},
   role_profile:{next:'manage',tab:'governance',root:'#roleProfileConfigWorkspace'},

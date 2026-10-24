@@ -139,6 +139,10 @@ window.CompanionSetup = (() => {
   let legacyArchivedWork = null;
   let legacyDataGroupId = "";
   let legacyDataPersonaId = "";
+  let legacyScope = null;
+  let legacyScopeBusy = false;
+  let legacyBatchBusy = false;
+  let legacyBatchResult = null;
   let legacyGroupTargetId = "";
   let legacyGroupRoleId = "";
   let legacyGroupPlan = null;
@@ -921,6 +925,76 @@ window.CompanionSetup = (() => {
       legacyMemoryPlanDirty = true;
       legacyConfirmMemoryMapping = false;
     }
+  }
+
+  const LEGACY_SCOPE_REASONS = {
+    same_platform_account_and_id: "同平台、同账号、同号，自动归入",
+    target_group_missing: "当前账号下没有这个群",
+    target_platform_differs: "平台不同",
+    target_account_differs: "账号不同",
+    target_group_role_missing: "目标群还没有绑定角色",
+    multiple_target_candidates: "同号群不唯一",
+    persona_not_assigned_to_role: "人格未归属当前角色",
+    persona_assigned_to_other_role: "人格属于其他角色",
+  };
+  function legacyScopeReason(code) { return LEGACY_SCOPE_REASONS[code] || code || "需确认"; }
+
+  async function readLegacyScope() {
+    if (legacyScopeBusy || legacyWriting()) return;
+    const address = legacyAddress();
+    if (!address) { legacyBatchResult = {error: "先选择当前版本的账号与角色。"}; render(); return; }
+    legacyScopeBusy = true; legacyBatchResult = null; render();
+    try {
+      legacyScope = await migrationRequest("GET", address + "/scope");
+    } catch (error) {
+      legacyScope = null;
+      legacyBatchResult = {error: error?.message || "读取迁移范围失败。"};
+    } finally { legacyScopeBusy = false; render(); }
+  }
+
+  async function applyLegacyBatch() {
+    if (!legacyScope || legacyBatchBusy || legacyWriting()) return;
+    const address = legacyAddress();
+    if (!address) return;
+    const personas = legacyScope.personas.filter(item => item.auto).map(item => item.source_id);
+    const groups = legacyScope.groups.filter(item => item.auto)
+      .map(item => ({persona_id: item.persona_id, group_id: item.source_id}));
+    if (!personas.length && !groups.length) {
+      legacyBatchResult = {error: "没有可自动迁移的项；需确认的窗口请在下方逐项核对。"};
+      render();
+      return;
+    }
+    legacyBatchBusy = true; render();
+    try {
+      legacyBatchResult = await migrationRequest("POST", address + "/batch-apply",
+        {token: legacyScope.token, personas, groups, options: {}});
+    } catch (error) {
+      legacyBatchResult = {error: error?.message || "迁移执行失败。"};
+    } finally { legacyBatchBusy = false; render(); }
+  }
+
+  function renderLegacyOneClick() {
+    const scope = legacyScope, result = legacyBatchResult;
+    const counts = scope?.counts || {};
+    const review = scope?.review || [];
+    const badge = auto => auto ? `<em class="setup-legacy-auto">自动</em>` : `<em class="setup-legacy-review">需确认</em>`;
+    const rows = [].concat(
+      (scope?.personas || []).map(item => `<li>${badge(item.auto)}人格 ${escape(item.source_id || "主角色")}${item.auto ? "" : " · " + escape(legacyScopeReason(item.reason))}</li>`),
+      (scope?.groups || []).map(item => `<li>${badge(item.auto)}群 ${escape(item.source_id)}${item.auto ? "" : " · " + escape(legacyScopeReason(item.reason))}</li>`)).slice(0, 40);
+    const resultLines = (result?.items || []).map(item => `<li>${item.state === "imported" ? "已导入" : item.state === "review" ? "需确认" : "失败"} · ${item.kind === "group" ? "群 " + escape(item.group_id) : "人格 " + escape(item.persona_id || "主角色")}${item.reason ? " · " + escape(legacyScopeReason(item.reason)) : ""}</li>`);
+    return `<div class="setup-legacy-oneclick">
+      <h5>一键迁移</h5>
+      <p>先按当前角色读取范围：同平台、同账号、同号的窗口自动归入；其余只列出来等你确认，不会被自动写入。</p>
+      <div class="setup-legacy-persona-row">
+        <button type="button" class="button" data-setup-legacy-run="scope" ${legacyScopeBusy || legacyWriting() ? "disabled" : ""}>${legacyScopeBusy ? "正在读取…" : scope ? "重新读取范围" : "读取迁移范围"}</button>
+        <button type="button" class="button primary" data-setup-legacy-run="batch" ${!scope || legacyBatchBusy || legacyWriting() || !(counts.personas_auto || counts.groups_auto) ? "disabled" : ""}>${legacyBatchBusy ? "正在迁移…" : "开始迁移"}</button>
+      </div>
+      ${scope ? `<p>将处理 ${Number(counts.personas_auto) || 0} 个人格、${Number(counts.groups_auto) || 0} 个群；私聊联系人 ${Number(scope.private?.contacts) || 0} 位；需确认 ${Number(counts.review) || 0} 项。</p>` : ""}
+      ${result?.error ? `<p class="setup-migration-error">${escape(result.error)}</p>` : ""}
+      ${rows.length ? `<ul class="setup-legacy-scope-list">${rows.join("")}</ul>` : ""}
+      ${review.length ? `<p class="setup-migration-hint">需确认的原因：${escape(legacyScopeReason(review[0].reason))}${review.length > 1 ? ` 等 ${review.length} 项` : ""}</p>` : ""}
+      ${result?.items ? `<div class="setup-legacy-batch-result"><strong>本次结果</strong><ul>${resultLines.join("")}</ul>${result.memory_database_skipped ? `<p class="setup-migration-hint">记忆库未迁移：需要先在上方「记忆身份映射」核对归属。</p>` : ""}</div>` : ""}
+    </div>`;
   }
 
   async function readLegacyDataPlan() {
@@ -2087,6 +2161,7 @@ window.CompanionSetup = (() => {
         ${!canApplyData ? `<p class="setup-legacy-scope-note" role="status">${!legacyDataPlan ? "先读取资料清单。" : legacyMemoryPlanDirty ? "身份已调整，请重新试算。" : pendingConfirmations.length ? `尚需确认：${escape(pendingConfirmations.join("、"))}。` : "选择至少一项可导入资料。"}</p>` : ""}
       </fieldset>
       ${legacyWizardStep === 5 ? confirmationsMarkup : ""}
+      ${legacyWizardStep === 5 ? `<section class="setup-migration-mapping-panel">${renderLegacyOneClick()}</section>` : ""}
       <fieldset class="setup-migration-mapping-panel" ${legacyWriting() ? "disabled" : ""} ${legacyWizardStep === 5 && legacyMappingView === "personas" ? "" : "hidden"}>
         ${inventory ? renderLegacyPersonaBatch(personaOptions) : `<p class="setup-migration-empty">先读取资料清单。</p>`}
       </fieldset>
@@ -3304,6 +3379,12 @@ window.CompanionSetup = (() => {
       legacyWizardStep = migrationView === "review" ? 6 : 4;
       render();
       if (migrationView === "mapping" && !legacyDataInventory && legacyAddress()) void act("legacy-data-plan");
+      return;
+    }
+    const batchRun = event.target.closest?.("[data-setup-legacy-run]")?.dataset.setupLegacyRun;
+    if (batchRun) {
+      if (batchRun === "scope") void readLegacyScope();
+      else if (batchRun === "batch") void applyLegacyBatch();
       return;
     }
     const mappingView = event.target.closest?.("[data-setup-legacy-mapping-view]")?.dataset.setupLegacyMappingView;

@@ -5,7 +5,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 const {spawnSync} = require("node:child_process");
 const {test, before, after} = require("node:test");
-const {chromium} = require("playwright");
+/* 同 test_native_extension_panel.cjs：playwright 是可选的浏览器验收依赖，
+   缺它就跳过，不要把它报成桥接坏了。 */
+let chromium = null;
+try { ({chromium} = require("playwright")); } catch (error) { chromium = null; }
+if (!chromium) {
+  test("原生扩展宿主桥接验收", {skip: "未安装 playwright，跳过真实渲染检查"}, () => {});
+  return;
+}
 const root = path.resolve(__dirname, "..");
 const pageRoot = path.join(root, "pages/陪伴小屋");
 let browser, receipts, sdkSource;
