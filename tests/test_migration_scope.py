@@ -3,7 +3,7 @@ import unittest
 from companion_v2.legacy.migration_scope import (
     AUTO_SAME_ID, REVIEW_ACCOUNT_DIFFERS, REVIEW_AMBIGUOUS, REVIEW_GROUP_MISSING,
     REVIEW_PERSONA_OTHER_ROLE, REVIEW_PERSONA_UNASSIGNED, REVIEW_PLATFORM_DIFFERS,
-    REVIEW_ROLE_MISSING, map_groups, map_personas, needs_review,
+    REVIEW_ROLE_MISSING, build_scope, map_groups, map_personas, needs_review,
 )
 
 
@@ -78,6 +78,48 @@ class PersonaScopeTests(unittest.TestCase):
         mapped = map_personas([{"persona_id": "x"}], {}, role_id="role-a")[0]
         self.assertEqual(mapped.document(), {"source_id": "x", "target_id": None,
                                              "auto": False, "reason": REVIEW_PERSONA_UNASSIGNED})
+
+
+class ScopeDocumentTests(unittest.TestCase):
+    def plan(self):
+        return {
+            "persona_sources": [{"persona_id": "astrbot", "label": "默认人格", "state": "ready"},
+                                {"persona_id": "other", "label": "旧人格", "state": "ready"}],
+            "group_networks": [{"source_group_id": "109", "members": 397, "edges": 80},
+                               {"source_group_id": "555", "members": 283, "edges": 80}],
+            "worldbook": {"groups": [{"source_group_id": "109", "entry_count": 1}],
+                          "member_profile_groups": [{"source_group_id": "109", "member_count": 88}]},
+            "private_contacts": {"importable": 3, "rejected": [{"reason": "x"}]},
+        }
+
+    def test_preview_lists_what_will_move_and_what_asks_for_review(self):
+        scope = build_scope(self.plan(), [target("109"), target("915")], {"astrbot": "role-a"},
+                            role_id="role-a", platform_id="qq-main", account_id="100")
+        self.assertEqual([item["source_id"] for item in scope["groups"]], ["109", "555"])
+        self.assertTrue(scope["groups"][0]["auto"])
+        self.assertEqual(scope["groups"][0]["counts"],
+                         {"members": 397, "edges": 80, "knowledge_entries": 1, "member_profiles": 88})
+        self.assertFalse(scope["groups"][1]["auto"])
+        self.assertEqual(scope["groups"][1]["reason"], REVIEW_GROUP_MISSING)
+        personas = {item["source_id"]: item for item in scope["personas"]}
+        self.assertTrue(personas["astrbot"]["auto"])
+        self.assertEqual(personas["other"]["reason"], REVIEW_PERSONA_UNASSIGNED)
+        self.assertEqual(scope["counts"], {"personas": 2, "personas_auto": 1, "groups": 2,
+                                           "groups_auto": 1, "review": 2})
+        self.assertEqual(scope["private"], {"contacts": 3, "rejected": 1})
+        self.assertEqual({item["kind"] for item in scope["review"]}, {"persona", "group"})
+
+    def test_review_token_tracks_the_reviewed_source(self):
+        first = build_scope(self.plan(), [target("109")], {"astrbot": "role-a"},
+                            role_id="role-a", platform_id="qq-main", account_id="100")
+        again = build_scope(self.plan(), [target("109")], {"astrbot": "role-a"},
+                            role_id="role-a", platform_id="qq-main", account_id="100")
+        self.assertEqual(first["token"], again["token"])
+        plan = self.plan()
+        plan["group_networks"][0]["members"] = 398
+        changed = build_scope(plan, [target("109")], {"astrbot": "role-a"},
+                              role_id="role-a", platform_id="qq-main", account_id="100")
+        self.assertNotEqual(first["token"], changed["token"])
 
 
 if __name__ == "__main__":

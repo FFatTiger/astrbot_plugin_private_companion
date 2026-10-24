@@ -118,3 +118,69 @@ def map_personas(source_personas, persona_roles, *, role_id):
 
 def needs_review(mappings):
     return tuple(item for item in mappings if not item.auto)
+
+
+def _group_counts(plan):
+    """Collect what each V1 group actually holds, so the preview totals match."""
+    counts = {}
+    def entry(group_id):
+        return counts.setdefault(_platform(group_id), {"members": 0, "edges": 0,
+            "knowledge_entries": 0, "member_profiles": 0})
+    for item in (plan or {}).get("group_networks") or ():
+        if not isinstance(item, dict):
+            continue
+        record = entry(item.get("source_group_id"))
+        if record is None:
+            continue
+        record["members"] = max(record["members"], int(item.get("members") or 0))
+        record["edges"] = max(record["edges"], int(item.get("edges") or 0))
+    worldbook = (plan or {}).get("worldbook") or {}
+    for item in worldbook.get("groups") or ():
+        if isinstance(item, dict):
+            record = entry(item.get("source_group_id"))
+            if record is not None:
+                record["knowledge_entries"] += int(item.get("entry_count") or 0)
+    for item in worldbook.get("member_profile_groups") or ():
+        if isinstance(item, dict):
+            record = entry(item.get("source_group_id"))
+            if record is not None:
+                record["member_profiles"] += int(item.get("member_count") or 0)
+    counts.pop("", None)
+    return counts
+
+
+def build_scope(plan, target_groups, persona_roles, *, role_id, platform_id, account_id):
+    """Compose the review document a role-driven migration shows before writing.
+
+    ``plan`` is the V1 data plan document (persona sources plus the per-group
+    inventories). Nothing here reads or writes storage: the page and the batch
+    importer call this same function, so what was reviewed is what gets applied.
+    """
+    from companion_v2.execution.models import digest
+
+    plan = plan or {}
+    personas = map_personas(plan.get("persona_sources") or (), persona_roles, role_id=role_id)
+    counts = _group_counts(plan)
+    groups = map_groups(list(counts), target_groups,
+                        platform_id=platform_id, account_id=account_id)
+    review = [{"kind": "persona", **item.document()}
+              for item in personas if not item.auto] + \
+             [{"kind": "group", **item.document()} for item in groups if not item.auto]
+    contacts = plan.get("private_contacts") or {}
+    document = {
+        "role_id": _platform(role_id),
+        "personas": [item.document() for item in personas],
+        "groups": [{**item.document(), "counts": counts.get(item.source_id, {})} for item in groups],
+        "private": {"contacts": int(contacts.get("importable") or contacts.get("count") or 0),
+                    "rejected": len(contacts.get("rejected") or ())},
+        "review": review,
+        "counts": {
+            "personas": len(personas),
+            "personas_auto": sum(1 for item in personas if item.auto),
+            "groups": len(groups),
+            "groups_auto": sum(1 for item in groups if item.auto),
+            "review": len(review),
+        },
+    }
+    document["token"] = digest(["legacy-role-scope.v1", document])
+    return document
