@@ -637,7 +637,9 @@ class LegacyMigrationWebAPI:
         network = document.get("group_networks") or ()
         worldbook_has_data = bool(worldbook.get("general_count") or worldbook.get("member_count")
             or worldbook.get("groups") or worldbook.get("member_profile_groups"))
-        flags["import_group_network"] = bool(network)
+        # Group networks are imported per (persona, group) by the group batch;
+        # a persona-level request has no group id and would fail as "not found".
+        flags["import_group_network"] = False
         flags["import_worldbook"] = worldbook_has_data
         flags["confirm_member_ids"] = True
         contacts = document.get("private_contacts") or {}
