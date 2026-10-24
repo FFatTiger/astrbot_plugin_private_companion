@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 import time
 from typing import Any
 
+from companion_v2.conversation import debounce_log
 from companion_v2.conversation.private_debounce import Policy, merge_texts, quiet_seconds
 
 
@@ -29,6 +30,8 @@ class Pending:
     state: str = "collecting"
     wake: asyncio.Event = field(default_factory=asyncio.Event)
     version: int = 0
+    wake_logged: bool = False
+    followups_logged: int = 0
 
     @property
     def latest_text(self):
@@ -63,6 +66,41 @@ class PrivateDebounce:
     @property
     def closed(self):
         return self._closed
+
+    def _timing(self, pending):
+        policy = pending.policy
+        if policy is None:
+            return ""
+        quiet = quiet_seconds(pending.latest_text, policy) * 1000
+        return debounce_log.timing(
+            quiet_ms=quiet,
+            min_ms=policy.min_seconds * 1000,
+            max_ms=policy.max_seconds * 1000,
+            total_ms=policy.total_seconds * 1000,
+        )
+
+    def _ensure_wake_logged(self, pending):
+        if pending.wake_logged or not pending.entries:
+            return
+        first_text = pending.entries[0][1]
+        pending.wake_logged = True
+        debounce_log.wake(
+            "private", "private_message", first_text,
+            target=pending.key, timing_text=self._timing(pending))
+        self._log_followups(pending)
+
+    def _log_followups(self, pending):
+        if not pending.wake_logged:
+            return
+        while pending.followups_logged < len(pending.entries) - 1:
+            index = pending.followups_logged + 1
+            text = pending.entries[index][1]
+            pending.followups_logged = index
+            debounce_log.followup(
+                "private", text, target=pending.key, count=index + 1,
+                elapsed_ms=max(0.0, (self._clock() - pending.created) * 1000),
+                timing_text=self._timing(pending),
+            )
 
     def reserve(self, key, event, text, *, received_at=None):
         """Register an event before the handler's first await.
@@ -103,6 +141,8 @@ class PrivateDebounce:
         pending.owner_ticket = ticket
         pending.latest_received = received
         pending.wake.set()
+        if pending.state == "active":
+            self._log_followups(pending)
         return Reservation(pending, ticket)
 
     @staticmethod
@@ -184,11 +224,13 @@ class PrivateDebounce:
                     pending.policy = policy
                     pending.version += 1
                     pending.wake.set()
+                self._ensure_wake_logged(pending)
                 return "active"
             pending.policy = policy
             pending.state = "active"
             pending.version += 1
             pending.wake.set()
+            self._ensure_wake_logged(pending)
             return "active"
 
     async def wait_for_resolution(self, reservation, event):
@@ -255,7 +297,15 @@ class PrivateDebounce:
             self._pending.pop(key, None)
             pending.state = "finished"
             ordered = sorted(zip(pending.tickets, pending.entries), key=lambda item: item[0])
-            return tuple(entry for _, entry in ordered)
+            entries = tuple(entry for _, entry in ordered)
+            if pending.wake_logged:
+                debounce_log.settled(
+                    "private", target=pending.key, inputs=len(entries),
+                    followups=max(0, len(entries) - 1),
+                    waited_ms=max(0.0, (self._clock() - pending.created) * 1000),
+                    timing_text=self._timing(pending),
+                )
+            return entries
 
     async def abort(self, reservation, *, event):
         pending = reservation.pending
@@ -267,6 +317,8 @@ class PrivateDebounce:
             self._pending.pop(key, None)
             if pending.state not in {"finished", "closed"}:
                 pending.state = "aborted"
+                if pending.wake_logged:
+                    debounce_log.cancelled("private", target=pending.key, reason="aborted")
             pending.wake.set()
             return True
 

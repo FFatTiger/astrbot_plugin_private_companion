@@ -68,6 +68,7 @@ from .astrbot_host.functional_commands import classify_functional_command, injec
 from .astrbot_host.group_command import receive_group_llm_command
 from .astrbot_host.reset_command import receive_reset_command
 from companion_v2.conversation.group_llm_block import GroupLLMBlock
+from companion_v2.conversation import debounce_log
 from .astrbot_host.private_debounce import PrivateDebounce
 from .astrbot_host.event_routing import (
     COMPANION_INTAKE_PRIORITY, competing_command_handler, suppress_default_reply,
@@ -697,9 +698,6 @@ class PrivateCompanionV2StagingPlugin(Star):
                         return
                     if core_reply_plan is not None:
                         core_reply_plan = self._core_reply_plan_with_text(core_reply_plan, merged_text)
-                    if len(debounced_entries) > 1:
-                        logger.info("[CompanionV2] 私聊防抖合并 event_ref=%s target=%s count=%s chars=%s",
-                                    event_ref, target.target_id, len(debounced_entries), len(merged_text))
             if status == "superseded":
                 self._suppress_debounced_private_event(
                     event, target, event_ref, debounce_manager, debounce_pending)
@@ -709,6 +707,13 @@ class PrivateCompanionV2StagingPlugin(Star):
                     event, target, event_ref, debounce_manager, debounce_pending,
                     reason="private_debounce_cancelled")
                 return
+        if (channel == "group" and group_admission is not None
+                and group_admission.get("reason") != "repeat"):
+            debounce_log.wake(
+                "group", group_admission.get("reason") or "role_choice",
+                getattr(event, "message_str", ""),
+                target=getattr(target, "target_id", ""),
+            )
         try:
             prepare_kwargs = {"group_admission": group_admission}
             if core_reply_plan is not None:

@@ -172,6 +172,38 @@ class PrivateDebounceStateTests(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(elapsed, 0.12)
         self.assertLess(timeouts[-1], timeouts[0])
 
+    async def test_logs_wake_followup_and_quiet_end_with_full_text(self):
+        manager = self.make_manager()
+        owner = object()
+        with self.assertLogs("companion_v2.conversation.debounce_log", level="INFO") as captured:
+            first = manager.reserve("target", owner, "在吗？")
+            await manager.configure(first, owner, manager.policy)
+            follow = manager.reserve("target", object(), "我想问你个事")
+            self.assertIs(follow.pending, first.pending)
+            await manager.wait_for_quiet(follow, follow.pending.owner)
+            entries = await manager.finish(follow, follow.pending.owner)
+        output = "\n".join(captured.output)
+        self.assertIn("收到唤醒消息", output)
+        self.assertIn("reason=私聊消息", output)
+        self.assertIn("message=在吗？", output)
+        self.assertIn("防抖期间收到后续消息", output)
+        self.assertIn("message=我想问你个事", output)
+        self.assertIn("防抖结束", output)
+        self.assertIn("收到 1 条后续消息，开始正常回复", output)
+        self.assertEqual(len(entries), 2)
+
+    async def test_logs_quiet_end_without_a_followup(self):
+        manager = self.make_manager()
+        owner = object()
+        with self.assertLogs("companion_v2.conversation.debounce_log", level="INFO") as captured:
+            first = manager.reserve("target", owner, "直接说完")
+            await manager.configure(first, owner, manager.policy)
+            await manager.wait_for_quiet(first, owner)
+            await manager.finish(first, owner)
+        output = "\n".join(captured.output)
+        self.assertIn("未接收到后续消息，开始正常回复", output)
+        self.assertNotIn("防抖期间收到后续消息", output)
+
     async def test_close_wakes_waiters_and_prevents_new_owners(self):
         manager = self.make_manager()
         owner = object()

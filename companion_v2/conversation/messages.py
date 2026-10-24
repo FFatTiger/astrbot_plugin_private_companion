@@ -31,6 +31,7 @@ from .busy_gate import BUSY_DELAY_INSTRUCTION
 from .perception_settings import validate as validate_perception_settings, validate_snapshot as validate_perception_snapshot
 from .reply_settings import validate as validate_reply_settings
 from .models import InboundConversationEvent
+from . import debounce_log
 from .media.models import ImageConversationEvent, INSTRUCTION as IMAGE_INSTRUCTION
 from .media.codec import image_descriptor
 from .media.service import ConversationImages
@@ -857,7 +858,7 @@ class ConversationMessages:
             if private and self.background_history is not None:
                 saved["background_history"] = self.background_history.capture(context, self.tasks.now())
             flow_row = self.runtime.read_one(
-                "SELECT reason FROM conversation_flows WHERE batch_id = ?", (batch_id,))
+                "SELECT * FROM conversation_flows WHERE batch_id = ?", (batch_id,))
             if flow_row is not None and flow_row["reason"] == "busy_delay":
                 saved["busy_delay"] = True
             not_before = self.tasks.now()
@@ -867,6 +868,22 @@ class ConversationMessages:
             connection.execute("""UPDATE conversation_batches SET state = 'sealed', revision = revision + 1,
                 generation_task_id = ?, contributions_json = ? WHERE batch_id = ?""",
                 (task_id, encode(saved), batch_id))
+            if (context.scope.kind is ScopeKind.GROUP and flow_row is not None
+                    and flow_row["reason"] in ("debounce", "busy_delay") and inputs):
+                try:
+                    timing_values = json.loads(flow_row["policy_json"])
+                    max_wait = float(timing_values["maximum_wait_seconds"])
+                    started_at = datetime.fromisoformat(flow_row["merge_until"]) - timedelta(seconds=max_wait)
+                    debounce_log.settled(
+                        "group", target=context.scope.native_scope_id,
+                        inputs=len(inputs), followups=max(0, len(inputs) - 1),
+                        waited_ms=max(0.0, (not_before - started_at).total_seconds() * 1000),
+                        timing_text=debounce_log.timing(
+                            quiet_ms=float(timing_values["quiet_seconds"]) * 1000,
+                            max_wait_ms=max_wait * 1000),
+                    )
+                except (KeyError, TypeError, ValueError):
+                    pass
             return require(self.tasks.submit(task))
 
     @outcome
