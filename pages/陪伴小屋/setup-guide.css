@@ -1844,3 +1844,521 @@
 }
 :root[data-motion="off"] .setup-migration-receipt-list li,
 :root[data-motion="off"] .setup-migration-workspace .button[aria-busy="true"]::before { animation: none !important; }
+
+/* ==========================================================================
+   旧版迁移 · 第二轮：引导设置角色 / 只读核对 / 显式迁移 / 完成（2026-10-25）
+   一张主卡最多三个区块；正文 72ch；主操作唯一且在动作条右侧。
+   ========================================================================== */
+
+/* ── 卡片、区块与标题层级 ─────────────────── */
+.setup-migration-main > .setup-migration-body {
+  display: grid;
+  gap: 0;
+  padding: 0 var(--sp-5) var(--sp-4);
+}
+.setup-migration-step-panel { display: grid; gap: 0; min-width: 0; }
+.setup-migration-block {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
+  padding: var(--sp-4) 0;
+  border-top: 1px solid var(--t-line);
+}
+.setup-migration-block:first-child { padding-top: var(--sp-2); border-top: 0; }
+.setup-migration-block > h3 {
+  margin: 0;
+  color: var(--t-text-strong);
+  font-size: var(--fs-title);
+  line-height: 1.3;
+}
+.setup-migration-stage-head h2 {
+  margin: var(--sp-1) 0 0;
+  color: var(--t-text-strong);
+  font-size: var(--fs-head);
+  line-height: 1.25;
+  letter-spacing: -.01em;
+}
+.setup-migration-hero-title {
+  margin: var(--sp-1) 0 0;
+  color: var(--t-text-strong);
+  font-size: var(--fs-head);
+  font-weight: 700;
+  line-height: 1.3;
+}
+.setup-migration-lead {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--t-text-soft);
+  font-size: var(--fs-body);
+  line-height: 1.6;
+}
+.setup-migration-micro {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--t-text-faint);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+}
+.setup-migration-summary-line {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--t-text);
+  font-size: var(--fs-body);
+  line-height: 1.6;
+}
+.setup-migration-summary-line strong {
+  color: var(--t-text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 只读状态行 ────────────────────────────── */
+.setup-migration-statusline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  min-width: 0;
+  margin: var(--sp-3) 0 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--t-line);
+  border-radius: var(--r-sm);
+  background: var(--t-surface-soft);
+}
+.setup-migration-statusline.is-warn {
+  border-color: color-mix(in srgb, var(--t-warn) 40%, var(--t-line));
+  background: color-mix(in srgb, var(--t-warn-quiet) 55%, var(--t-surface));
+}
+.setup-migration-statusline-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.setup-migration-statusline-item > span { color: var(--t-text-faint); font-size: var(--fs-micro); }
+.setup-migration-statusline-item > strong,
+.setup-migration-statusline-item > code {
+  color: var(--t-text-strong);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.setup-migration-statusline-item > small { color: var(--t-text-faint); font-size: var(--fs-micro); }
+.setup-migration-statusline-alert {
+  flex: 1 0 100%;
+  color: var(--t-warn-ink);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+}
+.setup-migration-statusline-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+.setup-migration-source-manual { position: relative; }
+.setup-migration-source-manual > summary {
+  color: var(--t-text-faint);
+  font-size: var(--fs-micro);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.setup-migration-source-manual[open] {
+  position: absolute;
+  top: calc(100% + var(--sp-2));
+  right: 0;
+  z-index: 3;
+  width: min(420px, 80vw);
+  padding: var(--sp-3);
+  border: 1px solid var(--t-line-firm);
+  border-radius: var(--r-sm);
+  background: var(--t-surface);
+  box-shadow: var(--t-shadow);
+}
+.setup-migration-source-manual .setup-legacy-path { margin: 0; }
+.setup-migration-source-manual .setup-migration-micro { margin-top: var(--sp-1); }
+
+/* ── 第 1 步：角色引导 ─────────────────────── */
+.setup-migration-role-empty {
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: start;
+  padding: var(--sp-3);
+  border: 1px dashed var(--t-line-firm);
+  border-radius: var(--r-sm);
+  background: var(--t-surface-soft);
+}
+.setup-migration-role-empty p { margin: 0; color: var(--t-text); font-size: var(--fs-body); line-height: 1.6; }
+.setup-migration-role-empty .setup-migration-micro { color: var(--t-text-faint); font-size: var(--fs-micro); }
+.setup-migration-role-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--t-line);
+  border-radius: var(--r-sm);
+  background: linear-gradient(118deg, color-mix(in srgb, var(--t-accent-quiet) 58%, var(--t-surface)) 0%, var(--t-surface) 74%);
+}
+.setup-migration-role-card-main { display: grid; gap: var(--sp-1); min-width: 0; }
+.setup-migration-role-card-name {
+  margin: 0;
+  color: var(--t-text-strong);
+  font-size: var(--fs-lead);
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.setup-migration-role-card-account,
+.setup-migration-role-card-personas {
+  margin: 0;
+  color: var(--t-text-soft);
+  font-size: var(--fs-tiny);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.setup-migration-role-card-personas { color: var(--t-text-faint); }
+.setup-migration-role-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+.setup-migration-role-editor .setup-actions { justify-content: flex-end; }
+.setup-migration-role-message {
+  margin: 0;
+  color: var(--t-ok-ink);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+}
+.setup-migration-role-manager {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--t-line);
+}
+.setup-migration-manager-title {
+  margin: 0;
+  color: var(--t-text-strong);
+  font-size: var(--fs-body);
+  font-weight: 700;
+}
+.setup-migration-manager-label {
+  margin: 0;
+  color: var(--t-text);
+  font-size: var(--fs-tiny);
+  font-weight: 600;
+}
+.setup-migration-field-note {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--t-text-faint);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+}
+.setup-migration-role-editor { display: grid; gap: var(--sp-2); margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--t-line); }
+.setup-migration-role-editor .setup-legacy-scope { margin: 0; }
+.setup-migration-persona-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.setup-migration-persona-fieldset legend { padding: 0; color: var(--t-text); font-size: var(--fs-tiny); font-weight: 600; }
+.setup-migration-persona-options { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-1); }
+.setup-migration-persona-option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--t-line);
+  border-radius: var(--r-pill);
+  background: var(--t-surface);
+  color: var(--t-text);
+  font-size: var(--fs-micro);
+  cursor: pointer;
+}
+.setup-migration-persona-option input { accent-color: var(--t-accent); }
+.setup-migration-persona-count { margin: 0; color: var(--t-text-faint); font-size: var(--fs-micro); }
+
+/* ── 第 2 步：紧凑表 ───────────────────────── */
+.setup-migration-table-scroll {
+  min-width: 0;
+  overflow-x: auto;
+  border: 1px solid var(--t-line);
+  border-radius: var(--r-sm);
+  background: var(--t-surface);
+}
+.setup-migration-compact-table {
+  width: 100%;
+  min-width: 660px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.setup-migration-compact-table col.col-item { width: 24%; }
+.setup-migration-compact-table col.col-now { width: 22%; }
+.setup-migration-compact-table col.col-after { width: 22%; }
+.setup-migration-compact-table col.col-reason { width: 32%; }
+.setup-migration-compact-table th,
+.setup-migration-compact-table td {
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--t-line);
+  font-size: var(--fs-tiny);
+  line-height: 1.5;
+  text-align: left;
+  vertical-align: top;
+}
+.setup-migration-compact-table thead th {
+  background: var(--t-surface-soft);
+  color: var(--t-text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.setup-migration-compact-table tbody th {
+  border-left: 2px solid var(--t-line-firm);
+  color: var(--t-text-strong);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.setup-migration-compact-table tbody tr.is-changed th { border-left-color: var(--t-accent); }
+.setup-migration-compact-table tbody tr.is-lost th { border-left-color: var(--t-warn); }
+.setup-migration-compact-table tbody td {
+  overflow: hidden;
+  color: var(--t-text-soft);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.setup-migration-compact-table tbody th code {
+  display: block;
+  margin-top: var(--sp-1);
+  color: var(--t-text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+.setup-migration-table-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-right: var(--sp-1);
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-pill);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.setup-migration-table-badge.is-changed { background: var(--t-accent-quiet); color: var(--t-accent-ink); }
+.setup-migration-table-badge.is-lost { background: var(--t-warn-quiet); color: var(--t-warn-ink); }
+.setup-migration-compact-table tfoot td { padding: 0; border-bottom: 0; background: var(--t-surface-soft); }
+.setup-migration-unchanged > summary {
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--t-text-soft);
+  font-size: var(--fs-micro);
+  cursor: pointer;
+}
+.setup-migration-unchanged p { margin: 0; padding: 0 var(--sp-3) var(--sp-2); color: var(--t-text-faint); font-size: var(--fs-micro); line-height: 1.5; }
+
+/* ── 第 2 步：范围双列 ─────────────────────── */
+.setup-migration-scope-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+.setup-migration-scope-column {
+  min-width: 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--t-line);
+  border-radius: var(--r-sm);
+  background: var(--t-surface);
+}
+.setup-migration-scope-column.is-warn {
+  border-color: color-mix(in srgb, var(--t-warn) 42%, var(--t-line));
+  background: color-mix(in srgb, var(--t-warn-quiet) 54%, var(--t-surface));
+}
+.setup-migration-column-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-2);
+  color: var(--t-text-strong);
+  font-size: var(--fs-tiny);
+  font-weight: 600;
+}
+.setup-migration-column-title span { color: var(--t-text-faint); font-size: var(--fs-micro); font-weight: 400; }
+.setup-migration-scope-column ul { display: grid; gap: var(--sp-1); margin: 0; padding: 0; list-style: none; }
+.setup-migration-scope-column li {
+  display: grid;
+  gap: var(--sp-1);
+  padding-top: var(--sp-1);
+  border-top: 1px solid var(--t-line);
+  min-width: 0;
+}
+.setup-migration-scope-column li span { color: var(--t-text); font-size: var(--fs-tiny); overflow-wrap: anywhere; }
+.setup-migration-scope-column li small { color: var(--t-text-faint); font-size: var(--fs-micro); line-height: 1.45; }
+.setup-migration-scope-column li.is-empty { border-top: 0; color: var(--t-text-faint); font-size: var(--fs-micro); }
+.setup-migration-scope { padding: 0; border: 0; background: transparent; }
+
+/* ── 第 3 步：迁移方式与进度 ───────────────── */
+.setup-migration-method {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+}
+.setup-migration-method-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--t-line);
+  border-radius: var(--r-sm);
+  background: var(--t-surface);
+  cursor: pointer;
+}
+.setup-migration-method-option.is-selected {
+  border-color: color-mix(in srgb, var(--t-accent) 52%, var(--t-line));
+  background: color-mix(in srgb, var(--t-accent-quiet) 58%, var(--t-surface));
+}
+.setup-migration-method-option input { margin: 2px 0 0; accent-color: var(--t-accent); flex: 0 0 auto; }
+.setup-migration-method-option > span { display: grid; gap: var(--sp-1); min-width: 0; }
+.setup-migration-method-option strong { color: var(--t-text-strong); font-size: var(--fs-tiny); }
+.setup-migration-method-option small { color: var(--t-text-faint); font-size: var(--fs-micro); line-height: 1.45; }
+.setup-migration-confirm-line {
+  margin: 0;
+  padding: var(--sp-3);
+  border-left: 2px solid var(--t-accent);
+  background: var(--t-accent-quiet);
+  color: var(--t-accent-ink);
+  font-size: var(--fs-body);
+  line-height: 1.6;
+}
+.setup-migration-progress {
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--r-pill);
+  background: var(--t-surface-sunken);
+}
+.setup-migration-progress span {
+  display: block;
+  width: 38%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--t-accent), var(--t-accent-hover));
+  animation: setup-migration-indeterminate 1.1s var(--ease-control, ease-in-out) infinite;
+}
+@keyframes setup-migration-indeterminate {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+.setup-migration-receipt-actions { display: flex; justify-content: flex-start; }
+
+/* ── 第 4 步：结果与待办 ───────────────────── */
+.setup-migration-remaining { display: grid; gap: var(--sp-1); margin: 0; padding: 0; list-style: none; }
+.setup-migration-remaining li {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--t-line);
+}
+.setup-migration-remaining li:first-child { padding-top: 0; border-top: 0; }
+.setup-migration-remaining strong { color: var(--t-text); font-size: var(--fs-tiny); }
+.setup-migration-remaining small { color: var(--t-text-faint); font-size: var(--fs-micro); line-height: 1.5; }
+.setup-migration-manual-result > summary { color: var(--t-text-soft); font-size: var(--fs-micro); cursor: pointer; }
+
+/* ── 动作条：左侧返回/次要，右侧唯一 primary ── */
+.setup-migration-actionbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  min-width: 0;
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--t-line);
+}
+.setup-migration-actionbar-left { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+.setup-migration-actionbar-right { display: grid; justify-items: end; gap: var(--sp-1); margin-left: auto; }
+.setup-migration-primary-reason {
+  max-width: 46ch;
+  color: var(--t-text-faint);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+  text-align: right;
+}
+
+/* ── 独立的逐项迁移页面 ───────────────────── */
+.setup-migration-manual-page { display: grid; gap: var(--sp-4); min-width: 0; }
+.setup-migration-manual-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  border: 1px solid var(--t-line);
+  border-radius: var(--r-md);
+  background: linear-gradient(118deg, color-mix(in srgb, var(--t-accent-quiet) 58%, var(--t-surface)) 0%, var(--t-surface) 76%);
+}
+.setup-migration-manual-head h2 { margin: var(--sp-1) 0 0; color: var(--t-text-strong); font-size: var(--fs-head); line-height: 1.3; }
+.setup-migration-manual-head .button { flex: 0 0 auto; }
+.setup-migration-manual-page > .setup-legacy-install-note,
+.setup-migration-manual-page > .setup-migration-check,
+.setup-migration-manual-page > .setup-legacy-data { margin: 0; }
+.setup-migration-manual-foot { display: flex; justify-content: flex-end; }
+.setup-migration-manual-page .setup-legacy-data { padding-top: var(--sp-3); }
+
+/* ── 窄屏：单列、按钮占满 ──────────────────── */
+@media (max-width: 1120px) {
+  .setup-migration-scope-columns { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .setup-migration-main > .setup-migration-body { padding: 0 var(--sp-3) var(--sp-3); }
+  .setup-migration-statusline { align-items: flex-start; }
+  .setup-migration-statusline-actions { width: 100%; margin-left: 0; justify-content: space-between; }
+  .setup-migration-statusline-item { flex-wrap: wrap; }
+  .setup-migration-source-manual[open] { right: auto; left: 0; width: min(420px, 88vw); }
+  .setup-migration-role-card { grid-template-columns: minmax(0, 1fr); }
+  .setup-migration-role-actions .button,
+  .setup-migration-role-empty .button { width: 100%; }
+  .setup-migration-method { grid-template-columns: minmax(0, 1fr); }
+  .setup-migration-actionbar { align-items: stretch; }
+  .setup-migration-actionbar-left,
+  .setup-migration-actionbar-right { width: 100%; margin-left: 0; justify-items: stretch; }
+  .setup-migration-actionbar-left .button,
+  .setup-migration-actionbar-right .button { width: 100%; }
+  .setup-migration-primary-reason { max-width: none; text-align: left; }
+  .setup-migration-manual-head { display: grid; gap: var(--sp-2); padding: var(--sp-3); }
+  .setup-migration-manual-head .button { width: 100%; }
+  .setup-migration-manual-foot .button { width: 100%; }
+  .setup-migration-compact-table { min-width: 0; table-layout: auto; }
+  .setup-migration-compact-table thead { display: none; }
+  .setup-migration-compact-table,
+  .setup-migration-compact-table tbody,
+  .setup-migration-compact-table tr,
+  .setup-migration-compact-table th,
+  .setup-migration-compact-table td { display: block; width: auto; }
+  .setup-migration-compact-table tbody tr {
+    padding: var(--sp-2) var(--sp-3);
+    border-bottom: 1px solid var(--t-line);
+    border-left: 2px solid var(--t-line-firm);
+  }
+  .setup-migration-compact-table tbody tr.is-changed { border-left-color: var(--t-accent); }
+  .setup-migration-compact-table tbody tr.is-lost { border-left-color: var(--t-warn); }
+  .setup-migration-compact-table tbody th,
+  .setup-migration-compact-table tbody td {
+    border: 0;
+    padding: var(--sp-1) 0;
+    white-space: normal;
+    overflow: visible;
+  }
+  .setup-migration-compact-table tbody td::before {
+    content: attr(data-label) "：";
+    color: var(--t-text-faint);
+    font-size: var(--fs-micro);
+  }
+  .setup-migration-compact-table tfoot,
+  .setup-migration-compact-table tfoot tr,
+  .setup-migration-compact-table tfoot td { display: block; }
+}
+
+/* 动效偏好：关闭不确定进度与回执出现动画。 */
+@media (prefers-reduced-motion: reduce) {
+  .setup-migration-progress span { animation: none; width: 100%; opacity: .55; }
+}
+:root[data-motion="off"] .setup-migration-progress span { animation: none; width: 100%; opacity: .55; }

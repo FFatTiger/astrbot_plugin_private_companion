@@ -162,7 +162,7 @@ window.CompanionMigrationConfiguration = (() => {
           <td data-label="旧版 → 当前"><div class="migration-config-diff"><span class="old">${esc(row.oldText)}</span><span class="arrow" aria-label="到">→</span><strong>${esc(row.currentText)}</strong></div></td>
           <td data-label="状态">${badge(row)}</td><td data-label="处理方式">${controls(row, locked)}</td></tr>`).join("");
     }).join("");
-    return `<div class="migration-config-review"><header class="migration-config-heading"><h4>配置对照</h4><span>已检查 ${count.total} 项</span></header>
+    return `<div class="migration-config-review"><header class="migration-config-heading"><h3>配置对照</h3><span>已检查 ${count.total} 项</span></header>
       <div class="migration-config-toolbar"><nav aria-label="筛选配置">${[["all", "全部", count.total], ["pending", "需确认", count.pending], ["merge", "可沿用", count.merge], ["keep", "保持当前", count.keep]].map(([id, label, number]) =>
         `<button type="button" data-migration-config-action="filter" data-filter="${id}" aria-pressed="${filter === id}">${label} ${number}</button>`).join("")}</nav>
         <div class="migration-config-tools"><label class="migration-config-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg><input type="search" data-migration-config-search value="${esc(query)}" placeholder="字段、旧值或当前值" aria-label="搜索配置字段"></label><button type="button" class="migration-config-reset" data-migration-config-action="reset" ${locked ? "disabled" : ""}>恢复推荐选择</button></div>
@@ -173,6 +173,9 @@ window.CompanionMigrationConfiguration = (() => {
       <p class="migration-config-hint">密钥只显示是否已配置；关联的连接参数会一同沿用或保留。${count.deferred ? ` ${count.deferred} 项需手动设置，可稍后从迁移结果进入。` : ""}</p></div>`;
   }
   return {update, supported, stats, selection, render, click,
+    rows: () => rows.map(row => ({...row})),
+    /* “沿用旧版配置”是整批选择：包含需要确认的行，由一次明确的二选一确认。 */
+    allSelection: () => [...new Set(rows.filter(row => row.selection_id).map(row => row.selection_id))],
     search(value) { query = String(value || ""); page = 1; },
     reset() { plan = null; rows = []; decisions.clear(); filter = "all"; query = ""; page = 1; }};
 })();

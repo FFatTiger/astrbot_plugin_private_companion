@@ -168,7 +168,7 @@ function harness({status, responses = {}, targets = [], refreshedTargets = targe
 const readyStatus = extra => ({step: 'complete', prepared: true, ready: true,
   completed: ['model', 'knowledge', 'relationships'], skipped: [], proactive_test: {state: 'delivered'}, ...extra});
 
-test('the configuration questionnaire loads comparisons and saves only selected rows before continuing', async () => {
+test('the review is read-only and migration starts only after an explicit confirmation', async () => {
   const route = 'host/targets/first/roles/role-a/legacy';
   const rows = [
     {id: 'enabled', selection_id: 'enabled', selection_unit: 'enabled', field: 'proactive.contact.enabled',
@@ -177,6 +177,10 @@ test('the configuration questionnaire loads comparisons and saves only selected 
       label: '主动间隔', before: 600, after: 900, current_known: true, status: 'confirm'},
   ];
   const discovery = {findings: [{source_id: 'private.host_configuration', state: 'ready'}]};
+  const plan = {...discovery, change_count: 2, plan_token: 'reviewed',
+    configuration_review: {version: 1, rows}, scope_status: [{available: true}]};
+  const freshPlan = {...plan, plan_token: 'reviewed-fresh'};
+  const emptyPlan = {...plan, change_count: 0, plan_token: 'reviewed-empty'};
   const scope = {token: 'scope-token',
     personas: [{source_id: '', auto: true, target_id: 'role-a'},
       {source_id: 'old', auto: false, target_id: null, reason: 'persona_not_assigned_to_role'}],
@@ -190,10 +194,9 @@ test('the configuration questionnaire loads comparisons and saves only selected 
   const page = harness({status: readyStatus(), targets: [{target_id: 'first', roles: [
     {role_id: 'role-a', legacy_api: '/astrbot_plugin_private_companion/' + route}]}], responses: {
     ['GET ' + route]: discovery,
-    ['GET ' + route + '/plan']: {...discovery, change_count: 2, plan_token: 'reviewed',
-      configuration_review: {version: 1, rows}, scope_status: [{available: true}]},
+    ['GET ' + route + '/plan']: [plan, freshPlan, emptyPlan],
     ['POST ' + route + '/apply']: {selection_applied: true, configuration_imported: true,
-      completion_recorded: true, kept_count: 1, written_count: 1, errors: []},
+      completion_recorded: true, kept_count: 1, written_count: 2, errors: []},
     ['GET ' + route + '/scope']: scope,
     ['POST ' + route + '/batch-apply']: batch,
     ['GET ' + route + '/data-plan']: {plan_token: 'data-token'},
@@ -202,42 +205,72 @@ test('the configuration questionnaire loads comparisons and saves only selected 
   await settle();
   page.clickMigrationWizard('next');
   await settle();
-  page.clickMigrationWizard('next');
+
+  /* 第 2 步（核对）只读：摘要、紧凑表、范围，三步之外没有写按钮。 */
+  assert.match(page.html, /data-migration-step="2"/);
+  assert.match(page.html, /配置将改写 <strong>2<\/strong> 项 · 失效 <strong>0<\/strong> 项 · 保留 <strong>0<\/strong> 项/);
+  assert.match(page.html, /setup-migration-compact-table/);
+  assert.match(page.html, /<th scope="col">项目<\/th><th scope="col">现在<\/th><th scope="col">迁移后<\/th><th scope="col">影响与原因<\/th>/);
+  assert.match(page.html, /主动联系/);
+  assert.match(page.html, /主动间隔/);
+  assert.match(page.html, /data-setup-legacy-wizard="manual"/);
+  assert.doesNotMatch(page.html, /data-setup-legacy-action="legacy-auto"/);
+  assert.doesNotMatch(page.html, /写入当前版本/);
+  assert.equal(page.calls.some(call => call.method === 'POST'), false,
+    '核对页不得写入');
+
+  /* 逐项迁移已移出向导：旧配置表和逐项导入只在独立面板出现。 */
+  page.clickMigrationWizard('manual');
   await settle();
+  assert.match(page.html, /data-setup-legacy-wizard="back-to-oneclick"/);
   assert.match(page.html, /migration-config-table/);
-  assert.doesNotMatch(page.html, /source-available|source-selected/);
-  assert.match(page.html, /data-setup-legacy-wizard="skip-config"/);
+  assert.match(page.html, /data-setup-legacy-action="legacy-apply"/);
+  page.clickMigrationWizard('back-to-oneclick');
+  await settle();
+  assert.match(page.html, /data-migration-step="2"/);
+
+  /* 进入迁移页不自动执行，必须先选迁移方式再点「开始迁移」。 */
   page.clickMigrationWizard('next');
   await settle();
-  assert.equal(page.calls.some(call => call.method === 'POST' && call.route.endsWith('/apply')), false);
-  page.chooseMigrationConfig('enabled', 'keep');
-  page.chooseMigrationConfig('interval', 'merge');
-  page.clickMigrationWizard('next');
+  assert.match(page.html, /data-migration-step="3"/);
+  assert.match(page.html, /写入配置 2 项 \+ 导入 1 个人格 \/ 0 个群 \/ 0 位联系人/);
+  assert.match(page.html, /data-setup-legacy="config-mode"[^>]*value="inherit"[^>]*checked/);
+  assert.match(page.html, /data-setup-legacy-wizard="run"[^>]*>开始迁移</);
+  assert.equal(page.calls.some(call => call.method === 'POST'), false,
+    '进入迁移页不得写入');
+
+  page.clickMigrationWizard('run');
   await settle();
   const saved = page.calls.find(call => call.method === 'POST' && call.route.endsWith('/apply'));
   assert.deepEqual(JSON.parse(JSON.stringify(saved.body)), {
-    plan_token: 'reviewed', configuration_scope: 'plugin', selected_fields: ['interval'],
+    plan_token: 'reviewed-fresh', configuration_scope: 'plugin', selected_fields: ['enabled', 'interval'],
   });
-  assert.match(page.html, /选择资料范围/);
-  assert.match(page.html, /高级：逐项迁移/);
-  /* 新默认路径在第 2 步自动读取迁移范围，不再等到配置写入后再读资料清单。 */
-  assert.ok(page.calls.some(call => call.method === 'GET' && call.route.endsWith('/scope')));
-  assert.match(page.html, /data-setup-legacy-run="scope"/);
-  /* 第 3 步直接执行：配置写入后，同一次执行把自动项导入、需确认项只回执。 */
-  assert.match(page.html, /data-migration-step="3"/);
   const batchCall = page.calls.find(call => call.method === 'POST' && call.route.endsWith('/batch-apply'));
-  assert.ok(batchCall, '第 3 步应执行一键迁移');
+  assert.ok(batchCall, '确认后才执行迁移');
   assert.deepEqual(JSON.parse(JSON.stringify(batchCall.body.personas)), ['', 'old']);
   assert.deepEqual(JSON.parse(JSON.stringify(batchCall.body.groups)), []);
   assert.equal(batchCall.body.token, 'scope-token');
-  assert.match(page.html, /逐项回执/);
   assert.match(page.html, /1 已导入 · 1 需确认 · 0 失败/);
   assert.match(page.html, /单项失败不会中断其余项目/);
+
+  /* 第二次执行重新试算：配置无变化时不重复 apply。 */
+  const planCallsBeforeRetry = page.calls.filter(call => call.route === route + '/plan').length;
+  const applyCallsBeforeRetry = page.calls.filter(call => call.method === 'POST' && call.route.endsWith('/apply')).length;
+  page.clickMigrationWizard('run');
+  await settle();
+  assert.equal(page.calls.filter(call => call.route === route + '/plan').length, planCallsBeforeRetry + 1,
+    '重试必须先重新试算');
+  assert.equal(page.calls.filter(call => call.method === 'POST' && call.route.endsWith('/apply')).length,
+    applyCallsBeforeRetry, '配置已是最新时不得重发旧 token');
+  assert.match(page.html, /配置已是最新，无需写入/);
+
   page.clickMigrationWizard('next');
   await settle();
   assert.match(page.html, /data-migration-step="4"/);
-  assert.match(page.html, /aria-label="迁移概况"/);
-  assert.match(page.html, /开始使用/);
+  assert.match(page.html, /<h3>结果汇总<\/h3>/);
+  assert.match(page.html, /<h3>仍需处理<\/h3>/);
+  assert.match(page.html, /<h3>逐项回执<\/h3>/);
+  assert.match(page.html, /data-go="life"/);
 });
 
 test('first upgrade opens migration with the newly saved destination available', async () => {
@@ -257,12 +290,13 @@ test('first upgrade opens migration with the newly saved destination available',
   assert.deepEqual(page.navigation, [['manage', 'data', 'migration']]);
   page.mountMigration();
   await settle();
-  assert.equal(page.calls.some(call => call.method === 'GET' && call.route === route), false,
-    'migration should wait for the role-first step before reading legacy data');
+  assert.ok(page.calls.some(call => call.method === 'GET' && call.route === route),
+    '核对是第一步的下一屏，迁移页应在进入时只读读取旧版来源');
   page.clickMigrationWizard('next');
   await settle();
-  assert.ok(page.calls.some(call => call.method === 'GET' && call.route === route),
-    'the role-first step should start discovery only after the user continues');
+  assert.equal(page.calls.filter(call => call.method === 'GET' && call.route === route).length, 1,
+    '进入核对页不应重复扫描');
+  assert.match(page.html, /data-migration-step="2"/);
 });
 
 test('startup detects an old configuration and offers a direct upgrade guide once', async () => {
@@ -326,6 +360,7 @@ test('private memory migration confirms the selected role and exposes retained w
   await settle();
   page.change('', 'private', {setupLegacy: 'target'});
   page.change('', 'role', {setupLegacy: 'role'});
+  await openLegacyManual(page);
   page.click('legacy-private-memory-plan');
   await settle();
   assert.match(page.html, /74 条历史资料/);
@@ -355,9 +390,9 @@ test('migration guide uses old and current version labels in its visible copy', 
   await settle();
   assert.match(page.html, /迁移设置/);
   assert.doesNotMatch(page.html, /\bV[12]\b/);
-  /* 8 → 4：默认路径是角色与来源 → 核对 → 一键迁移 → 完成，不再有 5..8 步。 */
+  /* 4 步：设置角色 → 核对 → 迁移 → 完成。 */
   assert.match(page.html, /第 <b>1<\/b> \/ 4 步/);
-  for (const [step, label] of [[1, '角色与来源'], [2, '核对'], [3, '一键迁移'], [4, '完成']]) {
+  for (const [step, label] of [[1, '设置角色'], [2, '核对'], [3, '迁移'], [4, '完成']]) {
     assert.match(page.html, new RegExp(`data-setup-legacy-step="${step}"[\\s\\S]*?<strong>${label}</strong>`),
       `第 ${step} 步应是 ${label}`);
   }
@@ -422,6 +457,7 @@ async function plannedMultiDestinationPage(firstApplyResponse) {
   await settle();
   page.change('', 't-first', {setupLegacy: 'target'});
   page.change('', 'r-first', {setupLegacy: 'role'});
+  await openLegacyManual(page);
   page.click('legacy-data-plan');
   await settle();
   return {page, firstRoute, secondRoute};
@@ -458,14 +494,18 @@ async function legacyPersonaMappingPage({targets, personaSources}) {
 }
 
 async function enterMigrationDataStep(page, {mapping = false} = {}) {
-  /* 4 步流程：第 1 步读来源，进入第 2 步后自动汇总配置与范围。
-     逐项能力收在第 2 步的「高级：逐项迁移」里，不再有独立的资料步骤。 */
-  page.clickMigrationWizard('next');
+  /* 逐项迁移已移出向导：从这里进入独立的逐项面板。 */
+  page.clickMigrationWizard('manual');
   await settle();
   if (mapping) {
     page.clickMigrationView('personas', true);
     await settle();
   }
+}
+
+async function openLegacyManual(page) {
+  page.clickMigrationWizard('manual');
+  await settle();
 }
 
 test('first-run stages start with binding, then model, knowledge, relationships and active test', async () => {
@@ -601,7 +641,7 @@ test('persona drafting and acquaintance-card saving stay inside the setup guide'
   assert.doesNotMatch(page.html, /data-go="manage"/);
 });
 
-test('a unique migration destination is preselected without scanning until the user continues', async () => {
+test('a unique destination preselects the role and reads the source without writing', async () => {
   const discovery = {v1_root: 'V1-data-root', findings: [
     {source_id: 'private.host_configuration', state: 'ready', detail: '可以迁移到 V2。'},
     {source_id: 'private.core_profiles', state: 'data_ready', detail: '日记、世界书和素材导入器已就绪。'},
@@ -617,30 +657,35 @@ test('a unique migration destination is preselected without scanning until the u
 
   assert.equal(page.calls.some(item => item.route === 'setup/status'), false,
     'the standalone migration workspace must not depend on first-run state');
-  assert.match(page.html, /先设置接收角色/);
-  assert.match(page.html, /setup-migration-context/);
+  assert.match(page.html, /data-migration-step="1"/);
+  assert.match(page.html, /当前角色/);
+  assert.match(page.html, /默认人格/);
+  assert.match(page.html, /就用这个角色/);
   assert.match(page.html, /旧版只读/);
   assert.match(page.html, /<option value="t-first" selected>账号一/);
   assert.match(page.html, /data-setup-legacy="bot"/);
   assert.match(page.html, /data-setup-legacy="role"/);
   assert.match(page.html, /<option value="r-first" selected>默认人格/);
-  assert.equal(page.calls.some(item => item.method === 'GET' && item.route === route), false,
-    'role preparation must finish before the read-only V1 scan starts');
+  const firstScan = page.calls.find(item => item.method === 'GET' && item.route === route);
+  assert.ok(firstScan, '进入第一步后只读读取来源');
+  assert.deepEqual(JSON.parse(JSON.stringify(firstScan.body)), {configuration_scope: 'plugin'});
   assert.equal(page.calls.some(item => item.method === 'POST' && item.route.startsWith(route)), false,
     'preselection must never write migration data');
+  assert.match(page.html, /V1-data-root/);
+  assert.match(page.html, /来源/);
+
   page.clickMigrationWizard('next');
   await settle();
-  const firstScan = page.calls.find(item => item.method === 'GET' && item.route === route);
-  assert.ok(firstScan, 'the first wizard action starts the read-only V1 scan');
-  assert.deepEqual(JSON.parse(JSON.stringify(firstScan.body)), {configuration_scope: 'plugin'});
-  page.clickMigrationStep(2);
-  assert.match(page.html, /V1-data-root/);
-  page.clickMigrationStep(2);
-  await settle();
+  assert.match(page.html, /data-migration-step="2"/);
+  assert.match(page.html, /配置将改写/);
+  assert.match(page.html, /迁移范围/);
+  assert.equal(page.calls.filter(item => item.method === 'GET' && item.route === route).length, 1,
+    '进入核对页不重复扫描');
+
+  await openLegacyManual(page);
   assert.match(page.html, /Reality 摄像头与音频/);
+  assert.match(page.html, /重新检查旧版/);
   page.change('', 'all', {setupLegacy: 'configuration-scope'});
-  assert.match(page.html, /检查旧版配置/);
-  assert.match(page.html, /尚未检查/);
   page.click('legacy-scan');
   await settle();
   const scan = page.calls.filter(item => item.method === 'GET' && item.route === route).at(-1);
@@ -692,7 +737,7 @@ test('the role-first step lists multiple Bots and roles before any migration tar
   page.clickMigrationWizard('create-role');
   assert.match(page.html, /AstrBot 人格（至少选择一个）/);
   assert.match(page.html, /type="checkbox" data-setup-legacy="new-persona"/);
-  assert.match(page.html, /保存角色/);
+  assert.match(page.html, /创建角色并继续/);
   assert.deepEqual(page.navigation, []);
 });
 
@@ -730,7 +775,7 @@ test('the migration guide creates a role inline and selects its refreshed destin
       persona_ids: ['星缘', '烛雨'], role_id: '新角色'});
   assert.equal(page.directoryRefreshes, 1);
   assert.match(page.html, /<option value="新角色" selected>/);
-  assert.match(page.html, /角色已保存，可以继续检查旧版来源/);
+  assert.match(page.html, /角色已创建，下一步：核对旧版配置与范围/);
   assert.doesNotMatch(page.html, /data-setup-legacy-wizard="next" disabled/);
   assert.deepEqual(page.navigation, []);
 });
@@ -806,21 +851,24 @@ test('a slow V1 discovery does not hold up the role-first migration page', async
   page.mountMigration();
   await settle();
 
-  assert.match(page.html, /先设置接收角色/);
+  assert.match(page.html, /当前角色/);
+  assert.match(page.html, /data-migration-step="1"/);
   assert.doesNotMatch(page.html, /旧版的数据还在/);
-  assert.equal(page.calls.some(item => item.method === 'GET' && item.route === route), false);
+  assert.ok(page.calls.some(item => item.method === 'GET' && item.route === route),
+    '进入迁移页后会异步读取旧版来源');
 
   page.clickMigrationWizard('next');
   await settle();
-  assert.ok(page.calls.some(item => item.method === 'GET' && item.route === route));
+  assert.match(page.html, /data-migration-step="2"/);
+  assert.match(page.html, /正在只读检查旧版来源/);
 
   finishDiscovery({v1_root: 'V1-data-root', findings: [], install: {
     phase: 'upgrade_pending', pending: true, v1_present: true, v1_root: 'V1-data-root',
     configuration_imported: false,
   }});
   await settle();
-  assert.match(page.html, /已找到旧版资料来源/);
-  assert.match(page.html, /发现目录：<code>V1-data-root<\/code>/);
+  assert.match(page.html, /V1-data-root/);
+  assert.doesNotMatch(page.html, /正在只读检查旧版来源/);
 });
 
 test('upgrade confirmation keeps configuration and data migration statuses separate', async () => {
@@ -841,8 +889,7 @@ test('upgrade confirmation keeps configuration and data migration statuses separ
   page.change('', 'r-first', {setupLegacy: 'role'});
   page.click('legacy-scan');
   await settle();
-  page.clickMigrationStep(2);
-  page.clickMigrationStep(2);
+  await openLegacyManual(page);
 
   await settle();
   assert.match(page.html, /请核对重载后的绑定、模型与回复/);
@@ -887,8 +934,7 @@ test('upgrade guide completes discovery, config inheritance and post-restart con
   beforeRestart.change('', 'r-first', {setupLegacy: 'role'});
   beforeRestart.click('legacy-scan');
   await settle();
-  beforeRestart.clickMigrationStep(2);
-  beforeRestart.clickMigrationStep(2);
+  await openLegacyManual(beforeRestart);
 
   await settle();
   assert.match(beforeRestart.html, /立即继承旧版配置/);
@@ -916,8 +962,7 @@ test('upgrade guide completes discovery, config inheritance and post-restart con
   afterRestart.change('', 'r-first', {setupLegacy: 'role'});
   afterRestart.click('legacy-scan');
   await settle();
-  afterRestart.clickMigrationStep(2);
-  afterRestart.clickMigrationStep(2);
+  await openLegacyManual(afterRestart);
   await settle();
   assert.match(afterRestart.html, /请核对重载后的绑定、模型与回复/);
   assert.match(afterRestart.html, /确认重载后运行正常/);
@@ -955,6 +1000,7 @@ test('upgrade guide blocks automatic inheritance when a configuration source is 
     page.change('', 'r-first', {setupLegacy: 'role'});
     page.click('legacy-scan');
     await settle();
+    await openLegacyManual(page);
 
     page.click('legacy-auto');
     await settle();
@@ -982,6 +1028,7 @@ test('upgrade guide blocks automatic inheritance when a configuration source is 
   realityUnreadable.change('', 'r-first', {setupLegacy: 'role'});
   realityUnreadable.click('legacy-scan');
   await settle();
+  await openLegacyManual(realityUnreadable);
   realityUnreadable.click('legacy-auto');
   await settle();
   assert.equal(realityUnreadable.calls.some(item => item.method === 'POST' && item.route === route + '/auto'), true,
@@ -1004,9 +1051,7 @@ test('upgrade guide identifies legacy imports whose configuration scope was neve
   page.change('', 'r-first', {setupLegacy: 'role'});
   page.click('legacy-scan');
   await settle();
-    page.clickMigrationStep(2);
-    page.clickMigrationStep(2);
-    await settle();
+  await openLegacyManual(page);
 
   assert.match(page.html, /旧版配置迁移记录，但原记录没有保存迁移范围/);
   assert.doesNotMatch(page.html, /旧版配置已迁移。请核对重载后的绑定/);
@@ -1218,14 +1263,7 @@ test('migration apply sends the reviewed plan token and refuses locally without 
   }});
   page.mountMigration();
   await settle();
-  page.click('legacy-apply');
-  await settle();
-  assert.equal(page.calls.some(item => item.route === route + '/apply'), false);
-  page.change('', 't-first', {setupLegacy: 'target'});
-  page.change('', 'r-first', {setupLegacy: 'role'});
-  page.click('legacy-apply');
-  await settle();
-  assert.equal(page.calls.some(item => item.route === route + '/apply'), false);
+  await openLegacyManual(page);
 
   page.change('', 'proactive', {setupLegacy: 'configuration-scope'});
   assert.match(page.html, /主动消息与天气基础设置/);
@@ -1237,7 +1275,7 @@ test('migration apply sends the reviewed plan token and refuses locally without 
   assert.deepEqual(JSON.parse(JSON.stringify(scan.options)), {timeoutMs: 300000});
   page.click('legacy-plan');
   await settle();
-  const planned = page.calls.find(item => item.route === route + '/plan');
+  const planned = page.calls.filter(item => item.route === route + '/plan').at(-1);
   assert.deepEqual(JSON.parse(JSON.stringify(planned.body)),
     {configuration_scope: 'proactive'});
   assert.deepEqual(JSON.parse(JSON.stringify(planned.options)), {timeoutMs: 300000});
@@ -1257,6 +1295,17 @@ test('migration apply sends the reviewed plan token and refuses locally without 
   assert.deepEqual(JSON.parse(JSON.stringify(applied.options)), {timeoutMs: 300000});
   assert.match(page.html, /已写入 3 项当前版本设置/);
   assert.match(page.html, /请重载本插件或重启 AstrBot 后回来核对/);
+
+  /* 没有试算计划时，逐项面板本地拒绝写入，不发请求。 */
+  const noPlan = harness({status: readyStatus(), targets, responses: {
+    ['GET ' + route]: discovery,
+  }});
+  noPlan.mountMigration();
+  await settle();
+  await openLegacyManual(noPlan);
+  noPlan.click('legacy-apply');
+  await settle();
+  assert.equal(noPlan.calls.some(item => item.method === 'POST' && item.route === route + '/apply'), false);
 });
 
 test('configuration compatibility separates unsupported settings from actionable tasks and replacement mechanisms', async () => {
@@ -1278,6 +1327,13 @@ test('configuration compatibility separates unsupported settings from actionable
   }});
   page.mountMigration();
   await settle();
+  page.clickMigrationWizard('next');
+  await settle();
+  assert.match(page.html, /配置将改写 <strong>0<\/strong> 项 · 失效 <strong>7<\/strong> 项 · 保留 <strong>0<\/strong> 项/);
+  assert.match(page.html, /setup-migration-table-badge is-lost">失效/);
+  assert.match(page.html, /basic_config\.enable_p4_b_legacy_score_isolation/);
+  assert.doesNotMatch(page.html, /data-setup-legacy-action="legacy-auto"/);
+  await openLegacyManual(page);
   page.change('', 'plugin', {setupLegacy: 'configuration-scope'});
   page.click('legacy-scan');
   await settle();
@@ -1290,12 +1346,8 @@ test('configuration compatibility separates unsupported settings from actionable
   const unsupported = page.html.split('暂不支持的旧设置（1）')[1].split('改由新版机制处理（2）')[0];
   assert.doesNotMatch(unsupported, /data-setup-legacy-settings/);
   assert.match(page.html, /data-setup-legacy-settings="models"/);
-  page.clickMigrationView('review');
-  assert.match(page.html, /1 项提供设置入口/);
   page.clickMigrationShortcut('detail', 'audit-settings');
-  for (const key of ['review-configuration', 'config-audit', 'audit-settings']) {
-    assert.ok(page.html.includes(`data-migration-detail="${key}" open`), key);
-  }
+  assert.ok(page.html.includes('data-migration-detail="audit-settings" open'));
 });
 
 test('migration settings use the chosen destination and keep selections while refreshing old plans', async () => {
@@ -1372,9 +1424,10 @@ test('migration can use an explicitly selected V1 directory through scan, plan a
   await settle();
   page.change('', 't-first', {setupLegacy: 'target'});
   page.change('', 'r-first', {setupLegacy: 'role'});
+  const scansBeforeRoot = page.calls.filter(item => item.method === 'GET' && item.route === route).length;
   page.change('', root, {setupLegacy: 'root'});
-  assert.equal(page.calls.some(item => item.method === 'GET' && item.route === route), false,
-    'changing the optional source directory must not start a scan implicitly');
+  assert.equal(page.calls.filter(item => item.method === 'GET' && item.route === route).length, scansBeforeRoot,
+    'changing the optional source directory must not start a new scan implicitly');
   page.change('', 'proactive', {setupLegacy: 'configuration-scope'});
   page.click('legacy-scan');
   await settle();
@@ -1382,7 +1435,7 @@ test('migration can use an explicitly selected V1 directory through scan, plan a
     {configuration_scope: 'proactive', v1_root: root});
   page.click('legacy-plan');
   await settle();
-  assert.deepEqual(JSON.parse(JSON.stringify(page.calls.find(item => item.route === planRoute).body)),
+  assert.deepEqual(JSON.parse(JSON.stringify(page.calls.filter(item => item.route === planRoute).at(-1).body)),
     {configuration_scope: 'proactive', v1_root: root});
   page.click('legacy-apply');
   await settle();
@@ -1440,6 +1493,7 @@ test('data migration does not present an unplanned memory database as empty', as
   await settle();
   page.change('', 't-first', {setupLegacy: 'target'});
   page.change('', 'r-first', {setupLegacy: 'role'});
+  await openLegacyManual(page);
 
   assert.match(page.html, /独立记忆库（试算后显示规模）/);
   assert.match(page.html, /先读取资料清单/);
@@ -1502,6 +1556,7 @@ test('learning relationship profiles are counted and can be selected without ori
   await settle();
   page.change('', 't-first', {setupLegacy: 'target'});
   page.change('', 'r-first', {setupLegacy: 'role'});
+  await openLegacyManual(page);
   page.click('legacy-data-plan');
   await settle();
   assert.match(page.html, /2 个学习关系网节点/);
@@ -1533,6 +1588,7 @@ test('旧版私聊用户单独试算和迁入，不必同时选择世界书或�
   await settle();
   page.change('', 't-first', {setupLegacy: 'target'});
   page.change('', 'r-first', {setupLegacy: 'role'});
+  await openLegacyManual(page);
   page.click('legacy-data-plan');
   await settle();
   assert.match(page.html, /私聊用户与权限（2 位用户 · 0 位权限待迁入）/);
@@ -1556,6 +1612,7 @@ test('私聊用户卡已存在时，迁入页仍允许补迁管理员和私聊�
     ['POST '+route+'/data-apply']:{private_contacts:{created:0,authorization:{identity_restored:1,permissions_restored:2}}}}});
   page.mountMigration();await settle();
   page.change('','t-first',{setupLegacy:'target'});page.change('','r-first',{setupLegacy:'role'});
+  await openLegacyManual(page);
   page.click('legacy-data-plan');await settle();
   assert.match(page.html,/0 位用户 · 1 位权限待迁入/);
   assert.doesNotMatch(page.html,/data-setup-legacy-action="legacy-data-apply"[^>]*disabled/);
@@ -1582,6 +1639,7 @@ test('关闭独立记忆库后不携带已自动选中的群记忆映射，不�
   await settle();
   page.change('', 't-first', {setupLegacy: 'target'});
   page.change('', 'r-first', {setupLegacy: 'role'});
+  await openLegacyManual(page);
   page.click('legacy-data-plan');
   await settle();
   page.change('', '', {setupLegacy: 'import-memory-database'}, {checked: false});
@@ -1855,7 +1913,7 @@ test('mapping opens with a read-only inventory and source changes retain choices
   page.change('', 'persona-b', {setupLegacy: 'data-persona'});
   assert.match(page.html, /data-setup-legacy="data-persona"\s*>/);
   assert.match(page.html, /<option value="persona-b" selected/);
-  assert.match(page.html, /class="setup-migration-body" aria-busy="true">/);
+  assert.match(page.html, /aria-busy="true"/);
   assert.match(page.html, /正在刷新当前选择，可继续调整资料范围与映射/);
   assert.doesNotMatch(page.html, /data-setup-legacy-mapping-view="personas"[^>]*disabled/);
   assert.equal(page.calls.at(-1).body.source_persona_id, 'persona-b');
@@ -1880,6 +1938,7 @@ test('archive opt-out reaches the apply request and missing confirmations keep i
   }});
   page.mountMigration();
   await settle();
+  await openLegacyManual(page);
   page.click('legacy-data-plan');
   await settle();
   page.change('', '', {setupLegacy: 'import-archive'}, {checked: false});
@@ -1911,6 +1970,7 @@ test('member-profile-only group sources can be selected and mapped through the g
   }});
   page.mountMigration();
   await settle();
+  await openLegacyManual(page);
   page.click('legacy-data-plan');
   await settle();
   assert.match(page.html, /<option value="789"[^>]*>群 789[^<]*2 份成员资料/);
@@ -1969,9 +2029,12 @@ test('late migration responses cannot repopulate a newly mounted workspace', asy
     legacy_api: '/astrbot_plugin_private_companion/' + route}]}], responses: {['GET ' + route + '/data-plan']: pending}});
   page.mountMigration();
   await settle();
+  await openLegacyManual(page);
   page.click('legacy-data-plan');
   page.unmount();
   page.mountMigration();
+  await settle();
+  await openLegacyManual(page);
   finishPlan(migrationDataFixture({persona_sources: [{persona_id: 'previous-page', state: 'ready'}]}));
   await settle();
   assert.doesNotMatch(page.html, /previous-page/);
@@ -1994,7 +2057,7 @@ test('a pending configuration scan does not block mapping navigation or inventor
   await settle();
   assert.equal(page.calls.filter(call => call.route.endsWith('/data-plan')).length, 1);
   assert.match(page.html, /正在只读检查旧版来源/);
-  assert.match(page.html, /class="setup-migration-body" aria-busy="true">/);
+  assert.match(page.html, /aria-busy="true"/);
   page.change('', '', {setupLegacy: 'import-reactions'}, {checked: false});
   assert.doesNotMatch(page.html.match(/<input[^>]*data-setup-legacy="import-reactions"[^>]*>/)[0], /checked/);
   page.clickMigrationView('personas', true);
@@ -2063,18 +2126,20 @@ test('an import locks conflicting edits and duplicate writes while result naviga
   page.click('legacy-data-plan');
   page.clickMigrationView('review');
   assert.match(page.html, /data-setup-legacy-view="review" aria-pressed="true"/);
+  assert.match(page.html, /data-migration-step="2"/);
   assert.equal(page.calls.filter(call => call.method === 'POST').length, 1);
   assert.equal(page.calls.filter(call => call.route.endsWith('/data-plan')).length, 1);
   finishImport({reaction_created: 1, reaction_remaining: 0, errors: []});
   await settle();
-  assert.match(page.html, /本批已导入/);
-  assert.match(page.html, /data-migration-detail="review-receipt"/);
+  await openLegacyManual(page);
+  assert.match(page.html, /最近一次资料导入/);
+  assert.match(page.html, /表情素材/);
   assert.doesNotMatch(page.html, /class="setup-legacy-data-controls" disabled/);
   assert.equal(page.calls.filter(call => call.route.endsWith('/data-plan')).at(-1).body.source_persona_id, undefined);
   page.click('legacy-data-plan');
   await settle();
-  assert.match(page.html, /本批已导入/);
-  assert.match(page.html, /最近一次导入回执/);
+  assert.match(page.html, /最近一次资料导入/);
+  assert.match(page.html, /表情素材/);
 });
 
 test('one selected persona can import without mapping unrelated personas', async () => {
@@ -2102,7 +2167,7 @@ test('one selected persona can import without mapping unrelated personas', async
   assert.match(page.html, /本批已完成/);
 });
 
-test('review separates outcome summaries from details and links confirmations to mapping', async () => {
+test('review keeps three read-only blocks and a separate per-item entry', async () => {
   const route = 'host/targets/private/roles/role/legacy';
   const page = harness({status: readyStatus(), targets: [{target_id: 'private', roles: [{role_id: 'role',
     legacy_api: '/astrbot_plugin_private_companion/' + route}]}], responses: {
@@ -2111,19 +2176,29 @@ test('review separates outcome summaries from details and links confirmations to
   }});
   page.mountMigration();
   await settle();
-  page.clickMigrationView('mapping');
+  page.clickMigrationWizard('next');
   await settle();
-  page.change('', '', {setupLegacy: 'import-journals'}, {checked: true});
-  page.clickMigrationView('review');
-  assert.match(page.html, /aria-label="迁移概况"/);
-  assert.match(page.html, /<h4>需要处理<\/h4>/);
-  assert.match(page.html, /资料归属待确认/);
-  assert.match(page.html, /data-migration-detail="review-data" ><summary>/);
-  page.clickMigrationShortcut('detail', 'review-configuration');
-  assert.match(page.html, /data-migration-detail="review-configuration" open/);
-  page.clickMigrationShortcut('mapping', 'current');
-  assert.match(page.html, /data-setup-legacy-view="mapping" aria-pressed="true"/);
+  assert.match(page.html, /data-migration-step="2"/);
+  /* 核对页：状态行 + 恰好三个区块，没有任何迁移写入按钮。 */
+  const reviewHtml = page.html.split('setup-migration-review-step')[1].split('setup-migration-run-step')[0];
+  assert.match(reviewHtml, /旧版来源/);
+  assert.match(reviewHtml, /重新检测/);
+  assert.match(reviewHtml, /<h3>配置变化<\/h3>/);
+  assert.match(reviewHtml, /<h3>变更与失效明细<\/h3>/);
+  assert.match(reviewHtml, /<h3>迁移范围<\/h3>/);
+  assert.equal((reviewHtml.match(/<h3>/g) || []).length, 3);
+  assert.doesNotMatch(page.html, /data-setup-legacy-action="legacy-auto"/);
+  assert.doesNotMatch(page.html, /写入当前版本/);
+  assert.match(page.html, /data-setup-legacy-wizard="manual"/);
+
+  await openLegacyManual(page);
+  assert.match(page.html, /逐项处理旧版资料/);
+  assert.match(page.html, /data-setup-legacy-wizard="back-to-oneclick"/);
+  page.clickMigrationView('current', true);
   assert.match(page.html, /data-setup-legacy-mapping-view="current" aria-pressed="true"/);
+  page.clickMigrationWizard('back-to-oneclick');
+  await settle();
+  assert.match(page.html, /data-migration-step="2"/);
 });
 
 test('a group preview cannot restore a mapping after its destination changes', async () => {
