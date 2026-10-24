@@ -21,3 +21,39 @@
 运行数据与旧版来源分开。迁移仅读取旧版配置和资料，选择明确目标后写入新数据根；不得修改旧版用户数据。测试、可加载副本和备份放在 AstrBot 一级插件扫描目录之外。宿主测试使用 AstrBot 自带 Python、`backend/app` 路径及独立临时 `ASTRBOT_ROOT`。
 
 发布顺序：修改领域功能及实际配置 → 同步陪伴小屋 → 从当前源码构建交付包 → 对该包验证清单、迁移、生命周期、重载和路由注销。旧包的通过记录不能代替新包测试。公开升级与回退步骤见根目录 `README.md`。
+
+## 运行目录同步
+
+源码是唯一可编辑副本；AstrBot 运行目录
+（`C:\Users\99505\.astrbot\data\plugins\astrbot_plugin_private_companion`）
+是构建产物，不在那里直接改。`tools/sync_runtime.py` 提供检查、计划和应用三步：
+
+```powershell
+cd Z:\CompanionUpgrade\source\astrbot_plugin_private_companion
+python tools/sync_runtime.py --check   # 差异存在时退出码为 1
+python tools/sync_runtime.py --plan    # 备份将被覆盖的运行文件并生成 plan.json
+python tools/sync_runtime.py --apply --plan-path <plan.json>
+```
+
+`--plan` 的备份写在仓库外
+`Z:\CompanionUpgrade\backups\runtime-sync-<时间>\before`。运行目录的 `data/`、
+`__pycache__/`、`.git/` 和构建生成的 `RELEASE_FILES.json` 不在同步范围内。
+未经构建和定向测试的源码不直接应用；应用后仍按发布流程重载并核对。
+
+## 工作树、备份与归档边界
+
+| 路径 | 角色 |
+| --- | --- |
+| `Z:\CompanionUpgrade\source\astrbot_plugin_private_companion` | 唯一维护源码与工作树 |
+| `Z:\CompanionUpgrade\releases` | 已验证交付包，只读 |
+| `Z:\CompanionUpgrade\backups` | 源码快照与运行同步备份，只读 |
+| `Z:\CompanionUpgrade\archive` | 历史现场与一次性整理，只读 |
+| `C:\Users\99505\.astrbot\data\plugin_data\astrbot_plugin_private_companion` | V1 用户数据，迁移只读来源，不得修改 |
+| `C:\Users\99505\.astrbot\data\plugins\astrbot_plugin_private_companion_v2` | V1 旧运行/设计目录，冻结，不加载、不编辑 |
+
+顶层目录地图与规则见 `Z:\CompanionUpgrade\README.md`。不要在顶层再建开发副本；
+需要并行开发时在源码仓库内使用分支或 worktree，并把副本放在 AstrBot 插件扫描目录之外。
+
+> `Z:\CompanionUpgrade\archive\20261024-consolidation\archive\development-workspace`
+> 同时是本仓库的 Git 公共对象库（当前 `source` 是它的链接 worktree）。它不能删除或移动；
+> 若要把对象库迁出归档，先用 `git worktree repair` 处理，再从 `source` 验证 `git status`。
