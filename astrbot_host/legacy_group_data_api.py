@@ -176,6 +176,140 @@ class LegacyGroupDataWebAPI:
         from .legacy_api import LegacyMigrationWebAPI
         return LegacyMigrationWebAPI._worldbook_digest(entries, members)
 
+    def apply_import(self, arguments, root, target, session):
+        """Import one reviewed (persona, group) pair without request state."""
+        controller = self.controller
+        try:
+            plan = self._plan(root, arguments["source_persona_id"],
+                          arguments["source_group_id"], target, session)
+            if arguments["plan_token"] != plan["plan_token"]:
+                return outcome_response(Outcome.failed("legacy_plan_stale",
+                    "V1 source or V2 group target changed after preview; preview again."))
+            if (not arguments["import_group_network"] and not arguments["import_group_worldbook"]
+                    and not arguments["import_group_expression"]):
+                return outcome_response(Outcome.failed("legacy_nothing_to_import",
+                    "select group relationships, knowledge or expression."))
+            if arguments["confirm_group_mapping"] is not True:
+                return outcome_response(Outcome.failed("legacy_group_mapping_confirmation_required",
+                    "confirm that this V1 group ID maps to the selected V2 platform, account and group."))
+            if arguments["confirm_member_ids"] is not True and (
+                    arguments["import_group_network"] or arguments["import_group_worldbook"]):
+                return outcome_response(Outcome.failed("legacy_member_mapping_confirmation_required",
+                    "confirm that member account IDs match within the selected V2 platform."))
+            if arguments["import_group_expression"] and (
+                    not plan["group_expression"]["available"]
+                    or arguments["confirm_expression_mapping"] is not True):
+                return outcome_response(Outcome.failed("legacy_expression_mapping_confirmation_required",
+                    "confirm the same group and role for the imported expression rules."))
+    
+            data = build_data_plan(root, source_persona_id=arguments["source_persona_id"])
+            selected = next((item for item in data.group_networks
+                if item["source_group_id"] == arguments["source_group_id"]), None)
+            if arguments["import_group_network"] and selected is None:
+                return outcome_response(Outcome.failed("legacy_group_not_found",
+                    "the selected V1 persona has no group relationship record."))
+            group_entries = group_members = ()
+            existing_group_source = None
+            if arguments["import_group_worldbook"]:
+                entries, members, group_entries, group_members = map_legacy_worldbook(
+                    data, source_group_id=arguments["source_group_id"],
+                    confirm_member_ids=True, include_group=True)
+                group_members = self._remap_group_members(
+                    group_members, arguments["source_group_id"], target.group_id)
+                if not group_entries and not group_members:
+                    return outcome_response(Outcome.failed("legacy_group_worldbook_empty",
+                        "the selected V1 group has no importable group-scoped knowledge."))
+                context = self._scope_context(target)
+                source_id = self._worldbook_source_id(arguments["source_persona_id"],
+                                                      arguments["source_group_id"])
+                binding = SourceBinding(context.scope.installation_id, role_id=self.role_id,
+                    persona_id=self.role_id, native_scope_ids=(target.group_id,), scope_kind=ScopeKind.GROUP,
+                    scope_route=(target.platform_id, target.bot_id, target.account_id))
+                existing_group_source = KnowledgeCatalog(controller.runtime).get(binding, source_id)
+                if existing_group_source and existing_group_source.code != "legacy_v1_imported":
+                    return outcome_response(Outcome.failed("legacy_worldbook_target_conflict",
+                        "the selected V2 group already has a knowledge source with another owner."))
+            network_result = None
+            worldbook_result = None
+            expression_result = None
+            # Both destinations share the V2 SQLite runtime. Compose their
+            # repository writes so a failure cannot leave a partial mapping.
+            with controller.runtime.transaction():
+                current_plan = self._plan(root, arguments["source_persona_id"],
+                        arguments["source_group_id"], target, session)
+                if arguments["plan_token"] != current_plan["plan_token"]:
+                    raise TaskError("legacy_plan_stale",
+                        "V1 source or V2 group target changed after preview; preview again.")
+                current_data = build_data_plan(root, source_persona_id=arguments["source_persona_id"])
+                if current_data.source_fingerprint != current_plan["source_fingerprint"]:
+                    raise TaskError("legacy_plan_stale", "V1 source changed during import; preview again.")
+                current_selected = next((item for item in current_data.group_networks
+                    if item["source_group_id"] == arguments["source_group_id"]), None)
+                if arguments["import_group_network"] and current_selected is None:
+                    raise TaskError("legacy_group_not_found", "the selected V1 persona has no group relationship record")
+                if arguments["import_group_worldbook"]:
+                    current_entries = map_legacy_worldbook(current_data,
+                        source_group_id=arguments["source_group_id"], confirm_member_ids=True,
+                        include_group=True)
+                    current_group_members = self._remap_group_members(current_entries[3],
+                        arguments["source_group_id"], target.group_id)
+                    if (self._worldbook_digest(current_entries[2], current_group_members)
+                            != self._worldbook_digest(group_entries, group_members)):
+                        raise TaskError("legacy_plan_stale", "V1 group knowledge changed during import; preview again.")
+                    current_group_source = KnowledgeCatalog(controller.runtime).get(binding, source_id)
+                    if current_group_source and current_group_source.code != "legacy_v1_imported":
+                        raise TaskError("legacy_worldbook_target_conflict",
+                            "the selected V2 group already has a knowledge source with another owner.")
+                    existing_group_source = current_group_source
+                if arguments["import_group_network"]:
+                    selected = current_selected
+                    network_result = session.application.messages.group_network.import_legacy_aggregate(
+                        self._scope_context(target),
+                        source_key=digest(["v1-group-network-import.v2", arguments["source_persona_id"],
+                                           arguments["source_group_id"], target.target_id, self.role_id,
+                                           selected["members"], selected["edges"]]),
+                        members=selected["members"], edges=selected["edges"], at=controller.now())
+    
+                if arguments["import_group_worldbook"]:
+                    catalog = KnowledgeCatalog(controller.runtime)
+                    context = self._scope_context(target)
+                    source_id = self._worldbook_source_id(arguments["source_persona_id"],
+                                                          arguments["source_group_id"])
+                    binding = SourceBinding(context.scope.installation_id, role_id=self.role_id,
+                        persona_id=self.role_id, native_scope_ids=(target.group_id,), scope_kind=ScopeKind.GROUP,
+                        scope_route=(target.platform_id, target.bot_id, target.account_id))
+                    fingerprint = self._worldbook_digest(group_entries, group_members)
+                    current = existing_group_source
+                    if not (current and current.active and current.digest == fingerprint):
+                        catalog.save(binding, source_id=source_id,
+                            locator="v1-persona:" + arguments["source_persona_id"][:96]
+                                + "/group:" + arguments["source_group_id"],
+                            format="legacy_worldbook", content_digest=fingerprint,
+                            entries=group_entries, members=group_members, issues=(),
+                            at=controller.now(), code="legacy_v1_imported")
+                    worldbook_result = {"entries_imported": len(group_entries),
+                        "members_imported": len(group_members),
+                        "state": "unchanged" if current and current.active and current.digest == fingerprint
+                            else "imported"}
+                if arguments["import_group_expression"]:
+                    from companion_v2.legacy.expression_data import selected_profile
+                    from companion_v2.expression.legacy_import import import_profile
+                    context = self._scope_context(target)
+                    profile = selected_profile(current_data.expression_profiles, context,
+                                               arguments["source_group_id"])
+                    expression_result = import_profile(controller.runtime, profile, context,
+                        controller.now(), expected_token=current_plan["group_expression"]["token"])
+            return outcome_response(Outcome.success({"source_persona_id": arguments["source_persona_id"],
+                "source_group_id": arguments["source_group_id"], "target_id": target.target_id,
+                "role_id": self.role_id, "group_network": network_result,
+                "group_worldbook": worldbook_result, "group_expression": expression_result,
+                "idempotent": True}))
+        except TaskError as error:
+            return outcome_response(Outcome.failed(error.code, str(error)))
+        except (ValueError, TypeError, KeyError, OSError, UnicodeError):
+            return outcome_response(Outcome.failed("legacy_request_invalid",
+                "invalid group migration request"))
+
     async def _run(self, arguments, *, apply):
         controller = self.controller
         async with controller._control_lock:
@@ -193,132 +327,11 @@ class LegacyGroupDataWebAPI:
                 found = migration.discover()
                 if not found.is_success:
                     return outcome_response(found)
-                plan = self._plan(root, arguments["source_persona_id"],
-                                  arguments["source_group_id"], target, session)
                 if not apply:
+                    plan = self._plan(root, arguments["source_persona_id"],
+                                      arguments["source_group_id"], target, session)
                     return outcome_response(Outcome.success(plan))
-                if arguments["plan_token"] != plan["plan_token"]:
-                    return outcome_response(Outcome.failed("legacy_plan_stale",
-                        "V1 source or V2 group target changed after preview; preview again."))
-                if (not arguments["import_group_network"] and not arguments["import_group_worldbook"]
-                        and not arguments["import_group_expression"]):
-                    return outcome_response(Outcome.failed("legacy_nothing_to_import",
-                        "select group relationships, knowledge or expression."))
-                if arguments["confirm_group_mapping"] is not True:
-                    return outcome_response(Outcome.failed("legacy_group_mapping_confirmation_required",
-                        "confirm that this V1 group ID maps to the selected V2 platform, account and group."))
-                if arguments["confirm_member_ids"] is not True and (
-                        arguments["import_group_network"] or arguments["import_group_worldbook"]):
-                    return outcome_response(Outcome.failed("legacy_member_mapping_confirmation_required",
-                        "confirm that member account IDs match within the selected V2 platform."))
-                if arguments["import_group_expression"] and (
-                        not plan["group_expression"]["available"]
-                        or arguments["confirm_expression_mapping"] is not True):
-                    return outcome_response(Outcome.failed("legacy_expression_mapping_confirmation_required",
-                        "confirm the same group and role for the imported expression rules."))
-
-                data = build_data_plan(root, source_persona_id=arguments["source_persona_id"])
-                selected = next((item for item in data.group_networks
-                    if item["source_group_id"] == arguments["source_group_id"]), None)
-                if arguments["import_group_network"] and selected is None:
-                    return outcome_response(Outcome.failed("legacy_group_not_found",
-                        "the selected V1 persona has no group relationship record."))
-                group_entries = group_members = ()
-                existing_group_source = None
-                if arguments["import_group_worldbook"]:
-                    entries, members, group_entries, group_members = map_legacy_worldbook(
-                        data, source_group_id=arguments["source_group_id"],
-                        confirm_member_ids=True, include_group=True)
-                    group_members = self._remap_group_members(
-                        group_members, arguments["source_group_id"], target.group_id)
-                    if not group_entries and not group_members:
-                        return outcome_response(Outcome.failed("legacy_group_worldbook_empty",
-                            "the selected V1 group has no importable group-scoped knowledge."))
-                    context = self._scope_context(target)
-                    source_id = self._worldbook_source_id(arguments["source_persona_id"],
-                                                          arguments["source_group_id"])
-                    binding = SourceBinding(context.scope.installation_id, role_id=self.role_id,
-                        persona_id=self.role_id, native_scope_ids=(target.group_id,), scope_kind=ScopeKind.GROUP,
-                        scope_route=(target.platform_id, target.bot_id, target.account_id))
-                    existing_group_source = KnowledgeCatalog(controller.runtime).get(binding, source_id)
-                    if existing_group_source and existing_group_source.code != "legacy_v1_imported":
-                        return outcome_response(Outcome.failed("legacy_worldbook_target_conflict",
-                            "the selected V2 group already has a knowledge source with another owner."))
-                network_result = None
-                worldbook_result = None
-                expression_result = None
-                # Both destinations share the V2 SQLite runtime. Compose their
-                # repository writes so a failure cannot leave a partial mapping.
-                with controller.runtime.transaction():
-                    current_plan = self._plan(root, arguments["source_persona_id"],
-                        arguments["source_group_id"], target, session)
-                    if arguments["plan_token"] != current_plan["plan_token"]:
-                        raise TaskError("legacy_plan_stale",
-                            "V1 source or V2 group target changed after preview; preview again.")
-                    current_data = build_data_plan(root, source_persona_id=arguments["source_persona_id"])
-                    if current_data.source_fingerprint != current_plan["source_fingerprint"]:
-                        raise TaskError("legacy_plan_stale", "V1 source changed during import; preview again.")
-                    current_selected = next((item for item in current_data.group_networks
-                        if item["source_group_id"] == arguments["source_group_id"]), None)
-                    if arguments["import_group_network"] and current_selected is None:
-                        raise TaskError("legacy_group_not_found", "the selected V1 persona has no group relationship record")
-                    if arguments["import_group_worldbook"]:
-                        current_entries = map_legacy_worldbook(current_data,
-                            source_group_id=arguments["source_group_id"], confirm_member_ids=True,
-                            include_group=True)
-                        current_group_members = self._remap_group_members(current_entries[3],
-                            arguments["source_group_id"], target.group_id)
-                        if (self._worldbook_digest(current_entries[2], current_group_members)
-                                != self._worldbook_digest(group_entries, group_members)):
-                            raise TaskError("legacy_plan_stale", "V1 group knowledge changed during import; preview again.")
-                        current_group_source = KnowledgeCatalog(controller.runtime).get(binding, source_id)
-                        if current_group_source and current_group_source.code != "legacy_v1_imported":
-                            raise TaskError("legacy_worldbook_target_conflict",
-                                "the selected V2 group already has a knowledge source with another owner.")
-                        existing_group_source = current_group_source
-                    if arguments["import_group_network"]:
-                        selected = current_selected
-                        network_result = session.application.messages.group_network.import_legacy_aggregate(
-                            self._scope_context(target),
-                            source_key=digest(["v1-group-network-import.v2", arguments["source_persona_id"],
-                                               arguments["source_group_id"], target.target_id, self.role_id,
-                                               selected["members"], selected["edges"]]),
-                            members=selected["members"], edges=selected["edges"], at=controller.now())
-
-                    if arguments["import_group_worldbook"]:
-                        catalog = KnowledgeCatalog(controller.runtime)
-                        context = self._scope_context(target)
-                        source_id = self._worldbook_source_id(arguments["source_persona_id"],
-                                                              arguments["source_group_id"])
-                        binding = SourceBinding(context.scope.installation_id, role_id=self.role_id,
-                            persona_id=self.role_id, native_scope_ids=(target.group_id,), scope_kind=ScopeKind.GROUP,
-                            scope_route=(target.platform_id, target.bot_id, target.account_id))
-                        fingerprint = self._worldbook_digest(group_entries, group_members)
-                        current = existing_group_source
-                        if not (current and current.active and current.digest == fingerprint):
-                            catalog.save(binding, source_id=source_id,
-                                locator="v1-persona:" + arguments["source_persona_id"][:96]
-                                    + "/group:" + arguments["source_group_id"],
-                                format="legacy_worldbook", content_digest=fingerprint,
-                                entries=group_entries, members=group_members, issues=(),
-                                at=controller.now(), code="legacy_v1_imported")
-                        worldbook_result = {"entries_imported": len(group_entries),
-                            "members_imported": len(group_members),
-                            "state": "unchanged" if current and current.active and current.digest == fingerprint
-                                else "imported"}
-                    if arguments["import_group_expression"]:
-                        from companion_v2.legacy.expression_data import selected_profile
-                        from companion_v2.expression.legacy_import import import_profile
-                        context = self._scope_context(target)
-                        profile = selected_profile(current_data.expression_profiles, context,
-                                                   arguments["source_group_id"])
-                        expression_result = import_profile(controller.runtime, profile, context,
-                            controller.now(), expected_token=current_plan["group_expression"]["token"])
-                return outcome_response(Outcome.success({"source_persona_id": arguments["source_persona_id"],
-                    "source_group_id": arguments["source_group_id"], "target_id": target.target_id,
-                    "role_id": self.role_id, "group_network": network_result,
-                    "group_worldbook": worldbook_result, "group_expression": expression_result,
-                    "idempotent": True}))
+                return self.apply_import(arguments, root, target, session)
             except TaskError as error:
                 return outcome_response(Outcome.failed(error.code, str(error)))
             except (ValueError, TypeError, KeyError, OSError, UnicodeError):
