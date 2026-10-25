@@ -132,13 +132,13 @@ const NEW_KINDS = {
       first_person: '我', voice_examples: '今天的风有点像海边的。\n你先说，我听着。',
       signature_phrases: '慢慢来、我在呢', hobbies: '植物随笔、听雨',
       avatar_data_url: '',
-      world_adaptation_mode: 'auto', main_companion_subject: '',
+      main_companion_subject: '',
       expression_private_source_mode: 'owner', expression_private_source_subject_ids: '[]',
       expression_private_application_mode: 'all', expression_private_application_subject_ids: '[]'},
     fields: {name: ['text'], birthday: ['text'], gender: ['text'], species: ['text'],
       first_person: ['text'], voice_examples: ['text'], signature_phrases: ['text'],
       avatar_data_url: ['text'],
-      hobbies: ['text'], world_adaptation_mode: ['text'], main_companion_subject: ['text'],
+      hobbies: ['text'], main_companion_subject: ['text'],
       expression_private_source_mode: ['text'], expression_private_source_subject_ids: ['text'],
       expression_private_application_mode: ['text'], expression_private_application_subject_ids: ['text']},
   },
@@ -443,22 +443,23 @@ test('the role dossier exposes the V1 character and world detail fields in one g
   const {window} = harness(['role_profile']);
   const profile = window.CompanionConfigEditors.spec.role_profile;
   const grouped = plain(profile.sections.flatMap(section => section.fields));
-  assert.equal(profile.sections.length, 9);
+  assert.equal(profile.sections.length, 8);
   assert.equal(new Set(grouped).size, grouped.length, 'each field belongs to one dossier group');
   assert.deepEqual(grouped.slice().sort(), plain(profile.order).slice().sort());
   assert.deepEqual(grouped.slice().sort(), Object.keys(profile.labels).sort());
   for (const field of ['name', 'species', 'birthday', 'age', 'gender', 'appearance_points', 'hair', 'eyes',
     'clothing', 'occupation', 'personality', 'first_person', 'reaction_patterns', 'voice_examples',
     'emotional_style', 'social_distance', 'signature_phrases', 'desire', 'hobbies', 'taboos', 'key_lore',
-    'world_name', 'era', 'tone', 'rules', 'scenes', 'network', 'platform_group_chat']) {
+    'world_name', 'era', 'tone', 'rules', 'scenes', 'network', 'world_extra', 'world']) {
     assert.ok(grouped.includes(field), `${field} is part of the editable role dossier`);
   }
-  for (const legacy of ['identity', 'appearance', 'personality', 'motivations', 'boundaries', 'world', 'platform_names']) {
+  for (const legacy of ['identity', 'appearance', 'personality', 'motivations', 'boundaries', 'world']) {
     assert.ok(grouped.includes(legacy), `${legacy} retains its earlier saved content`);
   }
-  assert.deepEqual(plain(profile.choices.world_adaptation_mode),
-    {auto: '自动', modern: '现代日常', fantasy: '幻想世界', sci_fi: '科幻世界', custom: '自定义', off: '关闭'});
-  assert.ok(profile.sections.flatMap(section => section.fields).includes('world_adaptation'));
+  // 平台称呼与世界观适配已下线：既不在可编辑字段里，也不再作为分组出现。
+  for (const removed of ['platform_names', 'platform_group_chat', 'world_adaptation_mode', 'world_adaptation']) {
+    assert.ok(!grouped.includes(removed), `${removed} must be gone from the dossier`);
+  }
 });
 
 test('the settings search catalogue exposes field metadata without reading configuration values', () => {
@@ -2018,15 +2019,14 @@ test('the role dossier maps profile fields onto the purpose-built controls', () 
       name: 'line', avatar_data_url: 'line', age: 'line', occupation: 'line', appearance_points: 'line',
       hair: 'line', eyes: 'line', clothing: 'line', image_identity_hint: 'line',
       world_name: 'line', era: 'line', tone: 'line',
-      platform_group_chat: 'line', platform_screen: 'line', platform_bilibili: 'line',
-      platform_qzone: 'line', platform_library: 'line', main_companion_subject: 'catalog-select',
+      main_companion_subject: 'catalog-select',
       expression_private_source_subject_ids: 'identity-checklist',
       expression_private_application_subject_ids: 'identity-checklist'});
   assert.equal(profile.chipOptions.gender.mode, 'single');
   assert.deepEqual(plain(profile.chipOptions.gender.options), ['女', '男', '无性别']);
   assert.deepEqual(plain(profile.chipOptions.species.options),
     ['人类', '精灵', '仿生人', 'AI', '兽人']);
-  assert.deepEqual(plain(profile.segmentedChoices), ['world_adaptation_mode',
+  assert.deepEqual(plain(profile.segmentedChoices), [
     'expression_private_source_mode', 'expression_private_application_mode']);
   assert.deepEqual(plain(profile.choices.expression_private_source_mode),
     {owner: '主要陪伴对象', selected: '指定对象', all: '所有获准私聊'});
@@ -2036,6 +2036,14 @@ test('the role dossier maps profile fields onto the purpose-built controls', () 
   assert.equal(relationship.inputs.user_gender, 'chips');
   assert.equal(relationship.inputs.default_nickname, 'line');
   assert.deepEqual(plain(relationship.chipOptions.user_gender.options), ['女', '男', '未说明']);
+});
+
+test('quote rows carry the marker used by removal and renumbering', () => {
+  /* The rendered row and the node added at runtime must both carry
+     data-wb-quote; removeQuote/renumberQuotes select exactly that marker. */
+  assert.match(workbench, /class="wb-quote" data-wb-quote/);
+  assert.match(workbench, /node\.dataset\.wbQuote = ""/);
+  assert.match(workbench, /querySelectorAll\("\[data-wb-quote\]"\),?/);
 });
 
 test('role profile controls render as date, chips, quotes, tags and a segmented mode', async () => {
@@ -2059,14 +2067,14 @@ test('role profile controls render as date, chips, quotes, tags and a segmented 
   assert.match(html, /class="wb-chip-opt is-on" data-wb-chip="gender" data-wb-chip-value="女"/);
   assert.match(html, /class="wb-chip-opt" data-wb-chip="gender" data-wb-chip-value="男"/);
   assert.match(html, /data-wb-quotes="voice_examples"/);
+  assert.match(html, /class="wb-quote" data-wb-quote(?:=""|>)/);
   assert.match(html, /今天的风有点像海边的。/);
   assert.match(html, /data-wb-tagset="signature_phrases"/);
   assert.match(html, /data-wb-tag-remove="signature_phrases" data-wb-tag-index="1"/);
   assert.match(html, /type="hidden" data-wb-field="hobbies"/);
-  /* 世界观适配模式走分段条：六个档位一档不少，auto 选中。 */
-  assert.match(html, /name="wb-world_adaptation_mode" value="auto" checked/);
-  assert.match(html, /name="wb-world_adaptation_mode" value="off"/);
-  assert.match(html, /现代日常/);
+  // 平台称呼与世界观适配已下线，页面不再渲染这两组控件。
+  assert.doesNotMatch(html, /wb-world_adaptation_mode/);
+  assert.doesNotMatch(html, /wb-platform_names/);
   assert.match(html, /data-wb-section-panel="expression_learning"/);
   assert.match(html, /data-wb-field="main_companion_subject"/);
   assert.match(html, /name="wb-expression_private_source_mode" value="owner"/);

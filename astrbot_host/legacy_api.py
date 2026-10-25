@@ -83,7 +83,7 @@ from .legacy_config import (V1_HOST_CONFIG_NAME, V1_PLUGIN_DATA_NAME,
                             V1_REALITY_PLUGIN_DATA_NAME, V1_IMAGE_PLUGIN_DATA_NAME,
                             read_v1_host_configuration,
                             read_v1_plugin_configuration, v1_host_config_path,
-                            find_v1_data_root)
+                            v1_setting, find_v1_data_root)
 from .persona_catalog import available_personas
 from .legacy_persona_mapping import legacy_account_inventory
 
@@ -242,6 +242,25 @@ class LegacyMigrationWebAPI:
         except (OSError, ValueError, UnicodeDecodeError):
             return None, "unreadable"
         return loaded, "" if loaded is not None else "unreadable"
+
+    def _relationship_config_seed(self):
+        """旧版配置里的「用户档案」提示词 → 主要陪伴对象的关系档案种子。
+
+        用户库里没有性别、生日、职业、相处方式；这些只存在于这份提示词里，
+        读不到就返回 None，迁移预览不会因此多出一条空记录。
+        """
+        configuration = self._v1_host_configuration()
+        if not isinstance(configuration, dict):
+            return None
+        target_ids = v1_setting(configuration, "basic_config.target_user_ids", None)
+        if not isinstance(target_ids, (list, tuple)) or not target_ids:
+            return None
+        primary_user_id = str(target_ids[0] or "").strip()
+        if not primary_user_id:
+            return None
+        text = v1_setting(configuration, "life_schedule_config.roleplay_user_profile_prompt", "")
+        from companion_v2.legacy.relationship_profiles import config_relationship_profile
+        return config_relationship_profile(text, primary_user_id=primary_user_id)
 
     def _v1_reality_configuration(self):
         try:
@@ -1035,8 +1054,10 @@ class LegacyMigrationWebAPI:
         document["private_contacts"] = {**contact_state, "rejected": list(data_plan.private_contact_rejected)}
         from companion_v2.relationships.legacy_import import (
             relationship_profile_entries, relationship_profile_plan, relationship_profile_token)
+        relationship_seed = self._relationship_config_seed()
         relationship_entries = relationship_profile_entries(
-            self.controller.runtime, context, data_plan.relationship_profiles)
+            self.controller.runtime, context, data_plan.relationship_profiles,
+            seed=relationship_seed)
         relationship_state = relationship_profile_plan(relationship_entries)
         relationship_token = relationship_profile_token(relationship_entries)
         document["relationship_profiles"] = {**relationship_state,

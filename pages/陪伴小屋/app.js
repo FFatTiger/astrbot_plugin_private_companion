@@ -3527,8 +3527,7 @@ const SELF_PROFILE_SECTIONS=[
   ['voice','audio-lines','口吻',['first_person','speech_style','emotional_style','social_distance','reaction_patterns','voice_examples','signature_phrases']],
   ['motivations','compass','动机',['motivations','core_values','desire','hobbies']],
   ['boundaries','shield-check','边界',['boundaries','taboos']],
-  ['world','globe-2','世界',['world_name','era','tone','rules','scenes','network','world_extra','world','world_adaptation_mode','world_adaptation']],
-  ['platform_names','messages-square','称呼',['platform_group_chat','platform_screen','platform_bilibili','platform_qzone','platform_library','platform_names']],
+  ['world','globe-2','世界',['world_name','era','tone','rules','scenes','network','world_extra','world']],
   ['expression_learning','message-square-more','表达学习范围',['main_companion_subject','expression_private_source_mode','expression_private_source_subject_ids','expression_private_application_mode','expression_private_application_subject_ids']],
 ];
 function selectSelfProfileSection(section){

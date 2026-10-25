@@ -1,7 +1,7 @@
 import unittest
 
 from companion_v2.conversation.media.output_settings import (
-    DEFAULTS, apply_prompts, parse_scene_presets, prompt_instruction,
+    DEFAULTS, apply_prompts, is_rule_image_request, parse_scene_presets, prompt_instruction,
 )
 from companion_v2.execution.models import TaskError
 
@@ -33,6 +33,18 @@ class ImageOutputSettingsTests(unittest.TestCase):
                 self.assertIn("自拍画面在 prompt 中写明 selfie", instruction)
                 self.assertIn("连贯的自然语言", instruction)
                 self.assertNotIn("只在本轮", instruction)
+
+    def test_rule_mode_only_matches_clear_image_requests(self):
+        for text in ("来张自拍看看", "画一只白猫", "我想画一只猫", "可以画一张吗",
+                     "我想看看你现在的穿搭", "你的自拍呢", "把图片改成蓝色", "再来一张", "继续", "看看",
+                     "draw a portrait", "generate an image of a cat"):
+            with self.subTest(text=text):
+                self.assertTrue(is_rule_image_request(text))
+        for text in ("今天天气不错", "这张图是什么意思", "今天好看吗", ""):
+            with self.subTest(text=text):
+                self.assertFalse(is_rule_image_request(text))
+        self.assertTrue(is_rule_image_request("帮我改一下", has_images=True))
+        self.assertFalse(is_rule_image_request("帮我改一下"))
 
     def test_disabled_image_requests_do_not_invite_a_tool_call(self):
         for values in ({**DEFAULTS, "trigger_mode": "off"}, {**DEFAULTS, "allow_user_requests": False}):

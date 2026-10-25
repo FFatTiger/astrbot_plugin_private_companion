@@ -202,7 +202,7 @@ window.CompanionRoleProfileDraft = (() => {
   }
   function hasDraftContent(field, value) {
     const text = String(value ?? "");
-    return !!text.trim() && !(field === "world_adaptation_mode" && text.trim() === "auto");
+    return !!text.trim();
   }
   function oldValue(field) { return state.current?.settings?.[field] || ""; }
   function selectedFields() {

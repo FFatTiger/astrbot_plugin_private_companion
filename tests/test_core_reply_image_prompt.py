@@ -70,6 +70,57 @@ class CoreReplyImagePromptTests(unittest.IsolatedAsyncioTestCase):
         settings.assert_not_called()
         self.references.prompt_material.assert_not_called()
 
+    def test_rules_mode_hides_image_tools_for_non_image_turns(self):
+        values = {**DEFAULTS, "trigger_mode": "rules"}
+        self.prepared["native_input"] = NS(text="今天天气不错",
+                                           at=self.prepared["native_input"].at)
+        with patch("astrbot_host.core_reply_image_prompt.effective_settings", return_value=values):
+            offered, preferences = core_image_tools(self.session, self.offered)
+        self.assertEqual([item.spec.action for item in offered], ["memory.query"])
+        self.assertIsNone(preferences)
+
+        self.prepared["native_input"] = NS(text="帮我改一下", at=self.prepared["native_input"].at,
+                                           images=(object(),))
+        with patch("astrbot_host.core_reply_image_prompt.effective_settings", return_value=values):
+            offered, preferences = core_image_tools(self.session, self.offered)
+        self.assertEqual([item.spec.action for item in offered],
+                         ["memory.query", "image.generate", "image.edit"])
+        self.assertEqual(preferences, values)
+
+    def test_tool_mode_keeps_image_tools_available_on_non_image_turns(self):
+        values = {**DEFAULTS, "trigger_mode": "tool"}
+        self.prepared["native_input"] = NS(text="今天天气不错",
+                                           at=self.prepared["native_input"].at)
+        with patch("astrbot_host.core_reply_image_prompt.effective_settings", return_value=values):
+            offered, preferences = core_image_tools(self.session, self.offered)
+        self.assertEqual([item.spec.action for item in offered],
+                         ["memory.query", "image.generate", "image.edit"])
+        self.assertEqual(preferences, values)
+
+    def test_rules_mode_allows_an_explicit_image_functional_command(self):
+        values = {**DEFAULTS, "trigger_mode": "rules"}
+        self.state["functional_command"] = NS(intent="image_generate")
+        self.prepared["native_input"] = NS(text="今天天气不错",
+                                           at=self.prepared["native_input"].at)
+        with patch("astrbot_host.core_reply_image_prompt.effective_settings", return_value=values), \
+                patch("astrbot_host.core_reply_image_prompt.is_rule_image_request",
+                      return_value=False) as detector:
+            offered, preferences = core_image_tools(self.session, self.offered)
+        self.assertEqual([item.spec.action for item in offered],
+                         ["memory.query", "image.generate", "image.edit"])
+        self.assertEqual(preferences, values)
+        detector.assert_not_called()
+
+    def test_rules_mode_keeps_image_tools_for_a_clear_request(self):
+        values = {**DEFAULTS, "trigger_mode": "rules"}
+        with patch("astrbot_host.core_reply_image_prompt.effective_settings", return_value=values):
+            offered, preferences = core_image_tools(self.session, self.offered)
+        self.assertEqual([item.spec.action for item in offered],
+                         ["memory.query", "image.generate", "image.edit"])
+        self.assertEqual(preferences, values)
+        self.inject(values=values)
+        self.assertIn("已命中图片请求规则", self.request.system_prompt)
+
     def test_unavailable_image_preferences_preserve_other_tools(self):
         with patch("astrbot_host.core_reply_image_prompt.effective_settings", side_effect=TaskError("unavailable", "settings unavailable")):
             offered, values = core_image_tools(self.session, self.offered)

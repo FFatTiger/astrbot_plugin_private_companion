@@ -563,9 +563,6 @@ window.CompanionSetup = (() => {
     character_extra:"其他角色补充", motivations:"价值与目标", core_values:"重视的事", desire:"长期目标", hobbies:"爱好",
     boundaries:"互动边界", taboos:"禁忌", world_name:"所处世界", era:"时代背景", tone:"世界基调", rules:"世界规则",
     scenes:"主要场景", network:"世界观关系网", world_extra:"其他世界设定", world:"世界设定补充",
-    platform_group_chat:"群聊称呼", platform_screen:"识屏称呼", platform_bilibili:"视频站称呼",
-    platform_qzone:"动态墙称呼", platform_library:"资料柜称呼", platform_names:"平台称呼补充",
-    world_adaptation_mode:"世界观适配模式", world_adaptation:"世界观适配指引",
     default_nickname:"对用户的称呼", user_gender:"用户性别", user_birthday:"生日或纪念日", user_occupation:"用户职业",
     role_relation:"用户与角色的关系", interaction:"相处方式", extra:"其他关系补充",
   };

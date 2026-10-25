@@ -22,6 +22,59 @@ DEFAULT_SCENE_PRESETS = (
     {"id": "formal-event", "name": "正式场合", "prompt": "formal event setting, composed posture, refined clothing"},
 )
 SCENE_MARKER = re.compile(r"\[场景预设[:：]([^\]\r\n]{1,40})\]")
+
+# The "rules" trigger is deliberately conservative: it only decides whether
+# image tools are exposed for this turn. The model still decides whether the
+# user is really asking for an image and composes the request.
+_IMAGE_RULE_VERBS = r"(?:画|绘制|生成|做|出|来|拍|发|给|整|搞|修|改|换|去掉|去除|添加|加上|调整|重画|再画)"
+_IMAGE_RULE_NOUNS = r"(?:图|图片|照片|相片|自拍|头像|壁纸|插画|立绘|写真|画面|全身照|穿搭照|合照)"
+_IMAGE_RULE_PATTERN = re.compile(
+    rf"(?:{_IMAGE_RULE_VERBS}.{{0,8}}{_IMAGE_RULE_NOUNS}|{_IMAGE_RULE_NOUNS}.{{0,8}}{_IMAGE_RULE_VERBS})",
+    re.IGNORECASE,
+)
+_IMAGE_RULE_ENGLISH = re.compile(
+    r"\b(?:draw|paint|generate|render|make)\b.{0,24}\b(?:image|picture|photo|portrait|selfie|avatar|illustration)\b"
+    r"|\b(?:image|picture|photo|portrait|selfie|avatar|illustration)\b.{0,24}\b(?:edit|change|remove|add|redraw|regenerate)\b",
+    re.IGNORECASE,
+)
+_IMAGE_RULE_DIRECT = re.compile(
+    r"(?:^|[，。！？!?；;\s])(?:我)?(?:给我|帮我|请|麻烦|可以|能不能|能|想|要)?\s*"
+    r"(?:画|绘制|拍|生成|做|来|发|整|搞)(?:一|个|张|只|幅|下|些|点)?"
+    r"|来(?:张|一张|幅)|生成(?:一|个|张|只|幅)"
+    r"|(?:生图|画图|改图|修图|出图|做图|合照)"
+    r"|(?:想看|看看|让我看|给我看|看下|看一下).{0,12}"
+    r"(?:自拍|照片|图片|头像|穿搭|样子|你)"
+    r"|(?:自拍|照片|头像|穿搭)(?:呢|吗|看看|发来|给我)",
+    re.IGNORECASE,
+)
+_IMAGE_RULE_FOLLOWUP = re.compile(
+    r"(?:再来一张|再画|继续画|重画|重新生成|换个(?:姿势|背景|风格|衣服)|换一套衣服|"
+    r"刚才那张|上一张|改成|修一下|去掉|加上|"
+    r"(?:^|[，。！？!?；;\s])(?:继续|接着|再来|还要|想看|看看|当然|好啊|好呀|可以)"
+    r"(?:$|[，。！？!?；;\s]))",
+    re.IGNORECASE,
+)
+
+
+def is_rule_image_request(value, *, has_images=False):
+    """Return whether a rule-mode turn should expose image tools.
+
+    This is a coarse, bounded prefilter, not a model substitute. False
+    positives leave the final decision with the model; false negatives only
+    affect users who explicitly selected the faster rule mode.
+    """
+
+    text = " ".join(str(value or "").split())
+    if not text:
+        return False
+    if (_IMAGE_RULE_PATTERN.search(text) or _IMAGE_RULE_DIRECT.search(text)
+            or _IMAGE_RULE_ENGLISH.search(text)):
+        return True
+    if _IMAGE_RULE_FOLLOWUP.search(text):
+        return True
+    return bool(has_images and re.search(r"(?:改|修|换|去掉|去除|添加|加上|调整)", text))
+
+
 DEFAULTS = {
     "allow_user_requests": True, "trigger_mode": "tool", "rule_max_daily": 3,
     "proactive_probability": 0.35, "proactive_max_daily": 1,

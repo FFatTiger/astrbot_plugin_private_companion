@@ -413,8 +413,7 @@ class PersonaWorkshopWebAPI:
             except asyncio.TimeoutError as error:
                 raise TaskError("role_profile_draft_timeout", "the profile draft request timed out") from error
             raw_text = getattr(response, "completion_text", response)
-            parsed = (parse_role_profile_draft(
-                raw_text, world_adaptation_mode=existing_profile.get("world_adaptation_mode", "auto"))
+            parsed = (parse_role_profile_draft(raw_text)
                 if draft_target == "role_profile" else parse_relationship_profile_draft(raw_text))
 
             async with self.controller._control_lock:
@@ -507,7 +506,9 @@ class PersonaWorkshopWebAPI:
         if legacy_config is not None:
             role_prompt = v1_setting(legacy_config, "life_schedule_config.schedule_persona_prompt", "")
             image_hint = v1_setting(legacy_config, "message_debounce_config.private_image_self_recognition_hint", "")
-            if role_prompt or image_hint:
+            # 旧版把世界蓝图单独存一份；只读角色那一段会让世界设定整块丢失。
+            worldview_text = v1_setting(legacy_config, "life_schedule_config.schedule_worldview_prompt", "")
+            if role_prompt or image_hint or worldview_text:
                 if v1_setting(legacy_config, "basic_config.enable_multi_persona_mode"):
                     raise TaskError("role_profile_migration_source_ambiguous",
                                     "select the V1 persona-specific role profile before importing")
@@ -520,7 +521,7 @@ class PersonaWorkshopWebAPI:
                                     "the V1 role profile belongs to another persona")
                 try:
                     mapped = map_v1_world_knowledge_role_profile(
-                        role_prompt, image_hint,
+                        role_prompt, image_hint, worldview_text=worldview_text,
                         configuration_fingerprint=digest({
                             "file": config_fingerprint,
                             "persona_id": source_persona_id,

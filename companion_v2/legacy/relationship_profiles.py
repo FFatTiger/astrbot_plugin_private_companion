@@ -1,10 +1,9 @@
 """Read the old plugin's per-person relationship details without guessing identity.
 
-V1 kept exactly three pieces of operator-facing relationship data on each user
-record: ``nickname``, ``persona_relationship.level`` and
-``persona_relationship.note``. It never recorded gender, birthday, occupation or
-an interaction style, so this module maps only those three fields and leaves the
-rest of the V2 profile empty for the operator to fill in later.
+V1 kept three pieces of relationship data on each user record: ``nickname``,
+``persona_relationship.level`` and ``persona_relationship.note``. 它还有一份
+配置级「用户档案」提示词（性别、生日、职业、关系定义、相处方式），那份由
+``config_relationship_profile`` 单独读取，不会和用户记录混在一起。
 
 The mapping is read-only. Identity fields are reused from the private-contact
 converter (same platform, same bot account, same native user id, same supported
@@ -21,6 +20,24 @@ MAPPED_FIELDS = {
     "nickname": "default_nickname",
     "persona_relationship.level": "role_relation",
     "persona_relationship.note": "extra",
+}
+
+# V1 还有一份「用户档案」提示词（life_schedule_config.roleplay_user_profile_prompt），
+# 里面写着主要陪伴对象的称呼、性别、生日、职业、关系定义和相处方式。用户库里没有
+# 这些字段，但它们确实在旧版配置里；只读用户库会让关系档案的这几项永远是空的。
+PROMPT_SOURCE = "life_schedule_config.roleplay_user_profile_prompt"
+PROMPT_LABELS = {
+    "对用户的称呼": "default_nickname",
+    "称呼": "default_nickname",
+    "用户性别": "user_gender",
+    "用户生日": "user_birthday",
+    "用户职业": "user_occupation",
+    "是角色的xx": "role_relation",
+    "是角色的XX": "role_relation",
+    "与角色的相处方式": "interaction",
+    "相处方式": "interaction",
+    "其他补充信息": "extra",
+    "其它补充信息": "extra",
 }
 
 
@@ -118,3 +135,56 @@ def relationship_profiles(payload):
                    key=lambda item: (item["platform"], item["account_id"], item["native_account_id"]))
     items.extend(sorted(unverified, key=lambda item: item["user_id"]))
     return tuple(items), tuple(rejected)
+
+
+def _prompt_values(text):
+    """把「标签：值」形式的关系档案提示词拆成字段；续行并入上一个字段。"""
+    fields, order, current = {}, [], ""
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        label, separator, value = line.partition("：")
+        if not separator:
+            label, separator, value = line.partition(":")
+        label = label.strip().strip("*# ").strip()
+        if separator and label in PROMPT_LABELS:
+            current = PROMPT_LABELS[label]
+            if current not in order:
+                order.append(current)
+            fields[current] = value.strip()
+            continue
+        if current:
+            fields[current] = (fields[current] + "\n" + line).strip() if fields[current] else line
+    return fields, order
+
+
+def config_relationship_profile(text, *, primary_user_id=""):
+    """从旧版配置的「用户档案」提示词解析主要陪伴对象的关系资料。
+
+    返回 ``{"user_id", "fields", "dropped", "source_fields"}``，没有可迁移内容时
+    返回 None。字段超过 V2 上限就整项丢弃（由迁移预览显示为 dropped），不截断。
+    """
+    from companion_v2.relationships.profile import FIELD_LIMITS as RELATIONSHIP_LIMITS
+
+    if not isinstance(text, str) or not text.strip():
+        return None
+    values, order = _prompt_values(text)
+    fields, dropped = {}, []
+    for name in order:
+        value = values.get(name, "").strip()
+        if not value:
+            continue
+        if len(value) > RELATIONSHIP_LIMITS[name]:
+            dropped.append(name)
+            continue
+        fields[name] = value
+    if not fields and not dropped:
+        return None
+    return {
+        "user_id": str(primary_user_id or "").strip(),
+        "fields": fields,
+        "dropped": dropped,
+        "source_fields": [f"{PROMPT_SOURCE}：{label}" for label, name in PROMPT_LABELS.items()
+                          if name in fields],
+    }

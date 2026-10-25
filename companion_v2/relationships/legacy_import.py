@@ -31,9 +31,9 @@ from .profile import (
 
 
 SOURCE_ID = "private.core_profiles.users"
-# V1 field name -> V2 relationship.profile field name. Everything else V2 can
-# display (gender, birthday, occupation, interaction) was never in V1 and stays
-# empty for the operator to fill.
+# V1 用户库只有 nickname / level / note 三项；性别、生日、职业、相处方式在旧版
+# 配置的「用户档案」提示词里，由 legacy.relationship_profiles.config_relationship_profile
+# 读出后作为 seed 合进对应用户，别再把它们当成 V1 没有的字段。
 MAPPED_FIELDS = {
     "nickname": "default_nickname",
     "role_relation": "role_relation",
@@ -89,8 +89,23 @@ def _entry(profile):
     }
 
 
-def relationship_profile_entries(runtime, context, profiles):
-    """Resolve every V1 candidate against this target without writing anything."""
+def _seed_for(profile, seed):
+    """这条档案记录是否就是配置里写到的主要陪伴对象。"""
+    if not seed or not seed.get("fields"):
+        return None
+    user_id = str(seed.get("user_id") or "")
+    if not user_id:
+        return None
+    known = {str(profile.get("user_id") or ""), *(str(item) for item in profile.get("user_ids") or ())}
+    return seed if user_id in known else None
+
+
+def relationship_profile_entries(runtime, context, profiles, *, seed=None):
+    """Resolve every V1 candidate against this target without writing anything.
+
+    ``seed`` 是旧版配置里那份「用户档案」提示词的解析结果；它只并入对应用户，
+    不新建用户、也不改变 identity 判定。
+    """
     scope = context.scope
     if getattr(scope.kind, "value", scope.kind) != "private":
         return ()
@@ -114,6 +129,12 @@ def relationship_profile_entries(runtime, context, profiles):
             continue
         entry["subject_id"] = subject_id
         mapped, dropped = _mapped_changes(profile)
+        seeded = _seed_for(profile, seed)
+        if seeded is not None:
+            for name, value in seeded["fields"].items():
+                mapped.setdefault(name, value)
+            entry["source_fields"].extend(seeded.get("source_fields") or ())
+            dropped = list(dict.fromkeys((*dropped, *(seeded.get("dropped") or ()))))
         entry["dropped"] = dropped
         if not mapped:
             entry["reason"] = ("relationship_profile_field_too_long" if dropped

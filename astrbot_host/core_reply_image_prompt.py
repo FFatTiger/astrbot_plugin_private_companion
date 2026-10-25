@@ -6,7 +6,7 @@ import logging
 from zoneinfo import ZoneInfo
 
 from companion_v2.conversation.media.generated import IMAGE_ACTIONS
-from companion_v2.conversation.media.output_settings import effective_settings, prompt_instruction
+from companion_v2.conversation.media.output_settings import effective_settings, is_rule_image_request, prompt_instruction
 from companion_v2.references.prompts import IMAGE_REFERENCE_INSTRUCTION
 
 from .native_extensions.request_context import set_system_instruction
@@ -53,6 +53,17 @@ def core_image_tools(session, offered):
         return tuple(item for item in offered if item.spec.action not in IMAGE_ACTIONS), None
     if not values["allow_user_requests"] or values["trigger_mode"] == "off":
         return tuple(item for item in offered if item.spec.action not in IMAGE_ACTIONS), None
+    if values["trigger_mode"] == "rules":
+        state = getattr(session, "state", None)
+        command = state.get("functional_command") if isinstance(state, Mapping) else None
+        command_intent = getattr(command, "intent", None)
+        if command_intent not in {"image_generate", "image_edit"}:
+            prepared = getattr(session, "prepared", None)
+            original = prepared.get("native_input") if isinstance(prepared, Mapping) else None
+            if not is_rule_image_request(
+                    getattr(original, "text", ""),
+                    has_images=bool(getattr(original, "images", ()))):
+                return tuple(item for item in offered if item.spec.action not in IMAGE_ACTIONS), None
     return offered, values
 
 
@@ -83,7 +94,14 @@ def inject_core_image_prompt(session, request, offered, values):
     from .core_reply_tools import native_tool_name
 
     descriptions = "\n".join(native_tool_name(action) + "：" + _PURPOSES[action] for action in actions)
-    instruction = prompt_instruction(values) + "\n本轮图片工具：\n" + descriptions + "\n" + _DELIVERY
+    rule_hint = (
+        "本轮用户文本已命中图片请求规则。若这句话确实是在要新图、自拍或改图，"
+        "直接调用对应图片工具，不要只回一段描述或反复确认。"
+        if values["trigger_mode"] == "rules" else ""
+    )
+    instruction = "\n".join(part for part in (
+        prompt_instruction(values), rule_hint,
+        "本轮图片工具：\n" + descriptions, _DELIVERY) if part)
     if "image.edit" in actions:
         instruction += (
             "\n本轮参考素材位于 companion_v2_context.image_reference_material。"

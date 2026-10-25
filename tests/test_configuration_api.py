@@ -118,7 +118,7 @@ class ConfigurationWebAPITests(MultiFixture, unittest.IsolatedAsyncioTestCase):
                                  "qzone",
                                  "relay",
                                  "relationship_profile",
-                                 "role_profile", "screen", "wardrobe", "proactive.contact"}
+                                 "role_profile", "screen", "wardrobe", "web_understanding", "proactive.contact"}
             expected_sections.add("image.output")
             self.assertTrue(expected_sections.issubset(status))
             self.assertEqual(set(status), expected_sections)
@@ -128,9 +128,6 @@ class ConfigurationWebAPITests(MultiFixture, unittest.IsolatedAsyncioTestCase):
             self.assertEqual(status["role_profile"]["scope"], "role")
             self.assertEqual(status["role_profile"]["layers"], ["installation", "role"])
             self.assertEqual(status["role_profile"]["fields"]["world"]["maximum_chars"], 4200)
-            self.assertEqual(status["role_profile"]["settings"]["world_adaptation_mode"], "auto")
-            self.assertEqual(status["role_profile"]["fields"]["world_adaptation_mode"]["maximum_chars"], 20)
-            self.assertEqual(status["role_profile"]["fields"]["world_adaptation"]["maximum_chars"], 1200)
             self.assertEqual(set(status["role_profile"]["settings"]), set(FIELD_LIMITS))
             self.assertEqual(status["relationship_profile"]["scope"], "relationship")
             self.assertEqual(status["relationship_profile"]["layers"],

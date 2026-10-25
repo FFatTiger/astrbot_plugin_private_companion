@@ -718,7 +718,7 @@ window.CompanionWorkbench = (() => {
       const lines = parseQuoteLines(value).map(line => line.trim()).filter(Boolean);
       const count = Array.from(String(value ?? "")).length;
       const bubbles = lines.map((line, index) =>
-        `<div class="wb-quote"><span class="wb-quote-no" aria-hidden="true">${index + 1}</span>`
+        `<div class="wb-quote" data-wb-quote><span class="wb-quote-no" aria-hidden="true">${index + 1}</span>`
         + `<textarea data-wb-quote-line="${e(item.name)}" rows="1" aria-label="${e(item.label || item.name)} 第 ${index + 1} 句"${dis}>${e(line)}</textarea>`
         + `<button type="button" class="wb-quote-remove" data-wb-quote-remove="${e(item.name)}"`
         + ` data-wb-quote-index="${index}" aria-label="删除第 ${index + 1} 句" title="删除这句"${dis}>${icon("x")}</button></div>`).join("");
@@ -2093,6 +2093,7 @@ window.CompanionWorkbench = (() => {
       const list = set.querySelector(".wb-quote-list");
       const node = document.createElement("div");
       node.className = "wb-quote";
+      node.dataset.wbQuote = "";
       const index = list.querySelectorAll("[data-wb-quote-line]").length;
       node.innerHTML = `<span class="wb-quote-no" aria-hidden="true">${index + 1}</span>`
         + `<textarea data-wb-quote-line="${e(name)}" rows="1" aria-label="${e(item.label || item.name)} 第 ${index + 1} 句"></textarea>`
