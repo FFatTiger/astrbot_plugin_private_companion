@@ -24,6 +24,8 @@ from companion_v2.foundation.outcome import Outcome
 from companion_v2.foundation.refs import SourceRef, VersionRef
 from companion_v2.sources.models import GovernanceState, SourceRecord
 
+logger = logging.getLogger(__name__)
+
 from .discovery import discover
 from .images import IMAGE_ACTIONS, ImageReferenceLease, image_result_handler
 from .image_settings import read_image_settings
@@ -206,6 +208,15 @@ class NativeExtensionRegistry(AstrBotToolPort):
             self._ensure_installation(lease)
             if self._should_start(lease):
                 lease.begin_start()
+        # 目录/准入排查用：一次打印自带的模块、声明数量与状态。
+        summary = []
+        for lease in self._bundled_extensions:
+            extension_id = lease.manifest.package.extension_id
+            declared = sum(1 for declaration in lease.declarations())
+            summary.append(f"{extension_id}:{declared}:{lease.state}:"
+                           f"{'blocked' if extension_id in self._blocked_extension_ids else 'ok'}")
+        logger.info("[CompanionV2][native] bundled=%s issues=%s image_enabled=%s",
+                    ",".join(summary), list(self.issues), self.image_enabled)
 
     # 只在插件自带的「生图」模块上自动补齐：它的接口配置已经存在，缺的只是装配记录。
     # 其他模块仍由用户显式装配，避免悄悄扩大能力授权。
