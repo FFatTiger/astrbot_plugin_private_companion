@@ -82,11 +82,14 @@ class DerivationTests(unittest.TestCase):
             identity(account_id="10002", participant_id="10002")
         self.assertEqual(caught.exception.code, "host_identity_invalid")
 
-    def test_an_account_that_is_not_a_number_is_refused(self):
-        for bad in ("", "   ", "alice", "10002 ", "1.0", None, 10002):
+    def test_an_invalid_native_account_is_refused(self):
+        for bad in ("", "   ", "alice!", "10002 ", "1.0", None, 10002):
             with self.subTest(value=bad):
                 with self.assertRaises(HostControlError):
                     derive_bot_id(bad)
+
+    def test_an_opaque_official_account_is_accepted(self):
+        self.assertTrue(derive_bot_id("607097777B7E7FE3E162A8F56825F8521").startswith("bot-"))
 
     def test_a_missing_platform_is_refused(self):
         for bad in ("", "   ", None):

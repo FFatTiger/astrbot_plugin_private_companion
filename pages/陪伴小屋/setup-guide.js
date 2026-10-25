@@ -326,6 +326,11 @@ window.CompanionSetup = (() => {
     finally { startupUpgradePrompt = null; }
   }
 
+  async function refreshDirectoryQuietly() {
+    try { await product().refreshDirectory(); }
+    catch { /* The setup catalog remains available before staging starts. */ }
+  }
+
   async function continueUpgrade(upgrade) {
     if (!upgrade?.can_prepare || typeof upgrade.plan_token !== "string" || !upgrade.plan_token) {
       window.navigate?.("manage", "host");
@@ -333,7 +338,7 @@ window.CompanionSetup = (() => {
     }
     const result = await api("POST", "/upgrade", {confirmed: true, plan_token: upgrade.plan_token});
     if (!result?.started) throw new Error(result?.startup_error || "旧版连接已保存，但当前运行环境尚未就绪。请在开始使用页查看详情。");
-    await product().refreshDirectory();
+    await refreshDirectoryQuietly();
     window.navigate?.("manage", "data", "migration");
     return true;
   }
@@ -710,8 +715,41 @@ window.CompanionSetup = (() => {
     return kind.split(".").map(part => part.replace(/_/g, " ")).join(" · ");
   }
 
+  function mergeLegacyRole(base, current) {
+    const merged = {...(base || {}), ...(current || {})};
+    for (const key of ["legacy_api", "legacy_group_data_api"]) {
+      if (!merged[key] && base?.[key]) merged[key] = base[key];
+    }
+    merged.persona_ids = [...new Set([...(base?.persona_ids || []), ...(current?.persona_ids || [])])];
+    return merged;
+  }
+
+  /* Before the first runtime profile is started, product().targets() can be
+     empty even though /setup/targets already knows the configured roles. Keep
+     both directories and merge roles by id; the runtime view wins where it has
+     a value, while the setup view fills migration paths and missing personas. */
+  function legacyDirectoryTargets() {
+    const byId = new Map();
+    const add = target => {
+      if (!target?.target_id) return;
+      const existing = byId.get(target.target_id);
+      if (!existing) {
+        byId.set(target.target_id, {...target, roles: [...(target.roles || [])]});
+        return;
+      }
+      const roles = new Map((existing.roles || []).map(role => [role.role_id, role]));
+      for (const role of target.roles || []) {
+        roles.set(role.role_id, mergeLegacyRole(roles.get(role.role_id), role));
+      }
+      byId.set(target.target_id, {...existing, ...target, roles: [...roles.values()]});
+    };
+    for (const target of legacyAccountCatalog?.targets || []) add(target);
+    for (const target of product()?.targets?.() || []) add(target);
+    return [...byId.values()];
+  }
+
   function legacyChoices() {
-    const targets = (product()?.targets?.() || []).filter(target =>
+    const targets = legacyDirectoryTargets().filter(target =>
       (target.roles || []).some(role => role.legacy_api));
     const target = targets.find(item => item.target_id === legacyTargetId) || null;
     const roles = target?.roles?.filter(role => role.legacy_api) || [];
@@ -751,7 +789,7 @@ window.CompanionSetup = (() => {
         && (!persona.platform_id || item.platform_id === persona.platform_id)
         && (!persona.account_id || item.account_id === persona.account_id);
       const account = accounts.find(matchesAccount)
-        || (product()?.targets?.() || []).find(matchesAccount)
+        || legacyDirectoryTargets().find(matchesAccount)
         || {platform_id: persona.platform_id || "", account_id: persona.account_id || "",
           bot_id: persona.bot_id || "", account_name: persona.account_name || ""};
       const group = ensure(account);
@@ -766,7 +804,7 @@ window.CompanionSetup = (() => {
         current.role.persona_ids.push(personaId);
       }
     }
-    for (const target of (product()?.targets?.() || [])) {
+    for (const target of legacyDirectoryTargets()) {
       if (target.scope_kind === "group") continue;
       const group = ensure(target);
       if (!group) continue;
@@ -789,9 +827,10 @@ window.CompanionSetup = (() => {
       const catalog = await api("GET", "/targets");
       if (generationAtStart !== mountGeneration || !migrationOnly || !root) return;
       legacyAccountCatalog = catalog && Array.isArray(catalog.accounts) && Array.isArray(catalog.personas)
-        ? catalog : null;
+        ? {...catalog, targets: Array.isArray(catalog.targets) ? catalog.targets : []} : null;
       legacyAccountCatalogState = legacyAccountCatalog ? "ready" : "unavailable";
       if (!legacyBotKey && legacyBotGroups().length === 1) legacyBotKey = legacyBotGroups()[0].key;
+      if (!legacyRoleId) preselectUniqueLegacyDestination();
       render();
     } catch {
       if (generationAtStart !== mountGeneration || !migrationOnly || !root) return;
@@ -809,19 +848,25 @@ window.CompanionSetup = (() => {
   }
 
   function legacyRoleCandidates() {
-    return (product()?.targets?.() || []).flatMap(target =>
+    return legacyDirectoryTargets().flatMap(target =>
       (target.scope_kind === "group" ? [] : target.roles || []).map((role, index) => ({target, role, index,
         ready: Boolean(role.legacy_api)})));
   }
 
   async function refreshLegacyRoles() {
     const current = mountGeneration;
+    if (legacyRoleSaveMessage.startsWith("角色目录暂未更新：")) legacyRoleSaveMessage = "";
+    let directoryError = null;
     try { await product().refreshDirectory(); }
-    catch (error) {
-      if (current === mountGeneration) legacyRoleSaveMessage = `角色目录暂未更新：${errorText(error, "请重试读取")}`;
-    }
+    catch (error) { directoryError = error; }
     if (current !== mountGeneration || !root) return;
     await loadLegacyAccountCatalog(current);
+    /* The setup API is authoritative before the first runtime profile starts.
+       product().refreshDirectory() legitimately fails with staging_not_initialized
+       at that point; only surface it when the setup catalog also has no targets. */
+    if (directoryError && !legacyDirectoryTargets().length) {
+      legacyRoleSaveMessage = `角色目录暂未更新：${errorText(directoryError, "请重试读取")}`;
+    }
     const selected = legacyRoleCandidates().find(item => item.role.role_id === legacyRoleId
       && legacyBotKeyOf(item.target) === legacyBotKey && item.target.scope_kind === "private")
       || legacyRoleCandidates().find(item => item.role.role_id === legacyRoleId
@@ -1037,7 +1082,7 @@ window.CompanionSetup = (() => {
   }
 
   function preselectUniqueLegacyDestination() {
-    const destinations = (product()?.targets?.() || []).flatMap(target =>
+    const destinations = legacyDirectoryTargets().flatMap(target =>
       (target.roles || []).filter(role => role.legacy_api).map(role => ({target, role})));
     const privateDestinations = destinations.filter(item => item.target.scope_kind === "private");
     const choices = privateDestinations.length === 1 ? privateDestinations : destinations;
@@ -1438,7 +1483,7 @@ window.CompanionSetup = (() => {
   }
 
   function legacyPersonaTargets() {
-    return (product()?.targets?.() || []).filter(target => target.scope_kind !== "group"
+    return legacyDirectoryTargets().filter(target => target.scope_kind !== "group"
       && Array.isArray(target.roles) && target.roles.some(role => role.legacy_api));
   }
 
@@ -1683,7 +1728,7 @@ window.CompanionSetup = (() => {
   }
 
   function legacyGroupSelection() {
-    const targets = (product()?.targets?.() || []).filter(item => item.scope_kind === "group"
+    const targets = legacyDirectoryTargets().filter(item => item.scope_kind === "group"
       && (item.roles || []).some(role => role.legacy_group_data_api));
     const target = targets.find(item => item.target_id === legacyGroupTargetId) || null;
     const roles = target?.roles?.filter(role => role.legacy_group_data_api) || [];
@@ -3678,7 +3723,7 @@ window.CompanionSetup = (() => {
       } else if (action === "prepare-upgrade") {
         const result = await api("POST", "/upgrade", {confirmed: true, plan_token: state?.upgrade?.plan_token});
         if (!result.started) throw new Error(result.startup_error || "旧版连接已保存，请核对运行状态。");
-        await product().refreshDirectory();
+        await refreshDirectoryQuietly();
         window.navigate?.("manage", "data", "migration");
         return;
       } else if (action === "prepare") {
@@ -4081,7 +4126,7 @@ window.CompanionSetup = (() => {
       legacyConfigSkipped = false;
       legacyMigrationFinished = false;
       legacyTargetId = input.value;
-      legacyBotKey = legacyBotKeyOf((product()?.targets?.() || []).find(item => item.target_id === input.value));
+      legacyBotKey = legacyBotKeyOf(legacyDirectoryTargets().find(item => item.target_id === input.value));
       legacyRoleId = "";
       legacyApi = "";
       legacyFinding = legacyPlan = legacyResult = null;

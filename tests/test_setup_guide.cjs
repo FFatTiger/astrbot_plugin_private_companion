@@ -13,7 +13,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 const settle = async () => { for (let i = 0; i < 12; i += 1) await flush(); };
 
 function harness({status, responses = {}, targets = [], refreshedTargets = targets, accounts = [], personas = [],
-  bridgeResponses = {}, configEditorsAvailable = true, confirmResult = true}) {
+  bridgeResponses = {}, configEditorsAvailable = true, confirmResult = true, directoryError = null}) {
   const calls = [];
   const bridgeCalls = [];
   const editorCalls = [];
@@ -59,7 +59,11 @@ function harness({status, responses = {}, targets = [], refreshedTargets = targe
     targets: () => currentTargets,
     accounts: () => accounts,
     personas: () => personas,
-    async refreshDirectory() { directoryRefreshes += 1; currentTargets = refreshedTargets; },
+    async refreshDirectory() {
+      directoryRefreshes += 1;
+      if (directoryError) throw directoryError;
+      currentTargets = refreshedTargets;
+    },
     role: () => configEditorsAvailable ? {reply_api: '/astrbot_plugin_private_companion/reply/current',
       model_api: '/astrbot_plugin_private_companion/model'} : null,
     scopeKey: () => 'installation-a:target-a:role-a',
@@ -172,6 +176,35 @@ function harness({status, responses = {}, targets = [], refreshedTargets = targe
 
 const readyStatus = extra => ({step: 'complete', prepared: true, ready: true,
   completed: ['model', 'knowledge', 'relationships'], skipped: [], proactive_test: {state: 'delivered'}, ...extra});
+
+test('migration role setup falls back to the setup catalog before staging starts', async () => {
+  const route = 'host/targets/t-first/roles/role-a/legacy';
+  const catalog = {
+    accounts: [{platform_id: 'qq-main', account_id: '100', bot_id: 'bot-a', account_name: '测试 Bot'}],
+    personas: [{bot_id: 'bot-a', platform_id: 'qq-main', account_id: '100',
+                persona_id: 'original', role_id: 'role-a', label: '原人格', mapped: true}],
+    targets: [{target_id: 't-first', scope_kind: 'private', platform_id: 'qq-main',
+               account_id: '100', bot_id: 'bot-a', participant_id: '*',
+               roles: [{role_id: 'role-a', persona_ids: ['original'],
+                        legacy_api: '/astrbot_plugin_private_companion/' + route}]}],
+  };
+  const error = Object.assign(new Error('staging_not_initialized'), {code: 'staging_not_initialized'});
+  const page = harness({targets: [], refreshedTargets: [], directoryError: error,
+    responses: {'GET setup/targets': catalog}});
+  page.mountMigration();
+  await settle();
+  assert.match(page.html, /当前角色/);
+  assert.match(page.html, /就用这个角色/);
+  assert.doesNotMatch(page.html, /角色目录暂未更新/);
+  page.clickMigrationWizard('refresh-roles');
+  await settle();
+  assert.match(page.html, /当前角色/);
+  assert.doesNotMatch(page.html, /角色目录暂未更新/);
+  assert.match(page.html, /就用这个角色/);
+  page.clickMigrationWizard('next');
+  await settle();
+  assert.match(page.html, /data-migration-step="2"/);
+});
 
 test('the review is read-only and migration starts only after an explicit confirmation', async () => {
   const route = 'host/targets/first/roles/role-a/legacy';
@@ -302,6 +335,18 @@ test('first upgrade opens migration with the newly saved destination available',
   assert.equal(page.calls.filter(call => call.method === 'GET' && call.route === route).length, 1,
     '进入核对页不应重复扫描');
   assert.match(page.html, /data-migration-step="2"/);
+});
+
+test('upgrade navigation survives a pre-staging directory refresh failure', async () => {
+  const error = Object.assign(new Error('staging_not_initialized'), {code: 'staging_not_initialized'});
+  const page = harness({status: {upgrade: {present: true, configured: false,
+    can_prepare: true, plan_token: 'reviewed-source'}}, directoryError: error,
+    responses: {'POST setup/upgrade': {saved: true, started: true}}});
+  page.mount();
+  await settle();
+  page.click('prepare-upgrade');
+  await settle();
+  assert.deepEqual(page.navigation, [['manage', 'data', 'migration']]);
 });
 
 test('startup detects an old configuration and offers a direct upgrade guide once', async () => {

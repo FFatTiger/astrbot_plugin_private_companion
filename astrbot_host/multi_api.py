@@ -41,9 +41,9 @@ from .host_options_api import HostOptionsWebAPI
 from .storage_api import StorageWebAPI
 from .display_names import display_names
 from .identity_derivation import role_display_name
+from .role_paths import HOST_PREFIX as PREFIX, role_legacy_paths
 
 
-PREFIX = "/astrbot_plugin_private_companion/host"
 INSTALLATION_CONFIGURATION_SECTIONS = ("proactive.contact", "reaction", "budget")
 TARGET_CONFIGURATION_SECTIONS = tuple(name for name in SECTIONS
     if name not in INSTALLATION_CONFIGURATION_SECTIONS)
@@ -162,10 +162,8 @@ class MultiHostWebAPI:
                           PREFIX + "/targets/" + target.target_id + "/roles/" + digest(role) + "/growth"),
              # V1 迁移写的是角色设置，所以它和别的域路由一样按角色挂：
              # 页面先选目标与角色，再对着那个角色的路径侦察、试算、执行。
-             "legacy_api": (None if isinstance(target, GroupTarget) else
-                            PREFIX + "/targets/" + target.target_id + "/roles/" + digest(role) + "/legacy"),
-             "legacy_group_data_api": (PREFIX + "/targets/" + target.target_id + "/roles/"
-                            + digest(role) + "/legacy-group-data" if isinstance(target, GroupTarget) else None)}
+             **role_legacy_paths(target.target_id, role,
+                                 "group" if isinstance(target, GroupTarget) else "private")}
             for role in sorted({p.role_id for p in settings.personas if p.bot_id == target.bot_id})]}
             for target in settings.all_targets]
 

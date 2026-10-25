@@ -385,6 +385,43 @@ class SetupWebAPI:
                                     "label": persona_id, "mapped": mapping is not None})
             directory = await self.controller.session_topology.inventory_report()
             targets = directory["targets"]
+            # The setup page runs before the first runtime profile exists, so
+            # page/targets cannot supply migration routes yet. The setup catalog
+            # must still describe which native roles can receive an old install.
+            from .legacy_api import PREFIX as LEGACY_PREFIX
+            from .role_paths import role_legacy_paths
+            inventory_roles = {}
+            inventory = getattr(getattr(self.controller, "web_api", None), "target_inventory", None)
+            if callable(inventory):
+                try:
+                    inventory_roles = {
+                        (target.get("target_id"), role.get("role_id")): role
+                        for target in inventory() for role in target.get("roles", [])
+                        if target.get("target_id") and role.get("role_id")
+                    }
+                except Exception:
+                    inventory_roles = {}
+            for target in targets:
+                scope_kind = target.get("scope_kind")
+                for role in target.get("roles", []):
+                    target_id, role_id = target.get("target_id"), role.get("role_id")
+                    matched = inventory_roles.get((target_id, role_id))
+                    if matched:
+                        for key in ("role_name", "legacy_api", "legacy_group_data_api"):
+                            if not role.get(key) and matched.get(key):
+                                role[key] = matched[key]
+                        role["persona_ids"] = list(dict.fromkeys(
+                            [*(role.get("persona_ids") or []), *(matched.get("persona_ids") or [])]))
+                    if target_id and role_id:
+                        if getattr(self.controller, "_multi_host", False):
+                            paths = role_legacy_paths(target_id, role_id, scope_kind)
+                            if not role.get("legacy_api"):
+                                role["legacy_api"] = paths["legacy_api"]
+                            if not role.get("legacy_group_data_api"):
+                                role["legacy_group_data_api"] = paths["legacy_group_data_api"]
+                        elif scope_kind != "group" and not role.get("legacy_api"):
+                            # The single-target host mounts migration at the root.
+                            role["legacy_api"] = LEGACY_PREFIX
             names = display_names(self.controller)
             accounts = await names.targets(accounts)
             targets = await names.targets(targets)

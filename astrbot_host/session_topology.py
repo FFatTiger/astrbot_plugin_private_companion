@@ -92,31 +92,53 @@ class SessionTopology:
         if not platforms:
             fallback = getattr(context, "platform", None)
             platforms = list(getattr(context, "platforms", {}).values()) or ([fallback] if fallback else [])
-        aliases = {(row["platform_id"], row["account_id"]): row["bot_id"] for row in self.configured(settings)}
+        configured = self.configured(settings)
+        aliases = {(row["platform_id"], row["account_id"]): row["bot_id"]
+                   for row in configured
+                   if row.get("platform_id") and row.get("account_id") and row.get("bot_id")}
         if settings is not None:
             registered = [{"platform_id": account.platform_id, "account_id": account.self_id,
                            "bot_id": account.bot_id} for account in settings.accounts]
         else:
             shared = self.controller.config.get("multi_host", {})
             registered = shared.get("accounts", []) if isinstance(shared, dict) else []
+        rows = list(configured)
         for row in registered if isinstance(registered, list) else ():
             if (isinstance(row, dict) and all(isinstance(row.get(field), str) and row[field].strip()
                     for field in ("platform_id", "account_id", "bot_id"))):
                 aliases[(row["platform_id"], row["account_id"])] = row["bot_id"]
+                rows.append(row)
         result = {}
+
+        def remember(platform_id, account_id, bot_id=None):
+            platform_id, account_id = str(platform_id or "").strip(), str(account_id or "").strip()
+            if not platform_id or not account_id:
+                return
+            result[(platform_id, account_id)] = {
+                "platform_id": platform_id, "account_id": account_id,
+                "bot_id": bot_id or aliases.get((platform_id, account_id)) or derive_bot_id(account_id),
+            }
+
+        # Configured accounts remain visible before a reverse websocket has
+        # registered its live client. A fresh install has no ``accounts`` rows
+        # yet, so targets also seed the picker.
+        for row in rows:
+            remember(row.get("platform_id"), row.get("account_id"), row.get("bot_id"))
         for platform in platforms:
             try:
                 meta = platform.meta()
-                if meta.name != "aiocqhttp":
-                    continue
-                clients = platform.get_client()._wsr_api_clients
-                for raw_id in clients:
-                    account = account_number(raw_id)
-                    result[(meta.id, account)] = {"platform_id": meta.id, "account_id": account,
-                        "bot_id": aliases.get((meta.id, account), derive_bot_id(account))}
+                if meta.name == "aiocqhttp":
+                    clients = platform.get_client()._wsr_api_clients
+                    for raw_id in clients:
+                        remember(meta.id, account_number(raw_id))
+                else:
+                    # QQ Official and other adapters do not expose a OneBot
+                    # self-id. Their stable account key is the platform instance
+                    # id, which is also what event_identity falls back to.
+                    remember(meta.id, meta.id)
             except (AttributeError, ValueError, TypeError):
                 continue
-        return sorted(result.values(), key=lambda row: (row["platform_id"], int(row["account_id"])))
+        return sorted(result.values(), key=lambda row: (row["platform_id"], row["account_id"]))
 
     def _observed(self):
         if not self.path.is_file():

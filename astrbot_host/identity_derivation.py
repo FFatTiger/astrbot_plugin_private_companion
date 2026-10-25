@@ -39,16 +39,16 @@ from .settings import HostControlError
 LEGACY_BOT_ID = "staging-bot"
 LEGACY_ROLE_ID = "staging-role"
 
-_ACCOUNT = re.compile(r"[0-9]+")
+_ACCOUNT = re.compile(r"[0-9A-Za-z_-]+")
 _SAFE = re.compile(r"[^0-9a-z]+")
 _ROLE_CHANNEL_SUFFIX = re.compile(r"\s*[-_]\s*(?:私聊|群聊)\s*$")
 
 
 def _account(value: object, field: str) -> str:
-    """A OneBot account number, as the rest of the host validates them."""
+    """A native account/sender key (numeric OneBot or opaque official id)."""
     if type(value) is not str or _ACCOUNT.fullmatch(value) is None:
         raise HostControlError("host_identity_invalid",
-                               f"the {field} must be a numeric account, not a name or an empty value")
+                               f"the {field} must be a native account id, not a name or an empty value")
     return value
 
 
