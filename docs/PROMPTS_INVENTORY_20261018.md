@@ -42,7 +42,7 @@ V2 自己执行回复批次时，由 `EvidencePromptCompiler.compile`（`compani
 | `BACKGROUND_INSTRUCTION` | `astrbot_host/core_reply_context.py:30` | 声明背景资料不是新发言/授权，身份沿用宿主人格 | 至少有一个背景段非空 |
 | `MEMORY_INSTRUCTION` | `astrbot_host/core_reply_context.py:32` | 私聊记忆的归属与不确定性 | 本轮有私聊记忆材料 |
 | `GROUP_INSTRUCTION` | `astrbot_host/core_reply_context.py:36` | 群聊发言者只代表本人、群记忆按账号归因 | 当前 scope 是群聊 |
-| `SENT_CONTINUATION_INSTRUCTION` | `astrbot_host/core_reply_context.py:43` | 把已发出的主动消息放回对话顺序 | 私聊且存在已确认投递的主动消息 |
+| `SENT_CONTINUATION_INSTRUCTION` | `astrbot_host/core_reply_context.py:47` | 把已发出的主动消息放回对话顺序；承接旧话头只能引用真实出现过的原话 | 私聊且存在已确认投递的主动消息 |
 | 表达偏好段 | `astrbot_host/core_reply_context.py:220-230` | 风格/日常表达偏好（`text_policy().instruction`） | 配置了 `style_prompt` 或开启日常表达 |
 | 对话附加提示 | `astrbot_host/core_reply_context.py:232-248` | 页面保存的 `conversation.reply.prompt` | 该字段非空 |
 | 角色档案 | `astrbot_host/core_reply_context.py:249` + `companion_v2/role_profile/context.py:67` | 角色自身与世界的稳定档案 | 有角色档案快照 |
