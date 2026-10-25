@@ -12,9 +12,12 @@ from .segment_control import LLM_SEGMENT_MARKER, controlled_parts, protected_ran
 from .text_processing import literal_ranges
 
 
-DEFAULT_SPLIT_WORDS = ("。", "？", "！", "~", "～", "?", ".", "!", ";", "；", "……", "）", "“", "…")
+DEFAULT_SPLIT_WORDS = ("。", "？", "！", "~", "～", "?", ".", "!", ";", "；", "……", "）", "…")
 DEFAULT_RULE_REGEX = r"(?<=[。！？!?…~～])\s*|\n+"
 PART_GAP_MODES = frozenset(("fixed", "random", "log"))
+# 开引号与开括号只属于后一句。把边界落在它们之后等于把引文从中间切开：
+# 上一段留下一个孤零零的「“」，下一段从被引用的半句开始。
+OPENING_PUNCTUATION = "“‘「『（(【[《〈"
 
 
 def _visible_length(text):
@@ -177,10 +180,9 @@ def _word_boundaries(text, words, protected):
         while interval < len(protected) and position > protected[interval][1]:
             interval += 1
         if interval < len(protected) and protected[interval][0] <= position:
-            # A configured opening quote may separate the lead-in from an
-            # otherwise atomic quoted title; content within stays protected.
-            if text[position] == "“" and "“" in words and protected[interval][0] == position:
-                boundaries.append(position + 1)
+            # 引文整体受保护，本身不是停顿：开引号处不再落任何边界。
+            # 旧实现在开引号之后补了一个断点，结果上一段以「“」结尾、
+            # 引文被切到下一段（2026-10-25 现场：…那句“ / 生日结束…）。
             position = protected[interval][1] + 1
             continue
         word = _match_word(text, position, words)
@@ -188,6 +190,11 @@ def _word_boundaries(text, words, protected):
             position += 1
             continue
         end = position + len(word)
+        if all(char in OPENING_PUNCTUATION for char in word):
+            # 配置里残留的开引号（旧预设默认带「“」）不能当断句符：
+            # 在它之后断开会留下「…那句“」这样的半截气泡。
+            position = end
+            continue
         if word in (".", ",", "，") and position > 0 and text[position - 1].isdigit() \
                 and end < len(text) and text[end].isdigit():
             position = end
