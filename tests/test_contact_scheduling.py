@@ -590,3 +590,41 @@ class ContactSchedulingTests(ContactScheduleFixture, unittest.IsolatedAsyncioTes
         self.clock.advance(timedelta(hours=24))
         later = (await self.contact(app, self.opportunity("later"))).unwrap().task
         await self.delivery_state(app, later.task_id, "delivered")
+
+    async def test_superseded_anchor_reanchors_to_latest_completed_conversation(self):
+        host, first = await self.scheduled(automatic=False)
+        app = host.application
+        context = self.contact_context()
+        schedule = app.contact_schedule
+        original, _, _ = schedule._origin(context, first, self.clock.now())
+
+        self.clock.advance(timedelta(seconds=30))
+        second = host.receive(self.event("superseding")).unwrap()
+        await self.done(app, second)
+        self.assertEqual(schedule.latest_conversation(context)["batch_id"], second)
+
+        self.settings(app, {"automatic_enabled": True}).unwrap()
+        self.clock.advance(timedelta(seconds=120))
+        current = schedule.validate_origin(context, original, self.clock.now())
+
+        self.assertEqual(current["batch_id"], second)
+        self.assertTrue(current.get("reanchored"))
+        self.assertEqual(current["previous_batch_id"], first)
+        self.assertEqual(current["role_hash"], original["role_hash"])
+
+    async def test_incomplete_latest_conversation_is_not_reanchored(self):
+        host, first = await self.scheduled(automatic=False)
+        app = host.application
+        context = self.contact_context()
+        schedule = app.contact_schedule
+
+        self.clock.advance(timedelta(seconds=30))
+        second = host.receive(self.event("incomplete")).unwrap()
+        await self.done(app, second)
+        with app.runtime.transaction() as connection:
+            connection.execute("UPDATE conversation_batches SET state = 'open' WHERE batch_id = ?", (second,))
+        self.assertFalse(schedule._conversation_ready(schedule.latest_conversation(context)))
+
+        with self.assertRaises(TaskError) as caught:
+            schedule._origin(context, first, self.clock.now())
+        self.assertEqual(caught.exception.code, "contact_conversation_changed")

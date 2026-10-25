@@ -261,7 +261,36 @@ class ContactSchedule:
         """
         self._maintenance_contexts[context.key] = context
 
+    def _anchor_time(self, context, batch_id):
+        """Return when the stored conversation happened, or ``None``.
+
+        Re-anchoring may only move forward inside the saved window. An
+        unavailable or foreign original turn cannot prove that ordering, so it
+        keeps the caller's existing rejection instead of widening the rule.
+        """
+        from companion_v2.conversation.native_turns import turns_available
+
+        found = []
+        row = self.runtime.read_one(
+            "SELECT created_at, origin_key FROM conversation_batches WHERE batch_id = ?", (batch_id,))
+        if row is not None and row["origin_key"] == context.key:
+            found.append(datetime.fromisoformat(row["created_at"]))
+        if turns_available(self.runtime):
+            row = self.runtime.read_one(
+                "SELECT observed_at, context_key FROM conversation_native_turns WHERE turn_id = ?", (batch_id,))
+            if row is not None and row["context_key"] == context.key:
+                found.append(datetime.fromisoformat(row["observed_at"]))
+        return max(found) if found else None
+
     def _origin(self, context, batch_id, at):
+        """Select the origin conversation, moving forward when it was superseded.
+
+        An automatic opportunity may be admitted just before a newer completed
+        conversation supersedes its anchor. That is a re-anchor, not a lost
+        opportunity: the latest completed conversation in the same window takes
+        over, the original turn is remembered in ``previous_batch_id``, and the
+        caller still runs every safety check against the new row.
+        """
         from companion_v2.conversation.native_turns import input_event, latest_scope
 
         row = self.runtime.read_one("""SELECT f.state AS flow_state, b.* FROM conversation_flows f
@@ -269,32 +298,43 @@ class ContactSchedule:
             ORDER BY f.sequence DESC LIMIT 1""", (context.scope.key,))
         native = latest_scope(self.runtime, context.scope)
         if native is not None and (row is None or native["observed_at"] >= row["created_at"]):
-            if (native["turn_id"] != batch_id or native["context_key"] != context.key
-                    or native["generation_state"] != "completed" or not native["role_instruction"].strip()):
+            if (native["context_key"] != context.key or native["generation_state"] != "completed"
+                    or not native["role_instruction"].strip()):
                 raise TaskError("contact_conversation_changed", "automatic opportunity requires the latest completed native conversation")
             self.messages.authorize(context, at)
             event = input_event(self.messages, native, at)
-            return {"batch_id": batch_id, "event_key": event.scoped_key,
-                    "event_hash": digest([event, context.key, native["role_instruction"]]),
-                    "role_hash": digest(native["role_instruction"])}, native, event
-        if (row is None or row["batch_id"] != batch_id or row["origin_key"] != context.key
-                or row["flow_state"] != "complete" or row["state"] != "ready" or not row["role_instruction"].strip()):
-            raise TaskError("contact_conversation_changed", "automatic opportunity requires the latest completed conversation")
-        self.messages.authorize(context, at)
-        item = self.runtime.read_one("""SELECT * FROM conversation_inputs WHERE batch_id = ? AND withdrawn = 0
-            ORDER BY position DESC LIMIT 1""", (batch_id,))
-        if item is None:
-            raise TaskError("contact_input_unavailable", "automatic opportunity has no active original input")
-        event = event_from_document(json.loads(item["event_json"]), context)
-        if (event.scope != context.scope or event.principal != context.actor.principal
-                or event.scoped_key != item["event_key"] or event.received_at > at):
-            raise TaskError("contact_context_mismatch", "automatic input must retain its original author and window")
-        source = self.messages._read_source(event.source, context, event.capability, at)
-        if source.content_hash != event.input_hash or digest(source.payload) != source.content_hash:
-            raise TaskError("contact_input_changed", "automatic input no longer matches its original evidence")
-        origin = {"batch_id": batch_id, "event_key": item["event_key"], "event_hash": item["event_hash"],
-                  "role_hash": digest(row["role_instruction"])}
-        return origin, row, event
+            origin = {"batch_id": native["turn_id"], "event_key": event.scoped_key,
+                      "event_hash": digest([event, context.key, native["role_instruction"]]),
+                      "role_hash": digest(native["role_instruction"])}
+            latest = native
+        else:
+            if (row is None or row["origin_key"] != context.key
+                    or row["flow_state"] != "complete" or row["state"] != "ready"
+                    or not row["role_instruction"].strip()):
+                raise TaskError("contact_conversation_changed", "automatic opportunity requires the latest completed conversation")
+            self.messages.authorize(context, at)
+            item = self.runtime.read_one("""SELECT * FROM conversation_inputs WHERE batch_id = ? AND withdrawn = 0
+                ORDER BY position DESC LIMIT 1""", (row["batch_id"],))
+            if item is None:
+                raise TaskError("contact_input_unavailable", "automatic opportunity has no active original input")
+            event = event_from_document(json.loads(item["event_json"]), context)
+            if (event.scope != context.scope or event.principal != context.actor.principal
+                    or event.scoped_key != item["event_key"] or event.received_at > at):
+                raise TaskError("contact_context_mismatch", "automatic input must retain its original author and window")
+            source = self.messages._read_source(event.source, context, event.capability, at)
+            if source.content_hash != event.input_hash or digest(source.payload) != source.content_hash:
+                raise TaskError("contact_input_changed", "automatic input no longer matches its original evidence")
+            origin = {"batch_id": row["batch_id"], "event_key": item["event_key"], "event_hash": item["event_hash"],
+                      "role_hash": digest(row["role_instruction"])}
+            latest = row
+        if origin["batch_id"] == batch_id:
+            return origin, latest, event
+        anchor = self._anchor_time(context, batch_id)
+        if anchor is None or datetime.fromisoformat(latest["created_at"]) < anchor:
+            raise TaskError("contact_conversation_changed",
+                            "automatic opportunity cannot move back to an older or foreign conversation")
+        origin.update({"reanchored": True, "previous_batch_id": batch_id})
+        return origin, latest, event
 
     def latest_conversation(self, context):
         """Select the actual latest input; an older completed turn is no fallback."""
@@ -314,7 +354,13 @@ class ContactSchedule:
                          "balance_event", "news_event", "screen_event", "greeting_event", "burst_event",
                          "relationship_event", "followup_event", "open_loop_event", "morning_event"}
         rhythm_event_markers = event_markers - {"relationship_event"}
-        if current != {key: value for key, value in origin.items() if key not in event_markers}:
+        if current.get("reanchored"):
+            # The latest completed conversation took over. Keep the original
+            # event markers so their own checks still run, but replace identity
+            # and time basis with the new row before continuing.
+            origin = {**origin, **current}
+        elif current != {key: value for key, value in origin.items()
+                         if key not in event_markers | {"reanchored", "previous_batch_id"}}:
             raise TaskError("contact_conversation_changed", "automatic opportunity lost its original conversation")
         preferences = require(self.contacts.preferences.read(context, observed_at=at))
         if not preferences.values["automatic_enabled"]:
@@ -389,6 +435,7 @@ class ContactSchedule:
             self.wake_events.validate(context, origin["morning_event"], at, interaction=interaction)
         if "open_loop_event" in origin:
             self._validate_open_loop(context, origin["open_loop_event"], preferences, at)
+        return current
 
     def _plan(self, row, at):
         context = TaskContext.restore(json.loads(row["context_json"]))
