@@ -199,6 +199,8 @@ class LegacyDataPlan:
     expression_profiles: tuple[dict, ...] = ()
     private_contacts: tuple[dict, ...] = ()
     private_contact_rejected: tuple[dict, ...] = ()
+    relationship_profiles: tuple[dict, ...] = ()
+    relationship_profile_rejected: tuple[dict, ...] = ()
 
     def document(self, *, source_group_id="", existing_reaction_ids=(),
                  existing_journal_heads=None, existing_reference_hashes=(),
@@ -360,6 +362,8 @@ class LegacyDataPlan:
             "profile_data": dict(self.profile_summary),
             "private_contacts": {"total": len(self.private_contacts),
                 "rejected": list(self.private_contact_rejected)},
+            "relationship_profiles": {"total": len(self.relationship_profiles),
+                "rejected": list(self.relationship_profile_rejected)},
             "work_delivery": dict(self.work_delivery),
             "world_assets": dict(self.world_assets),
             "group_networks": [{key: value for key, value in item.items() if key not in ("members", "edges")}
@@ -1673,6 +1677,8 @@ def build_data_plan(v1_root: str | Path, *, source_persona_id="", v1_configurati
     profile_data = _profile_data(profile)
     from .private_contacts import private_contacts
     contacts, contact_rejected = private_contacts(profile_data, v1_configuration=v1_configuration)
+    from .relationship_profiles import relationship_profiles
+    relation_profiles, relation_profile_rejected = relationship_profiles(profile_data)
     from .expression_data import expression_profiles
     learned_expressions = expression_profiles(profile_data, source_persona_id)
     reference_images, reference_image_rejected = _reference_assets(
@@ -1690,6 +1696,8 @@ def build_data_plan(v1_root: str | Path, *, source_persona_id="", v1_configurati
     material = {
         "private_contacts": contacts,
         "private_contact_rejected": contact_rejected,
+        "relationship_profiles": relation_profiles,
+        "relationship_profile_rejected": relation_profile_rejected,
         "expression_profiles": learned_expressions,
         "source_persona_id": source_persona_id,
         "selected_path": selected_path,
@@ -1734,7 +1742,7 @@ def build_data_plan(v1_root: str | Path, *, source_persona_id="", v1_configurati
         member_profile_rejected, persona_sources, source_persona_id, profile_summary,
         work_delivery, world_assets, fingerprint, tuple(warnings + group_warnings),
         reference_images, reference_image_rejected, wardrobe_items, wardrobe_rejected, learned_expressions,
-        contacts, contact_rejected)
+        contacts, contact_rejected, relation_profiles, relation_profile_rejected)
 
 
 def load_reaction_asset(v1_root: str | Path, item: ReactionAsset) -> bytes:

@@ -9,6 +9,30 @@ from .private_authorization import private_authorization, merge_authorization
 
 SOURCE_ID = "private.core_profiles.users"
 GENERIC_NAMES = frozenset(("用户", "主人", "主要用户", "默认用户", "临时会话"))
+DELIVERY_UMO_FIELDS = ("umo", "bound_delivery_umo", "preferred_delivery_umo", "last_inbound_umo")
+
+
+def private_umo(user):
+    return next((str(user.get(field) or "") for field in DELIVERY_UMO_FIELDS if user.get(field)), "")
+
+
+def verified_private_identity(user):
+    """Return (platform, account, participant) only for an identity V1 recorded as a private route.
+
+    Relationship data is written for the same person card, so it must pass the
+    same identity check. A number that lacks its adapter, bot account, supported
+    platform kind or matching private UMO is never guessed into a V2 subject.
+    """
+    participant = user.get("identity_subject_id")
+    platform, account = user.get("identity_adapter_instance_id"), user.get("identity_bot_id")
+    if (not all(type(value) is str and value.strip() for value in (participant, platform, account))
+            or user.get("identity_platform_kind") not in ("onebot", "aiocqhttp")):
+        return None
+    umo = private_umo(user)
+    if umo and umo not in (f"{platform}:FriendMessage:{participant}",
+                           f"{platform}:PrivateMessage:{participant}"):
+        return None
+    return platform, account, participant
 
 
 def private_contacts(payload, *, v1_configuration=None):
@@ -21,9 +45,7 @@ def private_contacts(payload, *, v1_configuration=None):
             rejected.append({"source_key": str(key), "reason": "user_invalid"})
             continue
         capabilities = user.get("unified_profile_capabilities") or {}
-        umo = next((str(user.get(field) or "") for field in
-            ("umo", "bound_delivery_umo", "preferred_delivery_umo", "last_inbound_umo")
-            if user.get(field)), "")
+        umo = private_umo(user)
         group_only = (user.get("profile_origin") == "group_observation" or user.get("observation_only")
             or isinstance(capabilities, dict) and capabilities.get("grant_source") == "legacy_effective_migration"
             and not umo and not user.get("last_seen"))
@@ -36,14 +58,11 @@ def private_contacts(payload, *, v1_configuration=None):
         if not maintained and not count:
             rejected.append({"source_key": str(key), "reason": "no_private_history"})
             continue
-        participant = user.get("identity_subject_id")
-        platform, account = user.get("identity_adapter_instance_id"), user.get("identity_bot_id")
-        if (not all(type(value) is str and value.strip() for value in (participant, platform, account))
-                or user.get("identity_platform_kind") not in ("onebot", "aiocqhttp")
-                or umo and umo not in (f"{platform}:FriendMessage:{participant}",
-                                      f"{platform}:PrivateMessage:{participant}")):
+        identity = verified_private_identity(user)
+        if identity is None:
             rejected.append({"source_key": str(key), "reason": "private_identity_unverified"})
             continue
+        platform, account, participant = identity
         nickname = " ".join(str(user.get("nickname") or "").split())[:64]
         if nickname in GENERIC_NAMES or nickname == participant:
             nickname = ""

@@ -572,7 +572,7 @@ class LegacyMigrationWebAPI:
             "import_reference_images": True, "import_wardrobe_items": True,
             "confirm_reference_persona_mapping": True,
             "import_expressions": True, "confirm_expression_mapping": True,
-            "import_private_contacts": True,
+            "import_private_contacts": True, "import_relationship_profiles": True,
         }
         items = []
         for persona_id in arguments.get("personas", []):
@@ -644,6 +644,9 @@ class LegacyMigrationWebAPI:
         flags["confirm_member_ids"] = True
         contacts = document.get("private_contacts") or {}
         flags["import_private_contacts"] = bool(contacts.get("importable") or contacts.get("total"))
+        # Relationship details are part of the same per-person migration; the
+        # importer only fills empty V2 fields and reports skipped identities.
+        flags["import_relationship_profiles"] = True
         flags["import_journals"] = bool((document.get("journals") or {}).get("batch_count"))
         flags["import_reactions"] = bool((document.get("reaction_assets") or {}).get("batch_count"))
         flags["import_reference_images"] = bool((document.get("reference_images") or {}).get("image_count"))
@@ -653,8 +656,15 @@ class LegacyMigrationWebAPI:
         if not result.is_success:
             return {"kind": "persona", "persona_id": persona_id, "state": "failed",
                     "reason": result.failure.code}
+        data = result.unwrap()
+        relationships = data.get("relationship_profiles") or {}
         return {"kind": "persona", "persona_id": persona_id, "state": "imported",
-                "result": result.unwrap()}
+                "relationship_profiles": {
+                    "imported": relationships.get("imported", 0),
+                    "unchanged": relationships.get("unchanged", 0),
+                    "skipped": relationships.get("skipped", 0),
+                },
+                "result": data}
 
     def _scope(self, migration, root, session):
         from companion_v2.legacy.data_migration import build_data_plan
@@ -782,7 +792,8 @@ class LegacyMigrationWebAPI:
                        "import_archive", "import_memory_database", "memory_owner_ids",
                        "memory_group_mappings", "confirm_memory_mapping", "import_reference_images",
                        "import_wardrobe_items", "confirm_reference_persona_mapping",
-                       "import_expressions", "confirm_expression_mapping", "import_private_contacts"}
+                       "import_expressions", "confirm_expression_mapping", "import_private_contacts",
+                       "import_relationship_profiles"}
             if (type(arguments) is not dict or not {"plan_token", "import_reactions",
                     "import_group_network", "confirm_member_ids", "source_persona_id",
                     "import_journals", "confirm_persona_mapping", "import_worldbook"}.issubset(arguments)
@@ -790,7 +801,8 @@ class LegacyMigrationWebAPI:
                 raise ValueError()
             if (type(arguments["plan_token"]) is not str or not arguments["plan_token"]
                     or any(type(arguments.get(key, False)) is not bool for key in
-                           ("import_expressions", "confirm_expression_mapping", "import_private_contacts"))
+                           ("import_expressions", "confirm_expression_mapping", "import_private_contacts",
+                            "import_relationship_profiles"))
                     or type(arguments["import_reactions"]) is not bool
                     or type(arguments["import_group_network"]) is not bool
                     or type(arguments["confirm_member_ids"]) is not bool
@@ -842,7 +854,8 @@ class LegacyMigrationWebAPI:
                 arguments.get("import_wardrobe_items", False),
                 arguments.get("confirm_reference_persona_mapping", False),
                 arguments.get("import_expressions", False), arguments.get("confirm_expression_mapping", False),
-                arguments.get("import_private_contacts", False)),
+                arguments.get("import_private_contacts", False),
+                arguments.get("import_relationship_profiles", False)),
             root_override=root_override,
         )
 
@@ -949,7 +962,8 @@ class LegacyMigrationWebAPI:
                        existing_reaction_ids=(), existing_journal_heads=None,
                        existing_worldbook=None, archive_inventory_fingerprint="",
                          memory_database_fingerprint="", memory_owner_ids=(), memory_group_mappings=(),
-                         reference_state=None, expression_state=None, contact_state=None):
+                         reference_state=None, expression_state=None, contact_state=None,
+                         relationship_state=None):
         scope = context.scope
         material = {
             "source": data_plan.source_fingerprint,
@@ -976,6 +990,7 @@ class LegacyMigrationWebAPI:
             "reference_state": reference_state or {},
             "expression_state": expression_state or {},
             "private_contacts": contact_state or {},
+            "relationship_profiles": relationship_state or {},
         }
         encoded = json.dumps(material, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -1018,6 +1033,14 @@ class LegacyMigrationWebAPI:
         contact_state["authorization"] = authorization_plan(
             self.controller.runtime, context, data_plan.private_contacts, self.controller.now())
         document["private_contacts"] = {**contact_state, "rejected": list(data_plan.private_contact_rejected)}
+        from companion_v2.relationships.legacy_import import (
+            relationship_profile_entries, relationship_profile_plan, relationship_profile_token)
+        relationship_entries = relationship_profile_entries(
+            self.controller.runtime, context, data_plan.relationship_profiles)
+        relationship_state = relationship_profile_plan(relationship_entries)
+        relationship_token = relationship_profile_token(relationship_entries)
+        document["relationship_profiles"] = {**relationship_state,
+            "rejected": list(data_plan.relationship_profile_rejected)}
         document["archive"] = archive_plan.document()
         expression_state = self._expression_state(data_plan, context, source_group_id)
         document["expressions"] = expression_state
@@ -1068,7 +1091,8 @@ class LegacyMigrationWebAPI:
                                                 source_persona_id, existing_ids, existing_heads,
                                                 worldbook_state, archive_plan.inventory_fingerprint,
                                                 memory_plan.fingerprint, memory_owner_ids,
-                                                memory_group_mappings, reference_state, expression_state, contact_state),
+                                                memory_group_mappings, reference_state, expression_state,
+                                                contact_state, relationship_token),
         })
         document["worldbook"]["available_count"] = (
             document["worldbook"]["general_count"]
@@ -1402,14 +1426,16 @@ class LegacyMigrationWebAPI:
                           memory_owner_ids=(), confirm_memory_mapping=False, memory_group_mappings=(),
                           import_reference_images=False, import_wardrobe_items=False,
                           confirm_reference_persona_mapping=False,
-                          import_expressions=False, confirm_expression_mapping=False, import_private_contacts=False):
+                          import_expressions=False, confirm_expression_mapping=False, import_private_contacts=False,
+                          import_relationship_profiles=False):
         return await asyncio.to_thread(
             self._data_apply_sync, migration, root, session, plan_token, source_group_id,
             source_persona_id, import_reactions, import_group_network, confirm_member_ids,
             import_journals, confirm_persona_mapping, import_worldbook, import_archive,
             import_memory_database, memory_owner_ids, confirm_memory_mapping, memory_group_mappings,
             import_reference_images, import_wardrobe_items, confirm_reference_persona_mapping,
-            import_expressions, confirm_expression_mapping, import_private_contacts)
+            import_expressions, confirm_expression_mapping, import_private_contacts,
+            import_relationship_profiles)
 
     def _data_apply_sync(self, migration, root, session, plan_token, source_group_id,
                          source_persona_id, import_reactions, import_group_network,
@@ -1418,7 +1444,8 @@ class LegacyMigrationWebAPI:
                          memory_owner_ids=(), confirm_memory_mapping=False, memory_group_mappings=(),
                          import_reference_images=False, import_wardrobe_items=False,
                          confirm_reference_persona_mapping=False,
-                         import_expressions=False, confirm_expression_mapping=False, import_private_contacts=False):
+                         import_expressions=False, confirm_expression_mapping=False, import_private_contacts=False,
+                         import_relationship_profiles=False):
         found = migration.discover()
         if not found.is_success:
             return found
@@ -1452,15 +1479,25 @@ class LegacyMigrationWebAPI:
         from companion_v2.identity_policy.legacy_import import authorization_plan, import_authorizations
         contact_state["authorization"] = authorization_plan(
             self.controller.runtime, context, data_plan.private_contacts, self.controller.now())
+        from companion_v2.relationships.legacy_import import (
+            import_relationship_profiles as import_legacy_relationship_profiles,
+            relationship_profile_entries, relationship_profile_token)
+        relationship_entries = relationship_profile_entries(
+            self.controller.runtime, context, data_plan.relationship_profiles)
+        relationship_token = relationship_profile_token(relationship_entries)
         if plan_token != self._data_plan_token(data_plan, context, service, source_group_id,
                                                source_persona_id, existing_ids, existing_heads,
                                                worldbook_state, archive_plan.inventory_fingerprint,
                                                memory_plan.fingerprint, memory_owner_ids,
-                                               memory_group_mappings, reference_state, expression_state, contact_state):
+                                               memory_group_mappings, reference_state, expression_state,
+                                               contact_state, relationship_token):
             return Outcome.failed("legacy_plan_stale", "V1 来源或 V2 目标在预览后发生变化，请重新试算。")
         from companion_v2.foundation.refs import ScopeKind
         if import_private_contacts and context.scope.kind is not ScopeKind.PRIVATE:
             return Outcome.failed("legacy_contacts_private_target_required", "请选择这些用户所属的私聊角色。")
+        if import_relationship_profiles and context.scope.kind is not ScopeKind.PRIVATE:
+            return Outcome.failed("legacy_relationship_private_target_required",
+                "人工关系资料只能写入这些用户所属的私聊角色。")
         if import_expressions and (not expression_state["available"] or not confirm_expression_mapping):
             return Outcome.failed("legacy_expression_mapping_required",
                 "请确认旧版表达来源与当前角色及同一私聊对象或群的对应关系。")
@@ -1483,7 +1520,7 @@ class LegacyMigrationWebAPI:
         if (not import_reactions and not import_group_network and not import_journals
                 and not import_worldbook and not import_archive and not import_memory_database
                 and not import_reference_images and not import_wardrobe_items and not import_expressions
-                and not import_private_contacts):
+                and not import_private_contacts and not import_relationship_profiles):
             return Outcome.failed("legacy_nothing_to_import", "请选择至少一种要导入的数据。")
 
         archive_result = None
@@ -1679,6 +1716,10 @@ class LegacyMigrationWebAPI:
             contact_result["authorization"] = authorization
             contact_result["permissions_restored"] = bool(authorization["permissions_restored"])
 
+        relationship_result = import_legacy_relationship_profiles(
+            self.controller.runtime, context, relationship_entries, self.controller.now()
+        ) if import_relationship_profiles else None
+
         refreshed_ids = self._reaction_ids(service, owner)
         remaining = sum(1 for item in data_plan.reaction_assets if item.sha256 not in refreshed_ids)
         refreshed_heads = self._journal_heads(data_plan, session, context)
@@ -1706,6 +1747,7 @@ class LegacyMigrationWebAPI:
             "reference_images": reference_result,
             "expressions": expression_result,
             "private_contacts": contact_result,
+            "relationship_profiles": relationship_result,
             "group_network": group_result,
             "worldbook": worldbook_result,
             "archive": archive_result,
