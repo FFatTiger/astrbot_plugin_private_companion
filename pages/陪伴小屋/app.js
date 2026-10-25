@@ -2066,11 +2066,12 @@ function renderDecisionOriginal(){
   const role=product.role?.();
   if(typeof role?.reply_api!=='string')return pageNeedsTarget('群聊参与');
   const roleSettings=configEditors('groupParticipationConfigWorkspace',['group_participation'],'群聊参与');
+  const gateSettings=configEditors('decisionGateWorkspace',['busy_gate','life'],'沉默策略 · 忙碌与休息');
   const target=product.target?.();
   if(target?.scope_kind!=='group'||!role.reply_api.startsWith('/astrbot_plugin_private_companion/')
-    ||!role.reply_api.endsWith('/reply'))return roleSettings;
+    ||!role.reply_api.endsWith('/reply'))return roleSettings+gateSettings;
   const endpoint=role.reply_api+'/participation';
-  return `${roleSettings}<div data-decision-group-only hidden>
+  return `${roleSettings}${gateSettings}<div data-decision-group-only hidden>
     <section id="groupInterjectionConfigWorkspace" class="config-editors" data-config-api="${escapeHTML(endpoint)}"
       aria-label="本群主动插话设置">${consoleLoading('正在读取本群插话设置…')}</section>
   </div>`;
@@ -3754,6 +3755,10 @@ function renderConfigEditors(){
   if($('#replyGateConfigWorkspace'))configEditorMounts.push(mountConfigEditor('replyGateConfigWorkspace',['busy_gate','life'],{
     busy_gate:{sectionIds:['reply','contact'],title:'忙碌时的回复与主动联系',note:'先设置私聊回复是否顺延，再设置忙碌结束后主动联系的恢复缓冲。'},
     life:{sectionIds:['rest','backlog'],title:'休息时的回复与补看',note:'休息时段的回复判定与醒后补看集中在这里；睡眠作息仍在日记与生活页维护。'},
+  }));
+  if($('#decisionGateWorkspace'))configEditorMounts.push(mountConfigEditor('decisionGateWorkspace',['busy_gate','life'],{
+    busy_gate:{sectionIds:['reply','contact'],title:'忙碌时的回复与联系',note:'忙碌命中时只顺延回复与主动联系，不会像撤回或收尾那样直接取消。'},
+    life:{sectionIds:['rest','backlog'],title:'休息时的回复与补看',note:'休息时段按判定延后或醒来回复，并保留醒后补看。'},
   }));
   /* QQ 空间的开关与节流（qzone 组）只挂在行动页的 QQ 空间区块里。
      挂不上时不留一个永远转圈的「正在读取设置…」——换成一句实话，

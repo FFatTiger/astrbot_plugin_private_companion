@@ -1,5 +1,6 @@
 """QWeather current-weather adapter: code mapping, normalization and port selection."""
 
+import base64
 import json
 import os
 import unittest
@@ -9,7 +10,7 @@ from unittest.mock import patch
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 
-from astrbot_host.qweather_credentials import QWeatherCredentials
+from astrbot_host.qweather_credentials import QWeatherCredentials, credentials_from_environment
 from astrbot_host.qweather_weather import (QWeatherWeatherPort, configured_qweather_weather_port,
                                            normalize_qweather_now, weather_code_for)
 from astrbot_host.weather import OpenMeteoWeatherPort
@@ -192,6 +193,28 @@ class PortSelectionTests(unittest.TestCase):
         with patch.dict(os.environ, {"QWEATHER_API_HOST": "example.xy.qweatherapi.com"}, clear=True):
             with self.assertRaises(ValueError):
                 configured_qweather_weather_port()
+
+
+class ConfigSignedJwtTests(unittest.TestCase):
+    def test_private_key_config_mints_kid_and_sub_without_a_manual_token(self):
+        key = Ed25519PrivateKey.generate()
+        pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                serialization.NoEncryption()).decode("ascii")
+        credentials = credentials_from_environment(label="weather", config={"weather": {
+            "api_host": "example.xy.qweatherapi.com",
+            "jwt_credential_id": "KID123", "jwt_project_id": "PROJECT123",
+            "jwt_developer_id": "Q123456789", "jwt_private_key": pem,
+        }})
+        token = credentials.headers(NOW)["Authorization"].removeprefix("Bearer ")
+        header, payload, signature = token.split(".")
+        decode = lambda part: json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+        self.assertEqual(decode(header), {"alg": "EdDSA", "kid": "KID123"})
+        claims = decode(payload)
+        self.assertEqual(claims["sub"], "PROJECT123")
+        self.assertEqual(claims["iss"], "Q123456789")
+        self.assertEqual(claims["iat"], int(NOW.timestamp()) - 30)
+        self.assertEqual(claims["exp"], int(NOW.timestamp()) + 870)
+        self.assertTrue(signature)
 
 
 if __name__ == "__main__":

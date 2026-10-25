@@ -1,11 +1,16 @@
 """Host weather source saves, live application and bounded cache behavior."""
 
 import asyncio
+import base64
+from datetime import datetime, timezone
 import json
 import os
 from types import SimpleNamespace as NS
 import unittest
 from unittest.mock import AsyncMock, patch
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives import serialization
 
 from tests import test_host_options_api as host_fixture
 from astrbot_host.weather_settings import CachedWeatherPort, configured_weather_ports
@@ -85,6 +90,37 @@ class WeatherSourceSettingsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(cleared["status"], "ok", cleared)
             self.assertEqual(cleared["data"]["credential_source"], "environment")
             self.assertEqual(self.config["weather"]["credential"], "")
+
+    async def test_private_key_fields_save_without_readback_and_mint_short_lived_jwt(self):
+        key = Ed25519PrivateKey.generate()
+        pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                serialization.NoEncryption()).decode("ascii")
+        response = await self.save({"provider": "qweather", "api_host": HOST,
+            "jwt_credential_id": "KID123", "jwt_project_id": "PROJECT123",
+            "jwt_developer_id": "Q123456789", "jwt_private_key": pem})
+        self.assertEqual(response["status"], "ok", response)
+        self.assertEqual(response["data"]["credential_kind"], "signed_jwt")
+        self.assertNotIn(pem, json.dumps(response))
+        self.assertNotIn("PRIVATE KEY", json.dumps(response))
+        credential = self.application.calendar_planning.weather_port.port._credentials
+        token = credential.headers(datetime.now(timezone.utc))["Authorization"].removeprefix("Bearer ")
+        header, payload, _ = token.split(".")
+        decode = lambda part: json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+        self.assertEqual(decode(header)["kid"], "KID123")
+        self.assertEqual(decode(payload)["sub"], "PROJECT123")
+        self.assertEqual(decode(payload)["iss"], "Q123456789")
+        restored, _ = configured_weather_ports(self.config)
+        self.assertEqual(restored.port._credentials._credential_id, "KID123")
+
+    async def test_private_key_and_token_fields_are_mutually_exclusive(self):
+        pem = Ed25519PrivateKey.generate().private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption()).decode("ascii")
+        response = await self.save({"api_host": HOST, "credential": KEY,
+            "jwt_credential_id": "KID123", "jwt_project_id": "PROJECT123",
+            "jwt_private_key": pem})
+        self.assertEqual(response["message"], "weather_source_invalid")
+        self.assertEqual(self.saved, [])
 
     async def test_invalid_fields_cannot_save_or_replace_live_ports(self):
         for changes in ({"api_host": "localhost", "credential": KEY},

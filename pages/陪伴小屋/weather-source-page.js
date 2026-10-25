@@ -6,8 +6,8 @@ window.CompanionWeatherSourcePage = (() => {
   const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
   const providers = {auto:"自动选择（优先和风）",qweather:"和风天气", "open-meteo":"Open-Meteo"};
   const errors = {
-    weather_source_invalid:"请核对数据源、专属 API Host 和 JWT／API Key；缓存间隔应为 1–120 分钟。",
-    weather_source_credential_required:"替换环境变量中的 Host 时，请同时填写对应的和风凭据。",
+    weather_source_invalid:"请核对数据源、专属 API Host 和 JWT／API Key，或填写私钥与凭据/项目 ID；缓存间隔应为 1–120 分钟。",
+    weather_source_credential_required:"替换环境变量中的 Host 时，请同时填写对应的和风凭据或私钥签发字段。",
     host_options_conflict:"数据源已被其他页面修改。请重新读取后核对并保存。",
     host_options_save_failed:"数据源未能保存，请重试。",
     host_options_save_unavailable:"当前宿主不支持保存插件配置。",
@@ -27,8 +27,8 @@ window.CompanionWeatherSourcePage = (() => {
   const currentScope = () => { try { return product.scopeKey?.() || "default"; } catch (_) { return "default"; } };
   const active = ticket => ticket === generation && root?.isConnected;
   const dirty = () => !!draft && (!status
-    ? draft.credential !== "" || pending || stale
-    : draft.credential !== "" || Object.keys(status.settings).some(key => String(draft[key]) !== String(status.settings[key])));
+    ? draft.credential !== "" || draft.jwt_private_key !== "" || pending || stale
+    : draft.credential !== "" || draft.jwt_private_key !== "" || Object.keys(status.settings).some(key => String(draft[key]) !== String(status.settings[key])));
   async function request(method, body) {
     const bridge = product.bridgeNow() || await product.bridgeFor();
     let timer;
@@ -63,7 +63,11 @@ window.CompanionWeatherSourcePage = (() => {
           <label class="perception-setting" for="weather-source-provider"><strong>天气数据源</strong><select id="weather-source-provider" name="provider">${Object.entries(providers).map(([value,label]) => `<option value="${value}" ${draft.provider === value ? "selected" : ""}>${label}</option>`).join("")}</select><small>自动模式有和风凭据时使用和风，否则使用 Open-Meteo。</small></label>
           <label class="perception-setting" for="weather-source-refresh"><strong>天气缓存刷新间隔（分钟）</strong><input id="weather-source-refresh" name="refresh_minutes" type="number" min="1" max="120" step="1" value="${esc(draft.refresh_minutes)}" required><small>1–120 分钟；控制实况数据源的读取频率。</small></label>
           <label class="perception-setting" for="weather-source-host"><strong>和风天气 API Host</strong><input id="weather-source-host" name="api_host" type="text" maxlength="253" value="${esc(draft.api_host)}" autocomplete="off" spellcheck="false" placeholder="例如 abc123.re.qweatherapi.com"><small>填写和风控制台分配的专属 Host，也可粘贴 HTTPS Host；不含接口路径。</small></label>
-          <label class="perception-setting" for="weather-source-credential"><strong>和风凭据（JWT／API Key）</strong><input id="weather-source-credential" name="credential" type="password" maxlength="4096" value="${esc(draft.credential)}" autocomplete="new-password" spellcheck="false" placeholder="${status.has_credential ? "已配置，留空保留现有凭据" : "粘贴 JWT 或 API Key"}"><small>${esc(source)}${status.has_credential ? ` · ${kind} 已配置` : ""}。自动识别认证方式；JWT 不含 Bearer 前缀，过期后在此更新。</small></label>
+          <label class="perception-setting" for="weather-source-credential"><strong>和风凭据（JWT／API Key）</strong><input id="weather-source-credential" name="credential" type="password" maxlength="4096" value="${esc(draft.credential)}" autocomplete="new-password" spellcheck="false" placeholder="${status.has_credential && !status.settings.has_jwt_private_key ? "已配置，留空保留现有凭据" : "粘贴 JWT 或 API Key"}"><small>${esc(source)}${status.has_credential ? ` · ${kind} 已配置` : ""}。自动识别认证方式；JWT 不含 Bearer 前缀，过期后在此更新。</small></label>
+          <label class="perception-setting" for="weather-source-jwt-kid"><strong>JWT 凭据 ID（kid）</strong><input id="weather-source-jwt-kid" name="jwt_credential_id" type="text" maxlength="64" value="${esc(draft.jwt_credential_id || "")}" autocomplete="off" spellcheck="false" placeholder="QWeather 控制台的凭据 ID"><small>使用 Ed25519 私钥自动签发时必填；与上方 token/API Key 二选一。</small></label>
+          <label class="perception-setting" for="weather-source-jwt-sub"><strong>JWT 项目 ID（sub）</strong><input id="weather-source-jwt-sub" name="jwt_project_id" type="text" maxlength="64" value="${esc(draft.jwt_project_id || "")}" autocomplete="off" spellcheck="false" placeholder="QWeather 项目 ID"><small>自动签发 JWT 时必填。</small></label>
+          <label class="perception-setting" for="weather-source-jwt-iss"><strong>JWT 开发者 ID（iss，可选）</strong><input id="weather-source-jwt-iss" name="jwt_developer_id" type="text" maxlength="64" value="${esc(draft.jwt_developer_id || "")}" autocomplete="off" spellcheck="false" placeholder="开发者 ID"><small>仅在你的和风项目要求 iss 时填写。</small></label>
+          <label class="perception-setting weather-source-private-key" for="weather-source-jwt-key"><strong>Ed25519 私钥（PEM）</strong><textarea id="weather-source-jwt-key" name="jwt_private_key" rows="4" maxlength="16384" autocomplete="off" spellcheck="false" placeholder="${status.settings.has_jwt_private_key ? "已配置，留空保留现有私钥" : "-----BEGIN PRIVATE KEY-----"}"></textarea><small>填写私钥、凭据 ID 和项目 ID 后自动签发短期 JWT；保存后不再回显私钥。</small></label>
         </fieldset>
         <div class="weather-source-footer"><p>官方预警共用这组和风凭据。凭据保存于宿主配置，读取时只返回配置状态。</p><div class="native-perception-actions"><button class="button small" type="button" data-weather-source-action="reload" ${busy ? "disabled" : ""}>重新读取</button>${status.credential_source === "plugin" ? `<button class="button small" type="button" data-weather-source-action="clear" ${busy || pending ? "disabled" : ""}>清除页面凭据</button>` : ""}<button class="button primary small" type="submit" ${busy || pending || stale ? "disabled" : ""}>${busy ? "正在保存…" : "保存数据源"}</button></div></div>
         <p class="perception-save-status" role="status" aria-live="polite">${esc(message)}</p>
@@ -78,7 +82,7 @@ window.CompanionWeatherSourcePage = (() => {
       const next = await request("GET");
       if (!active(ticket)) return;
       status = next; statusByScope.set(currentScope(), next);
-      draft = {...next.settings, credential:""}; pending = stale = false;
+      draft = {...next.settings, credential:"", jwt_private_key:""}; pending = stale = false;
       message = next.source_state === "invalid" ? errors.weather_source_invalid : "";
     } catch (failure) {if (active(ticket)) {
       /* 读取失败后不再画上一份数据源与凭据状态；凭据输入若尚未保存则留在
@@ -96,18 +100,19 @@ window.CompanionWeatherSourcePage = (() => {
     const ticket = generation, changes = {};
     if (clear) changes.clear_credentials = true;
     else {
-      for (const name of ["provider","api_host","refresh_minutes"]) {
-        const value = name === "refresh_minutes" ? Number(draft[name]) : draft[name].trim();
-        if (value !== status.settings[name]) changes[name] = value;
+      for (const name of ["provider","api_host","refresh_minutes","jwt_credential_id","jwt_project_id","jwt_developer_id"]) {
+        const value = name === "refresh_minutes" ? Number(draft[name]) : (draft[name] ?? "").trim();
+        if (value !== (status.settings[name] ?? "")) changes[name] = value;
       }
       if (draft.credential.trim()) changes.credential = draft.credential.trim();
+      if (draft.jwt_private_key.trim()) changes.jwt_private_key = draft.jwt_private_key.trim();
       if (!Object.keys(changes).length) {message = "没有需要保存的修改。"; render(); return;}
     }
     busy = true; message = "正在保存数据源…"; render();
     try {
       const next = await request("POST", {edit_token:status.edit_token,changes});
       if (!active(ticket)) return;
-      status = next; statusByScope.set(currentScope(), next); draft = {...next.settings,credential:""};
+      status = next; statusByScope.set(currentScope(), next); draft = {...next.settings,credential:"",jwt_private_key:""};
       message = clear ? "页面凭据已清除，当前来源已更新。" : "数据源已保存并立即生效。";
       window.CompanionNativePerceptionPage?.refresh();
       document.dispatchEvent(new CustomEvent("companion:weather-source-updated"));
@@ -125,7 +130,7 @@ window.CompanionWeatherSourcePage = (() => {
   function mount(node) {
     unmount(); root = node; abort = new AbortController();
     const cached = statusByScope.get(currentScope());
-    if (cached) { status = cached; draft = {...cached.settings, credential:""}; }
+    if (cached) { status = cached; draft = {...cached.settings, credential:"", jwt_private_key:""}; }
     root.addEventListener("input", event => {
       if (draft && Object.hasOwn(draft,event.target.name)) draft[event.target.name] = event.target.value;
     }, {signal:abort.signal});

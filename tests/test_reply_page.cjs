@@ -36,6 +36,7 @@ const DEFAULTS = {
   group_wakeup_image_enabled: false, group_wakeup_image_weight: 0.2,
   group_wakeup_short_text_wait_ms: 15000, group_wakeup_log_limit: 80,
   group_air_guard_enabled: true, group_air_guard_window_seconds: 60,
+  recall_silence_enabled: true,
   group_air_guard_max_bot_replies: 3, group_air_guard_cooldown_seconds: 150,
   group_air_guard_polite_loop_limit: 2,
   private_closing_guard_enabled: true, private_closing_guard_window_seconds: 1800,
@@ -115,7 +116,7 @@ const FIELDS = Object.fromEntries(Object.entries(DEFAULTS).map(([name, value]) =
     'file_understanding_private_enabled', 'file_understanding_group_enabled',
     'prompt_style_mode',
     'private_closing_guard_enabled', 'private_closing_guard_window_seconds',
-    'private_closing_guard_prompt_enabled',
+    'private_closing_guard_prompt_enabled', 'recall_silence_enabled',
     'private_debounce_enabled', 'private_debounce_min_ms', 'private_debounce_max_ms',
     'private_debounce_total_ms',
     ...Object.keys(DEFAULTS).filter(name => name.startsWith('group_wakeup_') && !GROUP_SCOPE_FIELDS.has(name)),
@@ -163,7 +164,8 @@ function harness() {
       setAttribute(name, value) { attributes[name] = value; }};
   });
   const sectionIds = ['segment', 'style', 'cleanup', 'wakeup_direct', 'wakeup_interest', 'wakeup_members',
-    'wakeup_cold_group', 'wakeup_fatigue', 'group_continuation', 'private_debounce', 'group_air_guard',
+    'wakeup_cold_group', 'wakeup_fatigue', 'group_continuation', 'private_debounce',
+    'silence_policy', 'group_air_guard',
     'private_closing', 'group_content_safety',
     'context_image', 'image_narration', 'video_narration', 'file_understanding', 'forwards', 'voice', 'components', 'checks'];
   const sectionTabs = sectionIds.map(id => {
@@ -339,7 +341,7 @@ test('the card is split into labelled groups but keeps one save', async () => {
   assert.ok(plain(instance.state.container.groups.find(group => group.id === 'voice').fields)
     .includes('voice_provider_id'));
   assert.ok(!ids.some(id => ['wakeup_direct', 'wakeup_interest', 'wakeup_members', 'wakeup_cold_group',
-    'wakeup_fatigue', 'group_air_guard', 'group_content_safety'].includes(id)));
+    'wakeup_fatigue', 'silence_policy', 'group_air_guard', 'group_content_safety'].includes(id)));
   assert.deepEqual(Object.keys(plain(instance.state.container.fields.rule_mode.choices)),
     ['words', 'regex', 'sentences', 'paragraphs']);
   assert.equal(instance.state.draft.rule_mode, 'words');
@@ -631,7 +633,7 @@ test('reply expression, perception, and decision settings partition every field 
   const decision = plain(live(harnessed).state.container.groups.flatMap(group => group.fields));
   assert.deepEqual(plain(live(harnessed).state.container.groups.map(group => group.id)),
     ['wakeup_direct', 'wakeup_interest', 'wakeup_members', 'wakeup_cold_group', 'wakeup_fatigue',
-      'group_continuation', 'private_debounce', 'group_air_guard', 'private_closing', 'group_content_safety']);
+      'group_continuation', 'private_debounce', 'silence_policy', 'group_air_guard', 'private_closing', 'group_content_safety']);
   harnessed.page.mount(harnessed.root, {view: 'perception'});
   await drains();
   harnessed.requests[2].resolve(status());
@@ -699,18 +701,21 @@ test('decision tempo exposes and saves the follow-up fuse settings', async () =>
   h.page.unmount();
 });
 
-test('decision safety exposes the private closing guard as a role preference', async () => {
+test('decision safety exposes silence policy masters and the private closing detail', async () => {
   const h = await loaded(harness(), 'decision');
-  assert.equal(h.page.selectSection('private_closing'), true);
-  assert.match(h.slots.settings.innerHTML, /私聊收尾 · 允许沉默/);
+  assert.equal(h.page.selectSection('silence_policy'), true);
+  assert.match(h.slots.settings.innerHTML, /沉默策略/);
   assert.match(h.slots.settings.innerHTML, /启用私聊收尾沉默/);
+  assert.match(h.slots.settings.innerHTML, /启用撤回沉默/);
   const instance = live(h);
-  for (const name of ['private_closing_guard_enabled', 'private_closing_guard_window_seconds',
-    'private_closing_guard_prompt_enabled']) {
+  for (const name of ['recall_silence_enabled', 'private_closing_guard_enabled',
+    'group_air_guard_enabled']) {
     assert.ok(instance.state.container.fields[name], `${name} is available in the decision editor`);
   }
   assert.deepEqual(plain(instance.state.container.fields.private_closing_guard_enabled.editable),
     ['role', 'window']);
+  assert.equal(h.page.selectSection('private_closing'), true);
+  assert.match(h.slots.settings.innerHTML, /私聊收尾 · 细则/);
   assert.equal(instance.state.container.fields.private_closing_guard_window_seconds.minimum, 60);
   assert.equal(instance.state.container.fields.private_closing_guard_window_seconds.maximum, 7200);
   instance.state.draft.private_closing_guard_window_seconds = 600;

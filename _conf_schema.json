@@ -786,7 +786,7 @@
   },
   "weather": {
     "description": "天气数据源（由陪伴小屋管理）",
-    "hint": "在陪伴小屋的天气感知区管理数据源、专属 API Host 和 JWT/API Key；凭据不进入角色配置导出。",
+    "hint": "在陪伴小屋的天气感知区管理数据源、专属 API Host 和 JWT/API Key，或填写 Ed25519 私钥与凭据/项目 ID 自动签发；凭据不进入角色配置导出。",
     "type": "object",
     "invisible": true,
     "items": {
@@ -809,6 +809,30 @@
       },
       "credential": {
         "description": "和风 JWT/API Key",
+        "type": "string",
+        "default": "",
+        "invisible": true
+      },
+      "jwt_credential_id": {
+        "description": "和风 JWT 凭据 ID（kid）",
+        "type": "string",
+        "default": "",
+        "invisible": true
+      },
+      "jwt_project_id": {
+        "description": "和风 JWT 项目 ID（sub）",
+        "type": "string",
+        "default": "",
+        "invisible": true
+      },
+      "jwt_developer_id": {
+        "description": "和风 JWT 开发者 ID（iss，可选）",
+        "type": "string",
+        "default": "",
+        "invisible": true
+      },
+      "jwt_private_key": {
+        "description": "和风 JWT Ed25519 私钥 PEM",
         "type": "string",
         "default": "",
         "invisible": true

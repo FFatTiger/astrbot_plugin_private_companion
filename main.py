@@ -932,7 +932,8 @@ class PrivateCompanionV2StagingPlugin(Star):
         try:
             with measure_core_preparation(event, "perception_injection", now=self.staging.now):
                 await inject_core_reply_perception_context(
-                    event, req, native_context=getattr(self.staging, "context", None))
+                    event, req, native_context=getattr(self.staging, "context", None),
+                    application=application)
         except Exception as error:
             logger.warning("[CompanionV2] 核心回复感知信息暂不可用，继续回复 error_type=%s",
                            type(error).__name__)

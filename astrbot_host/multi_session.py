@@ -1063,6 +1063,18 @@ class MultiHostSession:
                 original = prepared.get("context")
                 if not isinstance(original, TaskContext) or current.key != original.key:
                     raise TaskError("core_reply_context_changed", "identity, route or role changed after admission")
+                if self.application.messages.recalls.recalled(
+                        current.scope, captured.event_id, captured.principal.native_account_id):
+                    silence = True
+                    if self.application.reply_settings is not None:
+                        try:
+                            silence = self.application.reply_settings.capture(
+                                current, self.now())["settings"].get("recall_silence_enabled", True)
+                        except Exception:
+                            silence = True
+                    if silence:
+                        raise TaskError("message_withdrawn",
+                                        "the trigger message was withdrawn before delivery")
                 # capture_* above already resolves the live role for this authorization pass.
                 if current.scope.kind is ScopeKind.PRIVATE:
                     if self.application.private_access_gate.denied(current, at=self.now()):

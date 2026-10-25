@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Mapping
 from inspect import isawaitable
 
@@ -30,6 +31,18 @@ _MODALITY_LABELS = {
 
 def _single_line(value, limit=120):
     return " ".join(value.split())[:limit] if isinstance(value, str) else ""
+
+
+def _asks_recalled_messages(text):
+    """V1's narrow natural-language query detector, without content matching."""
+    compact = re.sub(r"\s+", "", str(text or "")).lower()
+    if not compact or not any(token in compact for token in ("撤回", "撤了", "撤掉", "收回", "防撤回")):
+        return False
+    ask_tokens = ("什么", "啥", "哪条", "哪句", "内容", "刚才", "刚刚", "最近", "上一条",
+                  "谁", "看", "看看", "说了什么", "发了什么", "发的啥", "撤的啥")
+    if any(token in compact for token in ask_tokens):
+        return True
+    return bool(re.search(r"撤[回了掉]?.*(说|发|讲|聊)", compact))
 
 
 def _setting_instructions(prepared):
@@ -334,6 +347,45 @@ async def inject_core_reply_perception_context(event, request, *, native_context
             pass
     original_text = getattr(original, "text", None)
     prompt_text = getattr(request, "prompt", None)
+    query_text = original_text if isinstance(original_text, str) and original_text.strip() else prompt_text
+    if application is not None and _asks_recalled_messages(query_text):
+        context = prepared.get("context")
+        if context is not None:
+            try:
+                from companion_v2.conversation.recall_management import RecallManagement
+
+                transcript = await asyncio.to_thread(
+                    RecallManagement(application, context).transcribe, context.actor, limit=5)
+                if transcript.is_success:
+                    result = transcript.unwrap()
+                    entries = [
+                        {"author": _single_line(item.get("author"), 80),
+                         "time": _single_line(item.get("local_time"), 16),
+                         "text": _single_line(item.get("text"), 500)}
+                        for item in result.get("entries", ())[:5]
+                        if isinstance(item, Mapping)
+                    ]
+                    if entries:
+                        details["recall_query"] = {
+                            "state": "available",
+                            "instruction": "用户正在问当前会话刚才撤回了什么。下面是可转述的短期撤回记录；请用自然口吻回答，不要提插件、缓存或内部记录机制。",
+                            "entries": entries,
+                        }
+                    else:
+                        details["recall_query"] = {
+                            "state": "empty",
+                            "instruction": "用户正在问当前会话刚才撤回了什么，但当前窗口没有可转述的撤回记录或记录已过期。请自然说明没有查到，不要编造。",
+                        }
+                else:
+                    failure = transcript.failure
+                    details["recall_query"] = {
+                        "state": "unavailable",
+                        "code": getattr(failure, "code", "recall_unavailable"),
+                        "instruction": "用户正在问撤回内容，但当前身份无权查看，或撤回转述未开启。请自然说明权限或功能边界，不要猜测或编造撤回内容。",
+                    }
+            except Exception:
+                # Recall lookup is optional context and must never block the reply.
+                pass
     if (isinstance(original_text, str) and isinstance(prompt_text, str)
             and prompt_text.strip() and original_text.strip() != prompt_text.strip()
             and original_text.strip().endswith(prompt_text.strip())):

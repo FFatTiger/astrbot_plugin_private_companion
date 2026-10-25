@@ -69,6 +69,25 @@ class PresenceCoordinator:
             self._advance_typing()
             self.app.notify()
 
+    def stop_native_scope(self, platform, account_id, kind, native_scope_id):
+        """A recalled trigger cancels this window's typing lease, as in V1."""
+        changed = False
+        for route, lease in tuple(self.native_replies.items()):
+            context = lease.get("context")
+            scope = getattr(context, "scope", None)
+            if scope is None:
+                continue
+            if (scope.platform, scope.account_id, scope.kind, scope.native_scope_id) != (
+                    platform, account_id, kind, native_scope_id):
+                continue
+            if lease.get("turns"):
+                lease["turns"].clear()
+                lease["activity_at"] = stamp(self.app.now())
+                changed = True
+        if changed:
+            self._advance_typing()
+            self.app.notify()
+
     def native_reply_stage(self, context, turn_id, stage):
         lease = self.native_replies.get(self.route(context))
         turn = (lease["turns"].get(turn_id)

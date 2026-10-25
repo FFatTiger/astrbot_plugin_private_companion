@@ -97,6 +97,11 @@ GROUP_SAFETY_DEFAULTS = {"enable_group_injection_guard": True,
                          "enable_group_privacy_guard": True,
                          "enable_group_reality_promise_guard": True}
 
+# Master switches for the decision page's silence policy. Detail windows remain
+# in their own sections; this is the one place that says whether that source may
+# cancel a reply at all.
+SILENCE_DEFAULTS = {"recall_silence_enabled": True}
+
 # What one reply may carry beyond its text and originals. The component order
 # replaces the old four-value position switches only when it is non-empty, so an
 # installation that never edits it keeps its current placement; the quote
@@ -130,7 +135,7 @@ ROLE_SHARED_FIELDS = (frozenset(asdict(SegmentationPolicy())) | SPACING_FIELDS
     | frozenset(GROUP_CONTINUATION_DEFAULTS) | frozenset(PRIVATE_CLOSING_DEFAULTS)
     | frozenset(PRIVATE_DEBOUNCE_DEFAULTS)
     | (frozenset(GROUP_WAKEUP_DEFAULTS) - GROUP_WAKEUP_GROUP_FIELDS)
-    | frozenset(GROUP_SAFETY_DEFAULTS) | frozenset(OUTBOUND_DEFAULTS) | frozenset(TEXT_DEFAULTS)
+    | frozenset(GROUP_SAFETY_DEFAULTS) | frozenset(SILENCE_DEFAULTS) | frozenset(OUTBOUND_DEFAULTS) | frozenset(TEXT_DEFAULTS)
     | frozenset(FORWARD_DEFAULTS) | frozenset(CONTEXT_IMAGE_DEFAULTS)
     | frozenset(IMAGE_NARRATION_DEFAULTS) | frozenset(UNDERSTANDING_DEFAULTS)
     | frozenset(DIAGNOSTIC_DEFAULTS) | ROLE_PROMPT_FIELDS)
@@ -154,6 +159,13 @@ def group_safety_settings(values):
     settings = {key: values.get(key, default) for key, default in GROUP_SAFETY_DEFAULTS.items()}
     if any(type(value) is not bool for value in settings.values()):
         raise ConfigurationError("reply_configuration_invalid", "group safety switches must be boolean")
+    return settings
+
+
+def silence_settings(values):
+    settings = {key: values.get(key, default) for key, default in SILENCE_DEFAULTS.items()}
+    if any(type(value) is not bool for value in settings.values()):
+        raise ConfigurationError("reply_configuration_invalid", "silence switches must be boolean")
     return settings
 
 
@@ -277,6 +289,7 @@ def validate(values):
     private_debounce = set(PRIVATE_DEBOUNCE_DEFAULTS)
     wakeup = set(GROUP_WAKEUP_DEFAULTS)
     safety = set(GROUP_SAFETY_DEFAULTS)
+    silence = set(SILENCE_DEFAULTS)
     outbound = set(OUTBOUND_DEFAULTS)
     forward = set(FORWARD_DEFAULTS)
     presentation = set(TEXT_DEFAULTS)
@@ -288,7 +301,7 @@ def validate(values):
     optional = set(values) - expected - {"image_position"}
     provided = set(values)
     if (not legacy_required <= provided
-            or optional - voice - air - continuation - private_closing - private_debounce - wakeup - safety - presentation - outbound - forward - captions - image_narration - understanding - spacing - diagnostics
+            or optional - voice - air - continuation - private_closing - private_debounce - wakeup - safety - silence - presentation - outbound - forward - captions - image_narration - understanding - spacing - diagnostics
             or (optional & voice and not (voice - {"voice_conversion_scope"}) <= optional)
             or any(optional & block and not block <= optional for block in (air, continuation, private_closing, private_debounce, presentation))
             or optional & spacing not in (set(), spacing)
@@ -324,6 +337,7 @@ def validate(values):
         private_debounce_settings(values)
         group_wakeup_settings(values)
         group_safety_settings(values)
+        silence_settings(values)
         outbound_settings(values)
         forward_values = {**FORWARD_DEFAULTS, **{name: values[name] for name in forward if name in values}}
         if type(forward_values["forward_message_adaptation_enabled"]) is not bool:
@@ -371,7 +385,7 @@ def configuration_fields(segmentation, streaming, gap, voice=None):
               **SPACING_DEFAULTS, "image_position": "after_text", **voice_settings(voice), **GROUP_AIR_DEFAULTS,
               **GROUP_CONTINUATION_DEFAULTS, **PRIVATE_CLOSING_DEFAULTS,
               **PRIVATE_DEBOUNCE_DEFAULTS, **GROUP_WAKEUP_DEFAULTS,
-              **GROUP_SAFETY_DEFAULTS, **OUTBOUND_DEFAULTS, **TEXT_DEFAULTS}
+              **GROUP_SAFETY_DEFAULTS, **SILENCE_DEFAULTS, **OUTBOUND_DEFAULTS, **TEXT_DEFAULTS}
     # The field remains in the backend contract so older snapshots can still
     # be read, but it is no longer a choice: deterministic rule completion is
     # always active whenever segmentation itself is enabled.

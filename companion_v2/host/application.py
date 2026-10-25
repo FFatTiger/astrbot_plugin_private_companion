@@ -697,6 +697,9 @@ class CompanionApplication:
     def platform_recall(self, notice):
         self.require_running()
         result = require(self.messages.recalls.accept(notice))
+        if self.presence is not None and result.get("cancelled", 0):
+            self.presence.stop_native_scope(
+                notice.platform, notice.account_id, notice.kind, notice.native_scope_id)
         self.notify()
         return result
 
