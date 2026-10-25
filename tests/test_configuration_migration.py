@@ -69,8 +69,8 @@ class RuleTableTests(unittest.TestCase):
     def test_generated_table_covers_the_audited_registry_mappings(self):
         rules = configuration_rules()
 
-        self.assertEqual(len(rules), 367)
-        self.assertEqual(sum(item["confidence"] == "high" for item in rules), 300)
+        self.assertEqual(len(rules), 371)
+        self.assertEqual(sum(item["confidence"] == "high" for item in rules), 304)
         self.assertEqual(sum(item["confidence"] == "medium" for item in rules), 67)
         self.assertEqual(len({item["source"] for item in rules}), len(rules))
 

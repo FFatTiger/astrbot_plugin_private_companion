@@ -719,6 +719,11 @@ class MultiHostSession:
                         instruction=captured.instruction, at=captured.at, settings=settings, participation=values,
                         persona_name=projection.persona_id if projection is not None else "", event_id=captured.event_id,
                         continuation=continuation, **facts)
+                    from companion_v2.conversation import group_high_intensity
+                    closeout = participation.high_intensity_state(
+                        context, captured.instruction, at=captured.at, settings=settings)
+                    if reason and not group_high_intensity.allows(reason, closeout):
+                        reason = ""
                     from companion_v2.conversation.reply_settings import group_wakeup_settings
                     wakeup = group_wakeup_settings(settings)
                     return Outcome.success({"admitted": bool(reason), "reason": reason,

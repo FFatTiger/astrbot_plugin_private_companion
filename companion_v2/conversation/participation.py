@@ -26,12 +26,14 @@ from companion_v2.model_gateway.models import ToolSpec
 from .group_interjection import (INTERJECTION, REPEAT_FOLLOW, REPEAT_INTERRUPT, GroupSpeechLedger,
                                  InterjectionPolicy, addresses_role, best_burst, day_key, interjection_state,
                                  openings, repeat_state)
-from .group_observation import GroupPresenceStore, history_items, observe
+from .group_observation import GroupPresenceStore, parse_moment, history_items, observe
 from .group_admission import GroupReplyAdmission, REASONS
 from .group_timing import ADDRESS_MARKER, RepeatPolicy, clean_group_text
 from .participation_prompts import (group_hints, interjection_instruction, observation_instruction,
                                     repeat_instruction)
-from .reply_settings import group_safety_settings, group_wakeup_settings, validate as validate_reply_settings
+from .reply_settings import (group_air_settings, group_safety_settings,
+                             group_wakeup_settings, validate as validate_reply_settings)
+from . import group_high_intensity
 
 
 ACTION = "group.participation.choose"
@@ -269,6 +271,29 @@ class GroupParticipation:
                 self._frozen_turns.pop(next(iter(self._frozen_turns)))
             self._frozen_turns[batch["batch_id"]] = frozen
         return replace(request, instruction=instruction + frozen["hints"])
+
+    def high_intensity_state(self, context, instruction, *, at, settings):
+        """Read the opt-in hard closeout from confirmed role turns.
+
+        The window/threshold/cooldown live in the air-guard group so V2 does not
+        grow a second set of near-identical settings.  No merge queue is kept
+        here: the ordinary group turn path still owns message batching.
+        """
+        air = group_air_settings(settings)
+        if not air["group_high_intensity_enabled"]:
+            return {"active": False, "recent_wakeups": 0, "threshold": 0,
+                    "window_seconds": 0, "cooldown_seconds": 0, "until": "",
+                    "remaining_seconds": 0}
+        _, turns = self.admission.native_participation_history(
+            context, instruction, at=at)
+        rounds = [when for turn in turns
+                  if (when := parse_moment(turn.get("returned_at"))) is not None]
+        return group_high_intensity.state(
+            rounds, at,
+            window_seconds=air["group_air_guard_window_seconds"],
+            threshold=max(2, air["group_air_guard_max_bot_replies"]),
+            cooldown_seconds=air["group_air_guard_cooldown_seconds"],
+        )
 
     def _build_turn(self, context, request, settings):
         """Derive every participation reference for one group turn, without writing.

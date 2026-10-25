@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import json
 
 from .reply_settings import group_air_settings, group_safety_settings, group_wakeup_settings
+from . import group_high_intensity
 
 
 # Group observation, self-initiated speech and repeat references are all
@@ -131,6 +132,15 @@ def group_hints(request, context, settings, recent, reply_batches, *, native=Fal
                 "这段时间优先旁听，暂停弱相关话题、未点名的一般问题、兴趣延展、冷群开场、复读和自主插话；"
                 "明确 @、清楚直呼角色、对你上一轮回复的有效接续，或成员明确把实质问题交给你时仍结合语境回应。"
                 "收口是参与倾向，不是硬性禁言；没有明确对象的新问题不要仅因问号而抢答。")
+    if air["group_high_intensity_enabled"]:
+        closeout = group_high_intensity.state(
+            rounds, at, window_seconds=air["group_air_guard_window_seconds"],
+            threshold=max(2, air["group_air_guard_max_bot_replies"]),
+            cooldown_seconds=air["group_air_guard_cooldown_seconds"])
+        if closeout["active"]:
+            instruction += (f"\n高强度收口已生效（窗口内 {closeout['recent_wakeups']} 轮，"
+                f"阈值 {closeout['threshold']}，剩余约 {closeout['remaining_seconds']} 秒）："
+                "未点名、非直接接续的群聊候选本轮直接旁听；只有明确 @、直呼角色或有效接续才开口。")
     wakeup = group_wakeup_settings(settings)
     name = wakeup["group_wakeup_bot_name"] if wakeup["group_wakeup_bot_name_enabled"] else ""
     direct = tuple(dict.fromkeys((*wakeup["group_wakeup_direct_words"], *((name,) if name else ()))))

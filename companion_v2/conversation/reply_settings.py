@@ -40,7 +40,7 @@ VOICE_FIELDS = tuple(key for key in asdict(VoiceReplyPolicy())
                                     "private_cooldown_seconds", "group_cooldown_seconds"))
 GROUP_AIR_DEFAULTS = {"group_air_guard_enabled": True, "group_air_guard_window_seconds": 60,
                       "group_air_guard_max_bot_replies": 3, "group_air_guard_cooldown_seconds": 150,
-                      "group_air_guard_polite_loop_limit": 2}
+                      "group_air_guard_polite_loop_limit": 2, "group_high_intensity_enabled": False}
 GROUP_AIR_LIMITS = {"group_air_guard_window_seconds": (30, 1800),
                     "group_air_guard_max_bot_replies": (1, 20),
                     "group_air_guard_cooldown_seconds": (0, 1800),
@@ -171,7 +171,8 @@ def silence_settings(values):
 
 def group_air_settings(values):
     settings = {key: values.get(key, default) for key, default in GROUP_AIR_DEFAULTS.items()}
-    if type(settings["group_air_guard_enabled"]) is not bool:
+    if (type(settings["group_air_guard_enabled"]) is not bool
+            or type(settings["group_high_intensity_enabled"]) is not bool):
         raise ConfigurationError("reply_configuration_invalid", "group air guard enabled must be boolean")
     for key, (minimum, maximum) in GROUP_AIR_LIMITS.items():
         if type(settings[key]) is not int or not minimum <= settings[key] <= maximum:

@@ -2215,6 +2215,30 @@
       "source_type": "int",
       "target": "role.state.cycle_luteal_energy",
       "confidence": "high"
+    },
+    {
+      "source": "group_high_intensity_config.enable_group_high_intensity_mode",
+      "source_type": "bool",
+      "target": "conversation.presentation.group_high_intensity_enabled",
+      "confidence": "high"
+    },
+    {
+      "source": "group_high_intensity_config.group_high_intensity_wakeup_window_seconds",
+      "source_type": "int",
+      "target": "conversation.presentation.group_air_guard_window_seconds",
+      "confidence": "high"
+    },
+    {
+      "source": "group_high_intensity_config.group_high_intensity_wakeup_threshold",
+      "source_type": "int",
+      "target": "conversation.presentation.group_air_guard_max_bot_replies",
+      "confidence": "high"
+    },
+    {
+      "source": "group_high_intensity_config.group_high_intensity_cooldown_seconds",
+      "source_type": "int",
+      "target": "conversation.presentation.group_air_guard_cooldown_seconds",
+      "confidence": "high"
     }
   ],
   "plugin_rules": [
@@ -7878,65 +7902,65 @@
     {
       "source": "group_high_intensity_config.enable_group_high_intensity_mode",
       "source_type": "bool",
-      "resolved_kind": "unresolved",
-      "target": "",
-      "verdict": "owed",
+      "resolved_kind": "registry",
+      "target": "conversation.presentation.group_high_intensity_enabled",
+      "verdict": "renamed-equivalent",
       "confidence": "high",
-      "summary": "无 V2 字段（账本 CSV:523 的 v2_field 为空）；V2 未注册任何群聊收口/降载配置组，群节奏相关键只存在于 conversation.presentation（group_air_guard_*/group_wakeup_*）与 conversation.group_participation"
+      "summary": "V2 用空气护栏的窗口/轮数/冷却承载该值；高强度开关启用时会硬性收口未点名、非直接接续的群消息。"
     },
     {
       "source": "group_high_intensity_config.group_high_intensity_wakeup_window_seconds",
       "source_type": "int",
-      "resolved_kind": "external",
-      "target": "",
-      "verdict": "owed",
+      "resolved_kind": "registry",
+      "target": "conversation.presentation.group_air_guard_window_seconds",
+      "verdict": "renamed-equivalent",
       "confidence": "high",
-      "summary": "无 V2 字段（账本 CSV:524 v2_field 为空）；V2 没有「窗口内唤醒次数」统计，故无对应窗口键"
+      "summary": "V2 用空气护栏的窗口/轮数/冷却承载该值；高强度开关启用时会硬性收口未点名、非直接接续的群消息。"
     },
     {
       "source": "group_high_intensity_config.group_high_intensity_wakeup_threshold",
       "source_type": "int",
-      "resolved_kind": "external",
-      "target": "",
-      "verdict": "owed",
+      "resolved_kind": "registry",
+      "target": "conversation.presentation.group_air_guard_max_bot_replies",
+      "verdict": "renamed-equivalent",
       "confidence": "high",
-      "summary": "无 V2 字段（账本 CSV:525 v2_field 为空）；V2 无「达到阈值即进入降载」的判定，也没有该阈值键"
+      "summary": "V2 用空气护栏的窗口/轮数/冷却承载该值；高强度开关启用时会硬性收口未点名、非直接接续的群消息。"
     },
     {
       "source": "group_high_intensity_config.group_high_intensity_cooldown_seconds",
       "source_type": "int",
-      "resolved_kind": "external",
-      "target": "",
-      "verdict": "owed",
+      "resolved_kind": "registry",
+      "target": "conversation.presentation.group_air_guard_cooldown_seconds",
+      "verdict": "renamed-equivalent",
       "confidence": "high",
-      "summary": "无 V2 字段（账本 CSV:526 v2_field 为空）；V2 无收口持续期状态，故无对应冷却键"
+      "summary": "V2 用空气护栏的窗口/轮数/冷却承载该值；高强度开关启用时会硬性收口未点名、非直接接续的群消息。"
     },
     {
       "source": "group_high_intensity_config.group_high_intensity_merge_seconds",
       "source_type": "int",
       "resolved_kind": "external",
       "target": "",
-      "verdict": "owed",
+      "verdict": "not-migrated-by-design",
       "confidence": "high",
-      "summary": "无 V2 字段（账本 CSV:527 v2_field 为空）；V2 的合并窗口是通用防抖，不是收口期专用等待，且不可配"
+      "summary": "V2 不保留旧版收口期专用合并队列；群消息合并沿用通用群聊批次，收口只影响是否参与。"
     },
     {
       "source": "group_high_intensity_config.group_high_intensity_max_merge_messages",
       "source_type": "int",
       "resolved_kind": "external",
       "target": "",
-      "verdict": "owed",
+      "verdict": "not-migrated-by-design",
       "confidence": "high",
-      "summary": "无 V2 字段（账本 CSV:528 v2_field 为空）；V2 同位置是硬编码 32 条批次上限，且属通用批次约束而非收口期合并上限"
+      "summary": "V2 不保留旧版收口期专用合并队列；群消息合并沿用通用群聊批次，收口只影响是否参与。"
     },
     {
       "source": "group_high_intensity_config.group_high_intensity_merge_scope",
       "source_type": "string",
       "resolved_kind": "unresolved",
       "target": "",
-      "verdict": "owed",
+      "verdict": "not-migrated-by-design",
       "confidence": "high",
-      "summary": "无 V2 字段（账本 CSV:529 v2_field 为空）；V2 合并键固定按窗口（route_key=scope.key）全窗口合并，无 group/same_user 维度"
+      "summary": "V2 不保留旧版收口期专用合并队列；群消息合并沿用通用群聊批次，收口只影响是否参与。"
     },
     {
       "source": "group_slang_topic_config.enable_group_slang_learning",

@@ -2362,3 +2362,17 @@
   .setup-migration-progress span { animation: none; width: 100%; opacity: .55; }
 }
 :root[data-motion="off"] .setup-migration-progress span { animation: none; width: 100%; opacity: .55; }
+
+/* 开始使用 = 旧版配置引导的一页式清单：编号分区 + 一句说明 + 就地点开编辑。 */
+.setup-guide-status { margin:0 0 var(--sp-3); color: var(--muted); font-size:var(--fs-body); line-height: 1.6; }
+.setup-guide-list { display: grid; gap:var(--sp-2); margin:0 0 var(--sp-4); padding:0; list-style: none; }
+.setup-guide-item { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center;
+  gap:var(--sp-3); padding:var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); }
+.setup-guide-number { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%;
+  border: 1px solid var(--line-strong); color: var(--muted); font-size:var(--fs-micro); font-variant-numeric: tabular-nums; }
+.setup-guide-copy h3 { margin:0 0 var(--sp-1); color: var(--ink); font-size:var(--fs-head); line-height: 1.35; }
+.setup-guide-copy p { margin:0; color: var(--muted); font-size:var(--fs-tiny); line-height: 1.6; }
+@media (max-width: 720px) {
+  .setup-guide-item { grid-template-columns: 36px minmax(0, 1fr); }
+  .setup-guide-item > .button { grid-column: 2; justify-self: start; }
+}

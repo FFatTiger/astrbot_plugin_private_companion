@@ -2934,6 +2934,24 @@ window.CompanionSetup = (() => {
     head.scrollIntoView?.({block: "nearest", behavior: reduce || motion === "low" ? "auto" : "smooth"});
   }
 
+  /* 开始使用 = 旧版「配置引导」那种一页式清单：编号分区、每区一句说明、
+     点开就在本页编辑，不再让用户去六个页面来回找。 */
+  function renderStartGuide() {
+    const items = ADVANCED_BLOCKS.map((item, index) => `<li class="setup-guide-item">
+      <span class="setup-guide-number">${String(index + 1).padStart(2, "0")}</span>
+      <div class="setup-guide-copy"><h3>${escape(item.label)}</h3><p>${escape(item.note)}</p></div>
+      <button type="button" class="button small" data-setup-open-block="${escape(item.id)}">展开设置</button>
+    </li>`).join("");
+    return `<div class="setup-shell setup-complete-shell setup-guide-shell">
+      <header class="setup-header"><div><span class="setup-kicker">我会永远陪着你</span><h2>开始使用</h2></div>
+        <div class="setup-header-actions"><button type="button" class="button" data-setup-action="advanced-open">快速配置</button></div></header>
+      ${upgradeCard()}
+      <p class="setup-guide-status" role="status">首次设置已完成 · 之后随时可以回来调整这些设置。</p>
+      <ol class="setup-guide-list" aria-label="配置引导">${items}</ol>
+      ${renderProactiveTest()}
+    </div>`;
+  }
+
   function render() {
     if (!root) return;
     for (const details of root.querySelectorAll?.("[data-migration-detail]") || []) {
@@ -2980,7 +2998,7 @@ window.CompanionSetup = (() => {
       return;
     }
     if (state.ready) {
-      root.innerHTML = `<div class="setup-shell setup-complete-shell"><header class="setup-header"><div><span class="setup-kicker">我会永远陪着你</span><h2>开始使用</h2></div><div class="setup-header-actions"><button type="button" class="button" data-setup-action="advanced-open">快速配置</button></div></header>${upgradeCard()}${renderProactiveTest()}</div>`;
+      root.innerHTML = renderStartGuide();
       return;
     }
     const step = state.step || "binding";
@@ -3832,6 +3850,14 @@ window.CompanionSetup = (() => {
     const legacyAction = event.target.closest?.("[data-setup-legacy-action]")?.dataset.setupLegacyAction;
     if (legacyAction) { act(legacyAction); return; }
     if (busy) return;
+    const openBlock = event.target.closest?.("[data-setup-open-block]");
+    if (openBlock && (state?.ready || state?.prepared)) {
+      const wanted = openBlock.dataset.setupOpenBlock;
+      advancedBlock = ADVANCED_BLOCKS.some(item => item.id === wanted) ? wanted : ADVANCED_BLOCKS[0].id;
+      advancedOpen = true;
+      render();
+      return;
+    }
     const advancedBlockButton = event.target.closest?.("[data-setup-advanced-block]");
     if (advancedBlockButton) {
       advancedBlock = ADVANCED_BLOCKS.some(item => item.id === advancedBlockButton.dataset.setupAdvancedBlock)

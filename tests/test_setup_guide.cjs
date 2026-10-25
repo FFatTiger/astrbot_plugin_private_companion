@@ -126,6 +126,10 @@ function harness({status, responses = {}, targets = [], refreshedTargets = targe
       listeners.click({target: {closest: selector => selector === '[data-setup-advanced-block]'
         ? {dataset: {setupAdvancedBlock: block}} : null}});
     },
+    clickGuideBlock(block) {
+      listeners.click({target: {closest: selector => selector === '[data-setup-open-block]'
+        ? {dataset: {setupOpenBlock: block}} : null}});
+    },
     clickMigrationView(view, mapping = false) {
       const attribute = mapping ? 'setupLegacyMappingView' : 'setupLegacyView';
       const selector = mapping ? '[data-setup-legacy-mapping-view]' : '[data-setup-legacy-view]';
@@ -1121,6 +1125,22 @@ test('completed setup is a one-time receipt with a direct route to daily use', a
   assert.match(page.html, /首次设置已保留，当前运行实例尚未接收消息/);
   assert.match(page.html, /data-setup-action="reconnect-host"/);
   assert.doesNotMatch(page.html, /setup-step-count|选择运行规模|绑定核心管理员窗口/);
+});
+
+test('start page lists the configuration guide and opens the matching editor in place', async () => {
+  const page = harness({status: readyStatus()});
+  page.mount();
+  await settle();
+
+  assert.match(page.html, /setup-guide-list/);
+  for (const label of ['回复与分段', '人物与资料', '日程与作息', '主动联系', '群聊参与', '模型路由']) {
+    assert.match(page.html, new RegExp(label));
+  }
+  // 旧版引导是一页清单：点某一项就在本页展开对应设置，不跳去别的页面。
+  page.clickGuideBlock('relationships');
+  assert.match(page.html, /setup-advanced-shell/);
+  assert.deepEqual(page.editorCalls.at(-1).kinds,
+    ['role_profile', 'relationship_profile', 'knowledge', 'private_access']);
 });
 
 test('quick setup edits common V2 settings in place without leaving the start page', async () => {
