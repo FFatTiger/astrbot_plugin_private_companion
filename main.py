@@ -1040,6 +1040,17 @@ class PrivateCompanionV2StagingPlugin(Star):
     async def observe_companion_model_session(self, event: AstrMessageEvent, response):
         from .astrbot_host.core_reply_reaction_delivery import observe_core_reaction_response
         observe_core_reaction_response(event, response)
+        from .astrbot_host.core_reply_cleanup import clean_reply_text
+        if (response is not None and getattr(response, "role", None) == "assistant"
+                and not getattr(response, "is_chunk", False)):
+            text = getattr(response, "completion_text", "") or ""
+            cleaned, removed = clean_reply_text(text)
+            if removed:
+                logger.info("[CompanionV2] 回复自重复清理 removed=%s", removed)
+                response.completion_text = cleaned
+                for part in getattr(getattr(response, "result_chain", None), "chain", ()) or ():
+                    if type(getattr(part, "text", None)) is str:
+                        part.text, _ = clean_reply_text(part.text)
         from .astrbot_host.core_reply_voice import observe_core_voice_response
         observe_core_voice_response(event, response)
         observe_native_host_response(self.staging, event, response)
