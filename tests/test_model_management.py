@@ -6,15 +6,28 @@ from dataclasses import asdict, replace
 from datetime import timedelta
 
 from companion_v2.configuration.models import ConfigLayer, ConfigTarget
+from companion_v2.configuration.registry import FieldRegistry
+from companion_v2.conversation.media.context_caption import context_caption_profile
+from companion_v2.conversation.media.image_narration import image_narration_profile
 from companion_v2.diagnostics.inbound import InboundNoReplyLedger
 from companion_v2.execution.models import digest, encode
 from companion_v2.model_gateway.management import ModelManagement
 from companion_v2.model_gateway.failures import ModelFailure
 from companion_v2.model_gateway.response_diagnostics import ResponseDiagnostics, ResponseTextSummary
+from companion_v2.model_gateway.routing import configuration_fields
 from tests.test_host_application import HostFixture
 
 
 class ModelManagementTests(HostFixture, unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        super().setUp()
+        self.profiles = (*self.profiles,
+            context_caption_profile("primary", max_output_tokens=100),
+            image_narration_profile("primary", max_output_tokens=100))
+        self.registry = FieldRegistry(version=self.registry.version, fields=configuration_fields(self.profiles))
+        self.providers = tuple(replace(provider, capabilities=(*provider.capabilities, "image"))
+                               for provider in self.providers)
+
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self.host_instance = await self.start()
@@ -27,7 +40,8 @@ class ModelManagementTests(HostFixture, unittest.IsolatedAsyncioTestCase):
 
     def request(self, status, *, changes=None, reset=None, key="model-settings"):
         task = status["tasks"][0]
-        return {"kind": task["kind"], "operation_key": key, "edit_token": task["edit_token"],
+        return {"kind": task["kind"], "layer": status["configuration_layer"],
+                "operation_key": key, "edit_token": task["edit_token"],
                 "changes": changes or {}, "reset": reset or []}
 
     async def test_pending_plugin_reservations_are_visible_without_becoming_actual_tokens(self):
@@ -506,7 +520,7 @@ class ModelManagementTests(HostFixture, unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(row["at"] != other_at for row in dialogue["recent"]))
 
     async def test_save_replay_inherit_and_upstream_source(self):
-        before = self.manager.status(self.core).unwrap()
+        before = self.manager.status(self.core, layer="window").unwrap()
         task = before["tasks"][0]
         self.assertEqual(task["fields"]["prompt"]["inherited_source"], "default")
         self.assertEqual(task["fields"]["fallback"]["value"], "primary")
@@ -520,7 +534,7 @@ class ModelManagementTests(HostFixture, unittest.IsolatedAsyncioTestCase):
         self.app.configuration.patch(self.core, target=role, group_id=parent.group_id,
             operation=self.operation(role.authorization_scope), expected_edit_token=parent.edit_token,
             changes={"model.conversation.reply.prompt": "角色级任务补充"}, observed_at=self.app.now()).unwrap()
-        inherited = self.manager.status(self.core).unwrap()
+        inherited = self.manager.status(self.core, layer="window").unwrap()
         field = inherited["tasks"][0]["fields"]["prompt"]
         self.assertEqual((field["value"], field["source"], field["inherited_source"]),
                          ("角色级任务补充", "role", "role"))
@@ -534,11 +548,26 @@ class ModelManagementTests(HostFixture, unittest.IsolatedAsyncioTestCase):
         self.assertTrue(replay["replayed"])
         self.assertEqual(replay["operation_id"], saved["operation_id"])
 
-        current = self.manager.status(self.core).unwrap()
+        current = self.manager.status(self.core, layer="window").unwrap()
         restored = self.manager.configure(self.core,
             self.request(current, reset=["prompt"], key="inherit-prompt")).unwrap()["task"]["fields"]["prompt"]
         self.assertEqual((restored["value"], restored["source"], restored["explicit"]),
                          ("角色级任务补充", "role", False))
+
+    async def test_sequential_task_saves_can_share_one_page_snapshot(self):
+        before = self.manager.status(self.core, layer="role").unwrap()
+        tasks = [task for task in before["tasks"] if task["kind"] in (
+            "conversation.context_image_caption", "conversation.image_narration")]
+        self.assertEqual(len(tasks), 2)
+        for index, task in enumerate(tasks):
+            saved = self.manager.configure(self.core, {
+                "kind": task["kind"], "layer": "role", "operation_key": f"quick-model-{index}",
+                "edit_token": task["edit_token"], "changes": {"provider": "primary"}, "reset": [],
+            }).unwrap()
+            self.assertEqual(saved["task"]["fields"]["provider"]["value"], "primary")
+        current = self.manager.status(self.core, layer="role").unwrap()
+        saved_tasks = [task for task in current["tasks"] if task["kind"] in {task["kind"] for task in tasks}]
+        self.assertTrue(all(task["fields"]["provider"]["explicit"] for task in saved_tasks))
 
     async def test_invalid_patch_stale_version_and_non_core_access(self):
         status = self.manager.status(self.core).unwrap()
@@ -558,7 +587,7 @@ class ModelManagementTests(HostFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stale.failure.code, "configuration_revision_conflict")
 
     async def test_replacement_rules_save_inherit_and_reject_unsupported_targets(self):
-        before = self.manager.status(self.core).unwrap()
+        before = self.manager.status(self.core, layer="window").unwrap()
         self.assertFalse(before["providers"][0]["supports_model_override"])
         rules = json.dumps([{"id": "ordinary", "provider_id": "primary", "keywords": ["private"]}])
         saved = self.manager.configure(self.core, self.request(before,
@@ -571,18 +600,18 @@ class ModelManagementTests(HostFixture, unittest.IsolatedAsyncioTestCase):
             '[{"provider_id":"primary","keywords":7,"time_window":{"timezone":"Asia/Shanghai","start":"07:00","end":"09:00"}}]',
         ):
             with self.subTest(value=value):
-                current = self.manager.status(self.core).unwrap()
+                current = self.manager.status(self.core, layer="window").unwrap()
                 result = self.manager.configure(self.core, self.request(current,
                     changes={"replacement_rules": value}, key="invalid-" + str(len(value))))
                 self.assertEqual(result.failure.code, "model_route_invalid")
-        current = self.manager.status(self.core).unwrap()
+        current = self.manager.status(self.core, layer="window").unwrap()
         inherited = self.manager.configure(self.core, self.request(current,
             reset=["replacement_rules"], key="inherit-routes")).unwrap()
         field = inherited["task"]["fields"]["replacement_rules"]
         self.assertEqual((field["value"], field["source"], field["explicit"]), ("[]", "default", False))
 
     async def test_refusal_terms_save_canonicalize_and_inherit(self):
-        before = self.manager.status(self.core).unwrap()
+        before = self.manager.status(self.core, layer="window").unwrap()
         saved = self.manager.configure(self.core, self.request(before, changes={
             "fallback_on_refusal": True,
             "refusal_terms": "policy denied; request blocked\nPOLICY DENIED",
@@ -591,13 +620,13 @@ class ModelManagementTests(HostFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(field["value"], "policy denied\nrequest blocked")
         self.assertEqual((field["source"], field["explicit"]), ("window", True))
 
-        current = self.manager.status(self.core).unwrap()
+        current = self.manager.status(self.core, layer="window").unwrap()
         invalid = self.manager.configure(self.core, self.request(current, changes={
             "refusal_terms": "\n".join(f"term-{index}" for index in range(65)),
         }, key="too-many-refusal-terms"))
         self.assertEqual(invalid.failure.code, "model_configuration_invalid")
 
-        current = self.manager.status(self.core).unwrap()
+        current = self.manager.status(self.core, layer="window").unwrap()
         inherited = self.manager.configure(self.core, self.request(current,
             reset=["refusal_terms"], key="inherit-refusal-terms")).unwrap()
         field = inherited["task"]["fields"]["refusal_terms"]

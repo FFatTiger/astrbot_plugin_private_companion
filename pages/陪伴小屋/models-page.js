@@ -140,8 +140,9 @@ window.CompanionModelsPage = (() => {
     return p; } catch { return null; } }
   function storePending(kind, p) { try { if (p) sessionStorage.setItem(storageKey(kind), JSON.stringify(p)); else sessionStorage.removeItem(storageKey(kind)); } catch { } }
   const newDraft = task => ({ layer: task.configuration_layer || "role", token: task.edit_token,
+    base: Object.fromEntries(Object.entries(task.fields).map(([name, field]) => [name, {...field}])),
     values: Object.fromEntries(fields.map(name => [name, task.fields[name].value])),
-    inherited: Object.fromEntries(fields.map(name => [name, !task.fields[name].explicit])), touched: false, stale: false, pending: readPending(task.kind) });
+    inherited: Object.fromEntries(fields.map(name => [name, !task.fields[name].explicit])), touched: false, stale: false, conflicts: [], pending: readPending(task.kind) });
   /* The replacement fields are optional in the payload: newer hosts expose them,
      older ones only ship the routing fields. Missing ones degrade to inherited. */
   const plainField = value => ({ value, inherited_value: value, source: "default", inherited_source: "default", explicit: false });
@@ -160,6 +161,25 @@ window.CompanionModelsPage = (() => {
       else if (!field.explicit || draft.values[name] !== field.value) changes[name] = draft.values[name]; }
     return { changes, reset }; }
   const dirty = (task, draft) => { const p = patchFor(task, draft); return Object.keys(p.changes).length > 0 || p.reset.length > 0; };
+  const sameField = (a, b) => JSON.stringify([a?.value, !!a?.explicit, a?.inherited_value, a?.source, a?.inherited_source])
+    === JSON.stringify([b?.value, !!b?.explicit, b?.inherited_value, b?.source, b?.inherited_source]);
+  function reconcileDraft(task, draft) {
+    // Unknown saves keep their exact operation and baseline until reconciled.
+    if (draft.pending) { draft.stale ||= draft.token !== task.edit_token; return draft; }
+    const base = draft.base || task.fields, patch = patchFor({...task, fields: base}, draft);
+    const edited = [...Object.keys(patch.changes), ...patch.reset], next = newDraft(task);
+    for (const name of edited) {
+      next.values[name] = draft.values[name]; next.inherited[name] = draft.inherited[name];
+      const alreadyCurrent = draft.inherited[name] ? !task.fields[name].explicit
+        : task.fields[name].explicit && draft.values[name] === task.fields[name].value;
+      if ((!sameField(base[name], task.fields[name]) || draft.conflicts?.includes(name)) && !alreadyCurrent) next.conflicts.push(name);
+    }
+    next.touched = edited.length > 0;
+    if (next.conflicts.length || next.layer !== draft.layer) {
+      next.token = draft.token; next.stale = true;
+    }
+    return next;
+  }
   /* The Dashboard bridge normally returns the inner ``data`` object.  Some
      older bridges and tests still return the complete response envelope.  A
      voice probe's inner result also has ``status: "ok"``; only treat a value
@@ -200,7 +220,7 @@ window.CompanionModelsPage = (() => {
   function setStatus(s, data) { s.status = validateStatus(normalize(data));
     for (const task of data.tasks) { const draft = s.drafts.get(task.kind);
       if (!draft) { s.drafts.set(task.kind, newDraft(task)); continue; }
-      if (draft.token !== task.edit_token) { if (!draft.touched && !draft.pending) s.drafts.set(task.kind, newDraft(task)); else draft.stale = true; } }
+      s.drafts.set(task.kind, reconcileDraft(task, draft)); }
     const kinds = new Set(data.tasks.map(task => task.kind)); s.selection = s.selection.filter(kind => kinds.has(kind));
     if (s.expanded && !kinds.has(s.expanded)) s.expanded = null; }
   const projected = (task, patch, name) => Object.hasOwn(patch.changes, name) ? patch.changes[name]
@@ -287,6 +307,12 @@ window.CompanionModelsPage = (() => {
     if (draft.inherited.provider) return `<span class="model-source inherit">跟随 ${esc(configSource(field.inherited_source || "default"))}</span>`;
     if (field.explicit) return `<span class="model-source own">${draft.layer === "role" ? "角色单独设置" : windowLabel(s) + "单独设置"}</span>`;
     return `<span class="model-source pending">待保存</span>`; }
+  function conflictNotice(task, draft) {
+    if (!draft.stale) return "";
+    const value = field => String(field ?? "").slice(0, 200) || "空";
+    const details = (draft.conflicts || []).map(name => `<p><b>${esc(fieldLabel[name] || name)}</b>：当前值「${esc(value(task.fields[name].value))}」；草稿「${esc(draft.inherited[name] ? "跟随上级" : value(draft.values[name]))}」</p>`).join("");
+    return `<div class="model-alert" role="alert">${details ? "以下字段也在别处改过，请核对后选择保留草稿或放弃。" : "配置已更新，请重新读取后核对草稿。"}${details}</div>`;
+  }
   /* Design: precise config uses one card per task (sc.fn), not a table. */
   function coreReplyCard(s, task) {
     const draft = s.drafts.get(task.kind), locked = s.loading || s.busy || s.denied || draft.pending;
@@ -294,7 +320,7 @@ window.CompanionModelsPage = (() => {
       <div class="model-sc-tp"><div class="model-eb">对话<span class="st"><span class="model-tag g">AstrBot 核心</span></span></div>
         <div class="model-ti">${icon(ICONS.reply)}<b>对话回复</b></div><p class="model-ds">${esc(task.routing_note || "普通回复采用 AstrBot 当前会话模型。")}</p></div>
       <div class="model-sc-bd">
-        ${draft.stale ? '<div class="model-alert">配置已更新，核对后可保留草稿。</div>' : ""}
+        ${conflictNotice(task, draft)}
         ${draft.pending ? '<div class="model-alert">上次保存结果未确认，请核对原保存。</div>' : ""}
         <label class="model-fd dash"><span class="model-cap">对话附加提示 <em>直接注入核心回复 · 最多 8000 字</em></span>
           <textarea rows="5" maxlength="8000" data-model-field="prompt" data-model-kind="${esc(task.kind)}" ${locked ? "disabled" : ""}>${esc(effective(task, draft, "prompt"))}</textarea></label>
@@ -326,7 +352,7 @@ window.CompanionModelsPage = (() => {
         <div class="model-rl">${task.capabilities.map(cap => `<span>${esc(capabilityLabel(cap))}</span>`).join("") || "<span>无能力声明</span>"}</div>
       </div>
       <div class="model-sc-bd">
-        ${draft.stale ? '<div class="model-alert">当前配置已更新。核对字段后，可保留草稿以新版本为基准继续编辑。</div>' : ""}
+        ${conflictNotice(task, draft)}
         ${draft.pending ? '<div class="model-alert">上次保存结果未确认。请核对原操作，避免重复提交。</div>' : ""}
         <label class="model-fd"><span class="model-cap">主模型提供方 <em>上级默认 ${esc(task.fields.provider.inherited_value || "未设置")}</em></span>
           <span class="model-msel"><i style="background:${pillColor(main)}"></i><select data-model-field="provider" data-model-kind="${esc(task.kind)}" aria-label="${esc(info.label)} 主模型提供方" ${locked || draft.pending ? "disabled" : ""}>${providerOptions(s, task, draft, "provider")}</select></span></label>
@@ -397,11 +423,33 @@ window.CompanionModelsPage = (() => {
       }
       s.bad = true; s.denied = true; s.notice = fail(err, "无法读取任务配置，请重新读取状态。"); }
     finally { s.loading = false; if (current(ticket, s)) render(); } }
+  async function reloadConflict(s, ticket) {
+    const data = await api("GET", path, {layer: s.layer || "role"});
+    if (!current(ticket, s)) return false;
+    setStatus(s, data); s.denied = false;
+    const conflict = snapshot(s).find(task => s.drafts.get(task.kind)?.stale && !s.drafts.get(task.kind)?.pending);
+    if (conflict) {
+      s.sub = "cfg"; s.cm = "precise"; s.view = "tasks"; s.expanded = conflict.kind;
+      s.query = ""; s.providerFilter = null; s.custom = null; s.lane = "all";
+    }
+    return true;
+  }
+  async function rebase(s, kind) {
+    const ticket = version; s.busy = true; s.notice = "正在核对最新配置…"; render();
+    try {
+      if (!await reloadConflict(s, ticket)) return;
+      const task = taskOf(s, kind), draft = s.drafts.get(kind);
+      if (!task || !draft || draft.pending || draft.layer !== (task.configuration_layer || "role")) return;
+      draft.token = task.edit_token; draft.base = newDraft(task).base; draft.stale = false; draft.conflicts = [];
+      s.notice = "已读取最新配置并保留草稿，点击保存后生效。"; s.bad = false;
+    } catch (err) { if (current(ticket, s)) { s.bad = true; s.notice = fail(err, "未能读取最新配置，请重新读取后再核对。"); } }
+    finally { s.busy = false; if (current(ticket, s)) render(); }
+  }
   async function saveTasks(s, kinds) { if (s.busy || s.loading || s.denied) return; const unsaved = kinds.filter(kind => { const task = taskOf(s, kind), draft = s.drafts.get(kind);
     return task && draft && !draft.stale && !draft.pending && dirty(task, draft); });
     if (!unsaved.length) { s.bad = true; s.notice = "这些任务没有待保存的改动。"; render(); return; }
     const ticket = version; s.busy = true; s.bad = false; s.notice = `正在保存 ${unsaved.length} 项任务路由…`; render();
-    const failed = []; let saved = 0;
+    const failed = []; let saved = 0, conflict = false, reread = false;
     for (const kind of unsaved) { if (ticket !== version) return;
       const task = taskOf(s, kind), draft = s.drafts.get(kind); if (!task || !draft) continue;
       const patch = patchFor(task, draft);
@@ -413,12 +461,16 @@ window.CompanionModelsPage = (() => {
         storePending(kind, null); const index = s.status.tasks.findIndex(t => t.kind === kind); if (index >= 0) s.status.tasks[index] = result.task;
         s.drafts.set(kind, newDraft(result.task)); saved++; }
       catch (err) { if (ticket !== version) return;
-        if (err.confirmed) { storePending(kind, null); draft.pending = null; draft.stale = true; }
+        if (err.confirmed) { storePending(kind, null); draft.pending = null;
+          if ((err.code || err.message) === "configuration_revision_conflict") { draft.stale = true; conflict = true; } }
         failed.push(`${taskName(kind).label}：${fail(err, "保存未通过")}`); }
       render(); }
     if (ticket !== version) return;
+    if (conflict) { try { reread = await reloadConflict(s, ticket); } catch { /* Keep the draft locked until a successful read. */ } }
+    if (ticket !== version) return;
     s.busy = false; s.bad = failed.length > 0;
-    s.notice = failed.length ? `已保存 ${saved} 项；${failed.length} 项未通过：${failed.join("；")}。改动仍保留，核对后可继续保存。`
+    const recovery = conflict ? (reread ? "已读取最新配置，草稿仍保留；有冲突的字段已标出，其他改动可继续保存。" : "暂未读到最新配置，草稿已保留，请重新读取后核对。") : "改动仍保留，可修改后继续保存。";
+    s.notice = failed.length ? `已保存 ${saved} 项；${failed.length} 项未通过：${failed.join("；")} ${recovery}`
       : `已保存 ${saved} 项。下一次启动的任务会采用当前配置。`;
     render(); }
   async function retry(s, kind) { const task = taskOf(s, kind), draft = s.drafts.get(kind); if (!draft?.pending || s.busy) return;
@@ -432,7 +484,12 @@ window.CompanionModelsPage = (() => {
       storePending(kind, null); const index = s.status.tasks.findIndex(t => t.kind === kind); if (index >= 0) s.status.tasks[index] = result.task;
       s.drafts.set(kind, newDraft(result.task)); s.bad = false; s.notice = result.replayed ? "原保存已确认。下一次任务会采用当前配置。" : "已保存。下一次任务会采用当前配置。"; }
     catch (err) { if (!current(ticket, s)) return; s.bad = true;
-      if (err.confirmed) { storePending(kind, null); draft.pending = null; draft.stale = true; s.notice = fail(err, "保存未通过。请刷新并核对。"); }
+      if (err.confirmed) { storePending(kind, null); draft.pending = null; s.notice = fail(err, "保存未通过，请核对字段。");
+        if ((err.code || err.message) === "configuration_revision_conflict") {
+          draft.stale = true;
+          try { if (await reloadConflict(s, ticket)) s.notice = "已读取最新配置并保留草稿，请核对标出的字段后继续保存。"; }
+          catch { s.notice = "未能读取最新配置，草稿已保留，请重新读取后核对。"; }
+        } }
       else s.notice = "保存结果尚未确认。请核对原保存结果后继续编辑。"; }
     finally { s.busy = false; if (current(ticket, s)) render(); } }
   function assign(s, providerId) { const kinds = selected(s); if (!providerId || !kinds.length) return;
@@ -543,7 +600,7 @@ window.CompanionModelsPage = (() => {
     const draft = s.drafts.get(kind); if (!draft) return;
     if (action === "save-one") { saveTasks(s, [kind]); return; }
     if (action === "discard") { s.drafts.set(kind, newDraft(taskOf(s, kind))); s.notice = "草稿已放弃。"; s.bad = false; render(); }
-    if (action === "rebase") { draft.token = taskOf(s, kind).edit_token; draft.stale = false; s.notice = "已采用当前版本作为保存基准，草稿仍待保存。"; s.bad = false; render(); }
+    if (action === "rebase") { rebase(s, kind); return; }
     if (action === "retry") retry(s, kind); }
   /* ---------- voice model ---------- */
   const voiceCurrent = v => v.data.languages.find(l => l.k === v.ui.lang) || v.data.languages[0];

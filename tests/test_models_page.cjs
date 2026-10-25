@@ -439,6 +439,14 @@ test('an uncertain save keeps its original operation and blocks further edits un
   assert.equal(requests.filter(request => request.method === 'POST').length, 1);
   first.reject(new Error('network interrupted'));
   await flush();
+  node.click('[data-model-action]', {modelAction: 'refresh'});
+  const latest = status();
+  latest.tasks[1].edit_token = 'b'.repeat(64);
+  latest.tasks[1].fields.prompt.value = 'new remote prompt';
+  requests.at(-1).resolve(latest);
+  await flush();
+  assert.equal(requests.filter(request => request.method === 'POST').length, 1,
+    'reading fresh status must not replay an uncertain write');
   node.change('[data-model-field]', {modelField: 'provider', modelKind: 'memory.reflect', value: 'primary'});
   node.click('[data-model-open]', {modelOpen: 'memory.reflect'});
   assert.match(node.innerHTML, /上次保存结果未确认/);
@@ -889,6 +897,143 @@ test('quick config fans a slot provider out to every task via model/configure', 
   posts.forEach(p => p.resolve({replayed: false, task: task('conversation.reply', 'secondary')}));
   await flush();
   assert.match(node.innerHTML, /已保存/);
+});
+
+test('quick config saves both image tasks sequentially from the same page snapshot', async () => {
+  const h = harness(), node = h.root(), data = status();
+  data.tasks = [task('conversation.context_image_caption', 'primary', ['text', 'image']),
+    task('conversation.image_narration', 'primary', ['text', 'image'])];
+  data.providers.forEach(provider => provider.capabilities.push('image'));
+  h.page.mount(node);
+  h.requests[0].resolve(data);
+  await flush();
+  node.change('[data-model-slot]', {modelSlot: '对话', value: 'secondary'});
+  node.click('[data-model-slot-apply]', {modelSlotApply: '对话'});
+  for (const item of data.tasks) {
+    const post = h.requests.at(-1);
+    assert.equal(post.method, 'POST');
+    assert.equal(post.values.kind, item.kind);
+    assert.equal(post.values.edit_token, TOKEN);
+    assert.deepEqual({...post.values.changes}, {provider: 'secondary'});
+    post.resolve({replayed: false, task: editable(item.kind, 'secondary', ['text', 'image'])});
+    await flush();
+  }
+  assert.equal(h.requests.filter(request => request.method === 'POST').length, 2);
+  assert.match(node.innerHTML, /已保存 2 项/);
+  h.page.unmount();
+});
+
+test('a save conflict reloads current values and preserves only the fields edited locally', async () => {
+  const h = harness(), node = h.root();
+  h.page.mount(node);
+  h.requests[0].resolve(status());
+  await flush();
+  node.change('[data-model-field]', {modelField: 'provider', modelKind: 'memory.reflect', value: 'secondary'});
+  node.click('[data-model-action]', {modelAction: 'save-one', modelKind: 'memory.reflect'});
+  h.requests[1].resolve({status: 'error', message: 'configuration_revision_conflict', data: null});
+  await flush();
+  assert.equal(h.requests[2]?.method, 'GET', 'a confirmed conflict must read the current configuration');
+  const latest = status();
+  latest.tasks[1].edit_token = 'b'.repeat(64);
+  latest.tasks[1].fields.prompt = {value: 'new remote prompt', explicit: true, source: 'role', inherited_value: '', inherited_source: 'default'};
+  h.requests[2].resolve(latest);
+  await flush();
+  assert.equal(h.requests.filter(r => r.method === 'POST').length, 1, 'refresh must not silently retry a write');
+  assert.equal(h.store.size, 0, 'a rejected operation is no longer uncertain');
+  node.click('[data-model-action]', {modelAction: 'save-one', modelKind: 'memory.reflect'});
+  const saved = h.requests[3];
+  assert.equal(saved?.values.edit_token, latest.tasks[1].edit_token);
+  assert.deepEqual({...saved.values.changes}, {provider: 'secondary'}, 'the remote prompt must not be overwritten by an untouched old value');
+  saved.resolve({replayed: false, task: editable('memory.reflect', 'secondary')});
+  await flush();
+  h.page.unmount();
+});
+
+test('a real field conflict shows both values and rereads before adopting a new save baseline', async () => {
+  const h = harness(), node = h.root(), initial = status();
+  initial.providers.push({id: 'third', capabilities: ['text'], max_output_tokens: 8192});
+  h.page.mount(node);
+  h.requests[0].resolve(initial);
+  await flush();
+  node.change('[data-model-field]', {modelField: 'provider', modelKind: 'memory.reflect', value: 'secondary'});
+  node.click('[data-model-action]', {modelAction: 'save-one', modelKind: 'memory.reflect'});
+  h.requests[1].resolve({status: 'error', message: 'configuration_revision_conflict', data: null});
+  await flush();
+  const latest = structuredClone(initial);
+  latest.tasks[1].edit_token = 'b'.repeat(64);
+  latest.tasks[1].fields.provider.value = 'third';
+  assert.equal(h.requests[2]?.method, 'GET');
+  h.requests[2].resolve(latest);
+  await flush();
+  assert.match(node.innerHTML, /当前值[\s\S]*third[\s\S]*草稿[\s\S]*secondary/);
+  node.click('[data-model-action]', {modelAction: 'save-one', modelKind: 'memory.reflect'});
+  assert.equal(h.requests.length, 3, 'a conflicting draft must wait for review');
+  node.click('[data-model-action]', {modelAction: 'rebase', modelKind: 'memory.reflect'});
+  assert.equal(h.requests[3]?.method, 'GET', 'review must not reuse a stale cached token');
+  const freshest = structuredClone(latest);
+  freshest.tasks[1].edit_token = 'c'.repeat(64);
+  freshest.tasks[1].fields.prompt.value = 'changed during review';
+  freshest.tasks[1].fields.prompt.explicit = true;
+  h.requests[3].resolve(freshest);
+  await flush();
+  node.click('[data-model-action]', {modelAction: 'save-one', modelKind: 'memory.reflect'});
+  assert.equal(h.requests[4]?.values.edit_token, freshest.tasks[1].edit_token);
+  assert.deepEqual({...h.requests[4].values.changes}, {provider: 'secondary'});
+  h.requests[4].resolve({replayed: false, task: editable('memory.reflect', 'secondary')});
+  await flush();
+  h.page.unmount();
+});
+
+test('repeated conflict refreshes never turn untouched remote fields into local edits', async () => {
+  const h = harness(), node = h.root(), initial = status();
+  initial.providers.push({id: 'third', capabilities: ['text'], max_output_tokens: 8192});
+  initial.tasks[1].fields.prompt = {value: 'original', explicit: true, source: 'role', inherited_value: '', inherited_source: 'default'};
+  h.page.mount(node);
+  h.requests[0].resolve(initial);
+  await flush();
+  node.change('[data-model-field]', {modelField: 'provider', modelKind: 'memory.reflect', value: 'secondary'});
+  node.click('[data-model-action]', {modelAction: 'save-one', modelKind: 'memory.reflect'});
+  h.requests[1].resolve({status: 'error', message: 'configuration_revision_conflict', data: null});
+  await flush();
+  const latest = structuredClone(initial);
+  latest.tasks[1].edit_token = 'b'.repeat(64);
+  latest.tasks[1].fields.provider.value = 'third';
+  latest.tasks[1].fields.prompt.value = 'remote change';
+  h.requests[2].resolve(latest);
+  await flush();
+  node.click('[data-model-action]', {modelAction: 'refresh'});
+  h.requests[3].resolve(structuredClone(latest));
+  await flush();
+  node.click('[data-model-action]', {modelAction: 'save-one', modelKind: 'memory.reflect'});
+  assert.equal(h.requests.length, 4, 'a refresh must not clear an unresolved field conflict');
+  node.click('[data-model-action]', {modelAction: 'rebase', modelKind: 'memory.reflect'});
+  const freshest = structuredClone(latest);
+  freshest.tasks[1].edit_token = 'c'.repeat(64);
+  freshest.tasks[1].fields.prompt.value = 'another remote change';
+  h.requests[4].resolve(freshest);
+  await flush();
+  node.click('[data-model-action]', {modelAction: 'save-one', modelKind: 'memory.reflect'});
+  assert.deepEqual({...h.requests[5].values.changes}, {provider: 'secondary'});
+  h.requests[5].resolve({replayed: false, task: editable('memory.reflect', 'secondary')});
+  await flush();
+  h.page.unmount();
+});
+
+test('a validation rejection leaves the task editable without a revision-conflict lock', async () => {
+  const h = harness(), node = h.root();
+  h.page.mount(node);
+  h.requests[0].resolve(status());
+  await flush();
+  node.change('[data-model-field]', {modelField: 'provider', modelKind: 'memory.reflect', value: 'secondary'});
+  node.click('[data-model-action]', {modelAction: 'save-one', modelKind: 'memory.reflect'});
+  h.requests[1].resolve({status: 'error', message: 'model_provider_unavailable', data: null});
+  await flush();
+  assert.equal(h.requests.length, 2);
+  node.click('[data-model-action]', {modelAction: 'save-one', modelKind: 'memory.reflect'});
+  assert.equal(h.requests[2]?.method, 'POST', 'a validation error must allow a corrected save');
+  h.requests[2].resolve({replayed: false, task: editable('memory.reflect', 'secondary')});
+  await flush();
+  h.page.unmount();
 });
 
 test('replacement policy edits keyword rules into the task replacement_rules field', async () => {
