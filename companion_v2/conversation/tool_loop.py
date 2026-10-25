@@ -119,6 +119,7 @@ class LocalRoleTools:
             "memo.create": "Save one private agenda note. Use purpose=open_loop only for a concrete conversation explicitly left to continue; it expires automatically.",
             "memo.list": "List the current participant's private agenda notes; purpose=open_loop returns only unfinished conversation threads.",
             "memo.edit": "Revise an existing note or open loop; edit an existing loop instead of creating a duplicate.",
+            "operation.lookup": "仅查询便签和提醒的原操作回执，不能查询生图、语音或设备操作；查不到不改变其他工具已返回的操作状态。",
         }
         self.catalog = (
             *(specification(action, *fields, description=agenda_descriptions.get(action,

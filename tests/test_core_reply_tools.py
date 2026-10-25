@@ -145,6 +145,12 @@ class CoreReplyToolsTests(ExternalFixture, unittest.IsolatedAsyncioTestCase):
         self.extension_behavior = unknown
         result = await self.call_native("device.play", {"query": "music"})
         self.assertEqual(result["state"], "unknown")
+        lookup = await self.call_native("operation.lookup", {"operation_id": result["operation_id"]}, "wrong-owner-lookup")
+        self.assertEqual(lookup["code"], "invalid_agenda_id")
+        self.assertEqual(lookup["state"], "failed")
+        original = self.tools.external._row(result["invocation_id"])
+        receipt, _ = self.tools.external.snapshot(original, self.context, self.clock.now())
+        self.assertEqual(receipt["state"], "unknown")
         again = await self.call_native("device.play", {"query": "music"}, "another-call")
         self.assertEqual(again["code"], "external_effect_unresolved")
         event, request = self.prepare("another-event")

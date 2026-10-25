@@ -113,9 +113,9 @@ class RoleProfileMigrationTests(unittest.TestCase):
         self.assertEqual(result["fields"]["taboos"], "不要把日程写成任务清单。")
         self.assertEqual(result["fields"]["key_lore"], "拥有名为星律的能力。")
         self.assertEqual(result["fields"]["image_identity_hint"], "图像线索")
-        self.assertEqual(result["excluded_relationship_sections"], 2)
+        self.assertEqual(result["fields"]["world_name"], "现代校园世界。")
+        self.assertEqual(result["excluded_relationship_sections"], 1)
         self.assertNotIn("这段不能迁入", repr(result))
-        self.assertNotIn("现代校园世界", repr(result))
 
     def test_v1_over_limit_values_are_rejected_without_truncation(self):
         result = map_v1_world_knowledge_role_profile("姓名：" + "名" * 81)

@@ -39,7 +39,11 @@ def observe_core_voice_response(event, response):
     policy = core["prepared"].get("voice_reply_policy")
     text = getattr(response, "completion_text", "") or ""
     visible, spans = separate_spoken(text, policy)
-    if spans:
+    repaired = core.pop("_voice_repaired_response", None)
+    if repaired is not None and repaired["response"] is response:
+        core["_voice_authored"] = repaired["plan"]
+        spans = repaired["plan"]["spans"]
+    elif spans:
         core["_voice_authored"] = {"visible": visible, "spans": spans, "cursor": 0, "used": set()}
     else:
         core.pop("_voice_authored", None)

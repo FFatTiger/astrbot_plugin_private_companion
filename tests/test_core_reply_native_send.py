@@ -24,14 +24,17 @@ class CoreReplyNativeSendTests(unittest.IsolatedAsyncioTestCase):
         from astrbot.core.message.components import Plain, Record
         from astrbot_host.core_reply_voice import prepare_core_reply_voice_message
         from astrbot_host.core_reply_voice_authoring import bind_core_voice_authoring, restore_core_voice_authoring
-        from tests.test_core_reply_voice_authoring import Provider
+        from astrbot_host.core_reply_segmentation import prepare_core_reply_segmentation
+        from tests.test_core_reply_voice_authoring import Provider, voice_plan
         event, wrapper, tool = self.prepare()
         state = event.get_extra(CORE_REPLY_CONTEXT_EXTRA)
         state["prepared"]["voice_reply_policy"] = VoiceReplyPolicy(generation_mode="model_tag", language="ja",
             foreign_text_mode="translation")
+        state["prepared"].update(channel="private", segmentation_settings={"min_segment_chars": 2})
+        prepare_core_reply_segmentation(event)
         runner = ToolLoopAgentRunner()
         request = ProviderRequest(prompt="在干嘛呢")
-        provider = Provider("<pc_tts>君と話してるよ。</pc_tts>我在陪你聊天呀。")
+        provider = Provider(voice_plan("君と話してるよ。おやすみ。"))
         await runner.reset(provider=provider, request=request, run_context=NS(context=NS(event=event), messages=[]),
             tool_executor=None, agent_hooks=None)
         bind_core_voice_authoring(event, runner)
@@ -44,13 +47,13 @@ class CoreReplyNativeSendTests(unittest.IsolatedAsyncioTestCase):
                 delivery=None, authorize=check)
         state["prepare_send"] = prepare
         try:
-            await tool.call(wrapper, messages=[{"type":"plain", "text":"我在陪你聊天呀。"}])
+            await tool.call(wrapper, messages=[{"type":"plain", "text":"我在陪你聊天呀。晚安。"}])
         finally:
             restore_core_voice_authoring(event)
         chains = [call.args[1] for call in self.platform.send_by_session.call_args_list]
         self.assertEqual([[type(component) for component in chain.chain] for chain in chains], [[Plain], [Record]])
-        self.assertEqual(rendered, ["君と話してるよ。"])
-        self.assertEqual(chains[0].get_plain_text(), "我在陪你聊天呀。")
+        self.assertEqual(rendered, ["君と話してるよ。おやすみ。"])
+        self.assertEqual(chains[0].get_plain_text(), "我在陪你聊天呀。晚安。")
         self.assertIs(runner.req, request)
         self.assertIsNone(provider.calls[0]["func_tool"])
 

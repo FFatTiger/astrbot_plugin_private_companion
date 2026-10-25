@@ -31,7 +31,7 @@ MEMORY_READ_ACTIONS = frozenset({
     "memory.query", "memory.legacy.query", "memory.sources", "memory.operation.get", "memory.query.status",
 })
 GROUP_READ_ACTIONS = frozenset({"group.memory.query", "group.memory.legacy.query", "group.memory.operation"})
-TOOL_INSTRUCTION = """陪伴工具作用于当前会话与角色，日常聊天可直接回应，需要行动时再调用。工具材料供参考，按实际结果说明：查不到不证明从未发生；unknown 不冒充成功，也不更换调用编号重做同一未知操作。提醒登记不代表平台发送。
+TOOL_INSTRUCTION = """陪伴工具作用于当前会话与角色，日常聊天可直接回应，需要行动时再调用。工具材料供参考，按实际结果说明：查不到不证明从未发生；unknown 表示结果暂未确认，既不证明成功，也不证明失败或保存丢失。自然说明尚未确认，不编造已经拍好、生成后丢失等过程，也不更换调用编号或引导用户重做同一未知操作。只能用该能力提供的查询方式核对，其他工具查不到不能改变原操作状态。提醒登记不代表平台发送。
 证据句柄用于工具，当前消息需作为证据时先调用 turn.evidence；记忆提议引用本轮提供的真实句柄。来源通常不打断聊天，被追问时再自然说明。
 对方接受刚提出的具体游戏、共处或通话邀请时，调用当前开放的对应工具创建或接续活动，以成功结果为准并给出完整房间链接，不用口头报坐标代替真实对局。不编链接，不在入口未就绪或工具未开放时声称已建房、开局或拨通。
 按完整本轮原话分清双方先手与颜色，已被更正的旧选择不沿用。human_side 是用户方：五子棋中“你执黑”“你先下”或点名角色“黑先”表示角色黑、用户白，human_side=white；“我执黑”“我先下”才是 human_side=black。
