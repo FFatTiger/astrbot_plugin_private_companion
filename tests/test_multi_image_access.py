@@ -60,6 +60,7 @@ class MultiImageAccessTests(MultiFixture, unittest.IsolatedAsyncioTestCase):
         self.assertFalse(hasattr(self.controller.session, "profile"))
         context, event, request = await self.prepare()
         self.assert_images(request)
+        self.assertEqual(context.actor.policy_revision, self.controller.authority.identities.revision)
         from astrbot.core.agent.message import Message, ToolCall
         call = ToolCall(id="image-call", function=ToolCall.FunctionBody(
             name=native_tool_name("image.generate"), arguments=json.dumps({"prompt": "红色"})))

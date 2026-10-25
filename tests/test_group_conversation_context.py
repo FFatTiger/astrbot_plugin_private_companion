@@ -65,8 +65,8 @@ class GroupContextTests(GroupFixture, unittest.IsolatedAsyncioTestCase):
         request = self.view(b, second)
         self.assertEqual([(m["speaker_id"], m["text"]) for m in history if m["type"] == "group_member_message"],
                          [("200", "我准备周六去公园")])
-        self.assertIn("[视频不可用]", request.instruction)
-        self.assertIn("缺少对应材料时不要猜", request.instruction)
+        self.assertIn("只有本轮实际提供的原件、采样画面和已读取正文可作依据", request.instruction)
+        self.assertIn("不从群名、旧摘要或元数据补猜", request.instruction)
         self.assertEqual([json.loads(m.payload)["speaker_id"] for m in self.view(b, second).context.materials
                           if m.purpose == "current_group_speaker"], ["201"])
         historical = next(m for m in self.view(b, second).context.materials if m.purpose == "group_conversation_history")
@@ -193,15 +193,23 @@ class GroupContextTests(GroupFixture, unittest.IsolatedAsyncioTestCase):
 
     async def test_persona_switch_revision_and_new_native_conversation_do_not_import_old_history(self):
         await self.start_host()
-        await self.receive("人格甲的旧消息")
-        self.native.selections["qq-main:GroupMessage:300"] = "second"
+        original, _ = await self.receive("人格甲的旧消息")
+        umo = "qq-main:GroupMessage:300"
+        conversation_id = await self.native.conversation_manager.get_curr_conversation_id(umo)
+        self.controller.session_topology.update_persona_selection_snapshot(
+            umo, "100", "bot-a", "second", "role-b", conversation_id)
         b, second = await self.receive("人格乙的消息", sender="201")
+        self.assertEqual(b.role_binding.role.subject_id, "role-b")
         self.assertEqual(self.history(b, second), [])
-        self.native.selections["qq-main:GroupMessage:300"] = "original"
+        self.controller.session_topology.update_persona_selection_snapshot(
+            umo, "100", "bot-a", "original", "role-a", conversation_id)
         a, returned = await self.receive("重新回到人格甲", sender="202")
+        self.assertEqual(a.role_binding.role, original.role_binding.role)
+        self.assertNotEqual(a.role_binding, original.role_binding)
         self.assertEqual(self.history(a, returned), [])
-        self.native.conversations["qq-main:GroupMessage:300"] = "new-group-conversation"
+        self.native.conversations[umo] = "new-group-conversation"
         later, batch = await self.receive("新会话", sender="203")
+        self.assertNotEqual(later.scope, a.scope)
         self.assertEqual(self.history(later, batch), [])
 
     async def test_foreign_and_future_references_cannot_be_injected_into_a_snapshot(self):
