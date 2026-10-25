@@ -66,12 +66,15 @@ def observe_core_tool_dispatch_begin(event, run_context):
     async def responses(*args, **kwargs):
         async for response in original_responses(*args, **kwargs):
             names = getattr(response, "tools_call_name", ())
-            if (not runner.streaming and not getattr(response, "is_chunk", False)
+            if (not getattr(response, "is_chunk", False)
                     and getattr(response, "role", None) == "assistant" and names
                     and set(names) == {"companion_v2_reaction_search"}):
                 # AstrBot emits tool-step prose before executing the search.
                 # Defer that draft until the final media reply; restore the exact
                 # response before dispatch so tool IDs, arguments and history stay intact.
+                # Streaming providers reach this same final response; the old
+                # ``not runner.streaming`` guard let a group/private streaming
+                # step send the draft and then send the post-tool reply again.
                 state["deferred_reply"] = (response, response.completion_text, response.result_chain)
                 # The SDK text setter mutates result_chain when one is attached.
                 response.result_chain = None

@@ -32,7 +32,7 @@ class SearchTool(FunctionTool):
 
 
 class MediaToolPresentationTests(unittest.IsolatedAsyncioTestCase):
-    async def run_search(self, name, *, voice=False):
+    async def run_search(self, name, *, voice=False, streaming=False):
         event = FakeEvent()
         event.unified_msg_origin = "test:media-tool-presentation"
         policy = VoiceReplyPolicy(generation_mode="model_tag", language="ja", foreign_text_mode="translation")
@@ -49,8 +49,14 @@ class MediaToolPresentationTests(unittest.IsolatedAsyncioTestCase):
             requests.append(deepcopy(kwargs["contexts"]))
             return outputs.pop(0)
 
+        async def stream(**kwargs):
+            requests.append(deepcopy(kwargs["contexts"]))
+            while outputs:
+                yield outputs.pop(0)
+
         tool = SearchTool(name)
-        provider = NS(provider_config={"id": "fake-media", "modalities": ["text"]}, text_chat=respond)
+        provider = NS(provider_config={"id": "fake-media", "modalities": ["text"]},
+                      text_chat=respond, text_chat_stream=stream)
         req = ProviderRequest(prompt="笨蛋", func_tool=ToolSet(tools=[tool]))
         run = NS(context=NS(event=event), messages=[], tool_call_timeout=5)
 
@@ -64,7 +70,7 @@ class MediaToolPresentationTests(unittest.IsolatedAsyncioTestCase):
                 restore_core_tool_dispatch(event, run_context)
 
         runner = ToolLoopAgentRunner()
-        await runner.reset(provider, req, run, FunctionToolExecutor(), Hooks())
+        await runner.reset(provider, req, run, FunctionToolExecutor(), Hooks(), streaming=streaming)
         _ACTIVE_AGENT_RUNNERS[event.unified_msg_origin] = runner
         self.addCleanup(_ACTIVE_AGENT_RUNNERS.pop, event.unified_msg_origin, None)
         shown = []
@@ -82,6 +88,10 @@ class MediaToolPresentationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_reaction_search_defers_complete_text_until_final_reply(self):
         _, shown = await self.run_search("companion_v2_reaction_search")
+        self.assertEqual(shown, ["生日快乐。"])
+
+    async def test_reaction_search_defers_streamed_draft_too(self):
+        _, shown = await self.run_search("companion_v2_reaction_search", streaming=True)
         self.assertEqual(shown, ["生日快乐。"])
 
     async def test_reaction_search_and_voice_keep_one_final_speech_span(self):
