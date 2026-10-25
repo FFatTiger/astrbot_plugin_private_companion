@@ -896,6 +896,53 @@ class ModelWebAPI:
         except (ValueError, TypeError, KeyError, UnicodeError, RecursionError, OverflowError):
             return self._response(Outcome.failed("model_request_invalid", "invalid voice probe request"))
 
+    def _preferred_image_projection(self, registry):
+        """The first named model in the configured generate queue, not the native owner id."""
+        try:
+            getter = getattr(registry, "image_extension_api", None)
+            api = getter() if callable(getter) else None
+            reader = getattr(api, "output_configuration", None)
+            if not callable(reader):
+                return {}
+            projected = reader()
+            settings = projected.get("settings") if isinstance(projected, dict) else None
+            if not isinstance(settings, dict):
+                return {}
+            endpoints = {
+                item.get("id"): item for item in settings.get("endpoints", [])
+                if isinstance(item, dict) and isinstance(item.get("id"), str)
+            }
+            routes = settings.get("operation_routes", {}).get("generate", [])
+            if not isinstance(routes, list):
+                return {}
+            first_configured = None
+            for route in routes:
+                if not isinstance(route, str) or not route.startswith("online:"):
+                    continue
+                endpoint = endpoints.get(route[7:])
+                if not isinstance(endpoint, dict):
+                    continue
+                model = endpoint.get("model")
+                if not isinstance(model, str) or not model.strip():
+                    continue
+                name = endpoint.get("name")
+                candidate = {
+                    "model": model,
+                    "name": name if isinstance(name, str) else "",
+                    "route": route,
+                    "enabled": settings.get("enabled") is True and endpoint.get("enabled") is True,
+                }
+                if first_configured is None:
+                    first_configured = candidate
+                if candidate["enabled"]:
+                    return candidate
+            return first_configured or {}
+        except Exception:
+            # The status endpoint must still expose action readiness even when
+            # the image configuration cannot be projected.
+            return {}
+        return {}
+
     def _image_projection(self):
         registry = self.controller.native_extensions
         path = Path(self.controller.data_root) / IMAGE_SETTINGS
@@ -942,7 +989,8 @@ class ModelWebAPI:
                   "declared_actions": sum(item.descriptor.package.extension_id == "image"
                                            for item in declarations)}
         return {"actions": rows, "enabled": dict(enabled), "module": module,
-                "authorization": "checked_for_each_invocation"}
+                "authorization": "checked_for_each_invocation",
+                "preferred_image": self._preferred_image_projection(registry)}
 
     async def image(self):
         try:

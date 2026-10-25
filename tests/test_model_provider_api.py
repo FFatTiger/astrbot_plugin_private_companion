@@ -544,6 +544,32 @@ class ProviderRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["data"]["module"]["issue_code"], "native_configuration_invalid")
         self.assertEqual(response["data"]["actions"][0]["diagnostic_code"], "native_configuration_invalid")
 
+    async def test_image_status_projects_the_first_configured_model_in_the_generate_queue(self):
+        (await self.controller.initialize_profile()).unwrap()
+        import astrbot_host.model_api as model_api
+
+        fake = FakeImageExtensionAPI()
+        fake.configuration = {
+            "enabled": True,
+            "backend": "online_api",
+            "endpoints": [
+                {"id": "primary", "name": "主在线 API", "enabled": True, "model": "gpt-image-2"},
+                {"id": "secondary", "name": "备用在线 API", "enabled": True, "model": "gpt-image-2.5"},
+            ],
+            "operation_routes": {"generate": ["online:primary", "online:secondary"], "edit": []},
+        }
+        registry = NS(image_extension_api=lambda: fake)
+
+        preferred = model_api.ModelWebAPI(self.controller)._preferred_image_projection(registry)
+
+        self.assertEqual(preferred, {"model": "gpt-image-2", "name": "主在线 API",
+                                     "route": "online:primary", "enabled": True})
+
+        fake.configuration["endpoints"][0]["enabled"] = False
+        preferred = model_api.ModelWebAPI(self.controller)._preferred_image_projection(registry)
+        self.assertEqual(preferred, {"model": "gpt-image-2.5", "name": "备用在线 API",
+                                     "route": "online:secondary", "enabled": True})
+
     async def test_image_status_distinguishes_unsupported_routes_from_stale_declarations(self):
         (await self.controller.initialize_profile()).unwrap()
         actions = ("image.generate", "image.edit", "image.mask_edit")

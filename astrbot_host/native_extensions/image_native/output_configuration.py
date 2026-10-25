@@ -124,10 +124,15 @@ def settings(plugin):
 def public_configuration(plugin):
     source = settings(plugin)
     result = copy.deepcopy(source)
-    for item in [*result.get("endpoints", []), result.get("sd_webui", {}), result.get("comfyui", {})]:
+    for item in result.get("endpoints", []):
         headers = item.pop("custom_headers", None)
         item["custom_headers_set"] = bool(headers)
         item["custom_header_names"] = sorted(headers) if isinstance(headers, dict) else []
+        item["api_key_set"] = bool(item.pop("api_key", ""))
+    # Local backends do not have endpoint-level custom headers.  Projecting
+    # those display-only endpoint fields here makes an unmodified public
+    # configuration fail its own save validation when the page sends it back.
+    for item in (result.get("sd_webui", {}), result.get("comfyui", {})):
         item["api_key_set"] = bool(item.pop("api_key", ""))
     network = result.setdefault("network", {})
     network["download_proxy_set"] = bool(network.pop("download_proxy", ""))
@@ -179,10 +184,14 @@ def _legacy_options(value, previous):
 
 def _connection(value, previous):
     if not isinstance(value, dict) or value.keys() - {"base_url", "api_key", "api_key_set", "clear_api_key",
-            "timeout_seconds", "parameters", "workflows"}:
+            "timeout_seconds", "parameters", "workflows", "custom_headers_set", "custom_header_names"}:
         raise NativeImageError("invalid_configuration")
     result = copy.deepcopy(value)
     result.pop("api_key_set", None)
+    # Accept the endpoint projection fields for compatibility with older page
+    # builds, but never persist them on a local backend.
+    result.pop("custom_headers_set", None)
+    result.pop("custom_header_names", None)
     clear = result.pop("clear_api_key", False)
     key = result.get("api_key", "")
     if not isinstance(key, str) or type(clear) is not bool:

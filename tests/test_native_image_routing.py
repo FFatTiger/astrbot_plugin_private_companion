@@ -140,6 +140,18 @@ class NativeImageRoutingTests(unittest.TestCase):
         self.assertEqual(reread["settings"]["endpoints"][0]["custom_header_names"], ["X-Region"])
         self.assertNotIn("custom_headers", reread["settings"]["endpoints"][0])
 
+    def test_public_projection_can_be_saved_back_unchanged(self):
+        self.save_online("openai")
+        current = self.api.output_configuration()
+        for name in ("sd_webui", "comfyui"):
+            self.assertNotIn("custom_headers_set", current["settings"][name])
+            self.assertNotIn("custom_header_names", current["settings"][name])
+
+        saved = self.api.save_output_configuration(current["revision"], current["settings"])
+
+        self.assertEqual(saved["revision"], current["revision"])
+        self.assertEqual(saved["settings"]["endpoints"][0]["model"], "image-model")
+
     def test_online_image_download_uses_configured_proxy(self):
         from astrbot_host.native_extensions.image_native.output_routing import OnlineImageBackend
 

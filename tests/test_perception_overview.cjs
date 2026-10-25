@@ -14,7 +14,7 @@ class FixedDate extends Date {
   static now() { return fixedNow.getTime(); }
 }
 
-function harness({runtimeWeatherState="available",mihomeEnabled=true,balanceEnabled=true,automaticAllowed=true,balanceConfigured=false,balanceResponse=null,otherInjections=[{label:"参考资料",detail:"本轮加入 1 项"}],recallEnabled=true,recallEntries=[{local_time:"17:42",withdrawn_at:"2026-10-01T09:42:00Z",author:"user-1",text:"周末去公园走走"}]}={}) {
+function harness({runtimeWeatherState="available",mihomeEnabled=true,balanceEnabled=true,automaticAllowed=true,balanceConfigured=false,balanceResponse=null,otherInjections=[{label:"参考资料",detail:"本轮加入 1 项"}],recallEnabled=true,recallEntries=[{local_time:"17:42",withdrawn_at:"2026-10-01T09:42:00Z",author:"user-1",text:"周末去公园走走"}],imageTask=true,imageProviderId="image-live",imagePreferred=null}={}) {
   let listener = null, intervalCallback = null, cleared = false, requested = [], bridgeRequests = [];
   const failedRequests = new Set(), tabActivations = [], focused = [];
   const currentBalance = balanceResponse || (balanceConfigured
@@ -52,7 +52,7 @@ function harness({runtimeWeatherState="available",mihomeEnabled=true,balanceEnab
       externalSelfLinkEnabled:true,lastCheckedAt:"2026-10-01 17:50"}};
   const status = {tasks:[
     {kind:"conversation.reply",fields:{provider:{value:"provider-main"},fallback:{value:"provider-backup"}}},
-    {kind:"image.generate",fields:{provider:{value:"provider-image"}}},
+    ...(imageTask ? [{kind:"image.generate",fields:{provider:{value:"provider-image"}}}] : []),
     {kind:"vision.review",fields:{provider:{value:"provider-vision"}}}],
     providers:[{id:"provider-main",model:"model-live"},{id:"provider-backup",model:"model-safe"},
       {id:"provider-image",model:"image-live"},{id:"provider-vision",model:"vision-live"}]};
@@ -86,7 +86,7 @@ function harness({runtimeWeatherState="available",mihomeEnabled=true,balanceEnab
       if (route.endsWith("/voice")) return {languages:[{k:"zh-CN",n:"中文",bind:"tts-main"}],
         providers:[{id:"tts-main",label:"TTS 主路由",model:"tts-live"}],catalog_state:"ready",voice_enabled:true};
       if (route.endsWith("/image")) return {actions:[{action:"image.generate",enabled:true,
-        owner:"Image 扩展",provider_id:"image-live",state:"ready"}]};
+        owner:"Image 扩展",provider_id:imageProviderId,state:"ready"}],preferred_image:imagePreferred};
       return status;
     },
     bridgeNow:() => ({apiGet:async route => {
@@ -208,6 +208,19 @@ test("overview shows the requested context, live routes, authorized devices and 
   page.page.unmount();
   assert.equal(page.intervals.size, 0);
   assert.equal(page.cleared, true);
+});
+
+test("image card shows the configured preferred model instead of the native owner id", async () => {
+  const page = harness({imageTask:false,imageProviderId:"image.native",
+    imagePreferred:{model:"gpt-image-2",name:"备选在线 API",route:"online:legacy-image-01",enabled:true}});
+  page.page.mount(page.root);
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.deepEqual([...page.root.innerHTML.matchAll(/class="perception-mtile-model">([^<]*)<\/strong>/g)].map(match => match[1]),
+    ["model-live", "tts-live", "gpt-image-2", "vision-live"]);
+  assert.match(page.root.innerHTML, /备选在线 API · 首选/);
+  assert.doesNotMatch(page.root.innerHTML, /image\.native/);
+  page.page.unmount();
 });
 
 test("dashboard provides narrow-screen rows, focus states and reduced motion", () => {

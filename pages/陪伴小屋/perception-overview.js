@@ -568,9 +568,22 @@ window.CompanionPerceptionOverviewPage = (() => {
           : voiceProvider?.model || voiceProvider?.label || voiceProvider?.name || voiceLanguage?.bind || "尚未绑定 TTS";
     const generated = imageStatus?.actions?.find(item => item.action === "image.generate");
     const imageRoute = modelRoute("image.generate");
+    const preferredImage = imageStatus?.preferred_image && typeof imageStatus.preferred_image === "object"
+      ? imageStatus.preferred_image : null;
+    /* image.native is the native action owner, not a model.  The status API
+       projects the first model in the configured generate queue so this card
+       shows the same concrete model as the image configuration page. */
+    const preferredImageModel = typeof preferredImage?.model === "string" ? preferredImage.model : "";
     const imageValue = imageState === "loading" ? "正在读取生图状态"
       : imageState === "error" ? "生图状态暂不可读"
-        : imageRoute?.model || generated?.provider_id || generated?.owner || "尚未分配生图模型";
+        : imageRoute?.model || preferredImageModel || generated?.provider_id || generated?.owner || "尚未分配生图模型";
+    const imageDetail = imageRoute
+      ? `${generated?.owner ? `${generated.owner} · ` : ""}${imageRoute.model} · ${modelAvailabilityLabel(generated?.state)}`
+      : preferredImageModel
+        ? `${preferredImage.name || preferredImage.route || "在线生图模型"} · ${preferredImage.enabled ? "首选" : "已停用"}`
+        : generated?.owner
+          ? `${generated.owner} · ${modelAvailabilityLabel(generated.state)}`
+          : "Native 生图动作与扩展由模型与连接页管理。";
     const visionRoute = modelRoute("vision.review") || modelRoute("screen.interpretation");
     const analysisProvider = semanticStatus?.settings?.analysis_provider;
     const events = upcomingDates(snapshot);
@@ -653,10 +666,15 @@ window.CompanionPerceptionOverviewPage = (() => {
       tag:voiceState === "error" ? "读取失败" : voiceState === "loading" ? "读取中" : voiceStatus?.voice_enabled === false ? "未启用" : voiceLanguage?.bind ? "已绑定" : "未绑定"});
     channel("model-image", "models", {tab:tabModel, modelTab:"image", icon:"image", title:"生图模型",
       value:imageValue,
-      detail:generated?.owner ? `${generated.owner}${imageRoute ? ` · ${imageRoute.model}` : ""} · ${modelAvailabilityLabel(generated.state)}`
-        : "Native 生图动作与扩展由模型与连接页管理。",
-      state:imageState !== "ready" ? "pending" : generated?.state === "ready" || imageRoute ? "ready" : generated?.state === "disabled" ? "off" : "pending",
-      tag:imageState === "error" ? "读取失败" : imageState === "loading" ? "读取中" : generated?.state === "ready" ? "可调用" : generated?.state === "disabled" ? "已关闭" : imageRoute ? "已分配" : "待检查"});
+      detail:imageDetail,
+      state:imageState !== "ready" ? "pending"
+        : imageRoute ? "ready"
+        : preferredImageModel ? preferredImage.enabled ? "ready" : "off"
+        : generated?.state === "ready" ? "ready" : generated?.state === "disabled" ? "off" : "pending",
+      tag:imageState === "error" ? "读取失败" : imageState === "loading" ? "读取中"
+        : imageRoute ? "已分配"
+        : preferredImageModel ? preferredImage.enabled ? "首选模型" : "已停用"
+        : generated?.state === "ready" ? "可调用" : generated?.state === "disabled" ? "已关闭" : "待检查"});
     if (visionRoute || analysisProvider) channel("model-vision", "models", {tab:tabModel, modelTab:"fn", icon:"scan-eye", title:"视觉模型",
       value:visionRoute?.model || analysisProvider,
       detail:visionRoute ? detailForRoute(visionRoute) : "语义视觉分析 Provider",
