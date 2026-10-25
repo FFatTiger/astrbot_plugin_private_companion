@@ -143,6 +143,12 @@ class ReplyTextProcessingTests(unittest.TestCase):
         presentation = policy(content_cleanup_enabled=True, content_cleanup_words='["。", "，"]')
         self.assertEqual(presentation.clean_parts(("甲。乙，", "（丙。", "丁，）戊。")),
                          ("甲乙", "（丙。", "丁，）戊"))
+        middle = replace(presentation, content_cleanup_scope="middle")
+        self.assertEqual(middle.clean_parts(("甲。乙，", "（丙。", "丁，）戊。")),
+                         ("甲乙，", "（丙。", "丁，）戊。"))
+        leading = replace(presentation, content_cleanup_scope="leading")
+        self.assertEqual(leading.clean_parts(("。甲。乙", "，丙。", "丁，）戊。")),
+                         ("甲。乙", "丙。", "丁，）戊。"))
         trailing = replace(presentation, content_cleanup_scope="trailing")
         self.assertEqual(trailing.clean_parts(("甲。乙。， \n", "丙。（丁。）", "戊。（己。）。，")),
                          ("甲。乙", "丙。（丁。）", "戊。（己。）"))
@@ -160,7 +166,8 @@ class ReplyTextProcessingTests(unittest.TestCase):
             replace(presentation, content_cleanup_rule=r"(a|aa)+$").clean_parts(("a" * 2000 + "!",))
 
     def test_empty_parts_are_removed_without_moving_authored_speech_to_another_part(self):
-        presentation = policy(content_cleanup_enabled=True, content_cleanup_words='["删", "\\n"]',
+        presentation = policy(content_cleanup_enabled=True, content_cleanup_scope="leading",
+                              content_cleanup_words='["删", "\\n"]',
                               content_replacement_enabled=True,
                               content_replacements='["说 => 改", "语 => 换"]')
         segmentation = SegmentationPolicy(enabled=True, llm_controlled=True)
@@ -188,7 +195,7 @@ class ReplyTextProcessingTests(unittest.TestCase):
         with self.assertRaises(ConfigurationError):
             validate({**legacy, "content_cleanup_enabled": True})
         invalid = ({"content_cleanup_enabled": 1}, {"content_cleanup_rule": "["},
-                   {"content_cleanup_scope": "middle"}, {"content_cleanup_words": '[""]'},
+                   {"content_cleanup_scope": "head"}, {"content_cleanup_words": '[""]'},
                    {"content_replacements": '[{"from":"a","from":"b","to":"c"}]'},
                    {"content_replacements": '[{"from":"","to":"x"}]'},
                    {"content_replacements": '["broken"]'})

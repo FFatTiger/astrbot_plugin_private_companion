@@ -19,7 +19,7 @@ window.CompanionReplyPage = (() => {
       part_gap_mode: {fixed: "固定", random: "随机", log: "按文本长度"},
     prompt_style_mode: {constraint: "约束", free: "自由", guided: "引导"},
     content_cleanup_mode: {words: "按清理词", regex: "按正则"},
-    content_cleanup_scope: {all: "整段回复", trailing: "仅句尾（每段末尾）"},
+    content_cleanup_scope: {leading: "句首", middle: "句中", trailing: "句尾"},
     recall_forbidden_scope: {bot_only: "角色自己的回复", group_only: "群聊回复", bot_and_group: "角色回复与群聊"},
     image_position: {after_text: "文字后", before_text: "文字前"},
     voice_trigger_mode: {always: "每轮", request: "按请求", adaptive: "模型择句"},
@@ -168,8 +168,8 @@ window.CompanionReplyPage = (() => {
       enable_humanized_expression: "勾选后，下面的额外表达提示会与所选风格叠加；自由模式下关闭即可移除这段提示。",
       humanized_expression_prompt: "最多 4000 字。约束模式使用此正文；留空使用内置默认文本。勾选“追加拟人表达提示”后，在自由或引导模式也会额外注入。本对象与群聊各自保存。",
       content_cleanup_enabled: "用于主动消息和普通私聊、群聊的文字回复，默认开启。发送前按所选方式整理文字；关闭时不执行清理。需要调整说法时优先补充上方提示词。",
-      content_cleanup_scope: "选择“仅句尾”时只清理每段消息末尾的匹配项，保留句中标点；选择“整段回复”时清理整段的匹配项。",
-      content_cleanup_words: "按所选范围逐字清理词条。例如填入“。”和“，”并选择“仅句尾”，即可保留句中标点、清理每段末尾；也可添加空格、换行或制表符。",
+      content_cleanup_scope: "按句首、句中、句尾三个位置清理：句首只处理每段开头，句中只处理不贴首尾的匹配，句尾只处理每段末尾。",
+      content_cleanup_words: "按所选位置逐字清理词条。例如填入“。”和“，”并选择“句尾”，即可保留句中标点、清理每段末尾；也可添加空格、换行或制表符。",
       content_cleanup_rule: "仅在清理方式选为正则时使用；最多 512 字。",
       content_replacements: "逐项填写原词和替换文本。",
       framework_error_guard_enabled: "清理插件与框架内部标记，避免把内部格式带入回复。",
@@ -1247,6 +1247,12 @@ window.CompanionReplyPage = (() => {
       onStatus: adopt,
     });
     instance.mount();
+    /* 旧配置的“整段”不再出现在三档位置选项里；仅把它显示成“句中”，
+       用户下一次保存时自然迁移，避免下拉框出现空值。 */
+    if (instance.state?.draft?.content_cleanup_scope === "all") {
+      instance.state.draft.content_cleanup_scope = "middle";
+      instance.mount();
+    }
     if (options.expressionModule) setExpressionModule(options.expressionModule);
     if (options.view === "perception") setPerceptionModule(options.perceptionModule || "overview");
     if (options.view === "decision") setDecisionView(options.decisionView || activeDecisionView);

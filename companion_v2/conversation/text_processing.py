@@ -85,6 +85,12 @@ def _pattern(rule):
     return regex.compile(rule)
 
 
+@lru_cache(maxsize=128)
+def _word_pattern(words):
+    ordered = sorted({word for word in words if word}, key=len, reverse=True)
+    return regex.compile("|".join(regex.escape(word) for word in ordered)) if ordered else None
+
+
 def _merged(ranges):
     result = []
     for start, end in sorted(ranges):
@@ -242,7 +248,7 @@ class ReplyTextPolicy:
     # remains an explicit opt-out at the role or window layer.
     content_cleanup_enabled: bool = True
     content_cleanup_mode: str = "words"
-    content_cleanup_scope: str = "all"
+    content_cleanup_scope: str = "trailing"
     content_cleanup_rule: str = r"[\n]"
     content_cleanup_words: str = json.dumps(["\n"])
     content_replacement_enabled: bool = False
@@ -273,7 +279,9 @@ class ReplyTextPolicy:
             self.humanized
         except ValueError as error:
             raise ValueError(str(error)) from error
-        if self.content_cleanup_mode not in ("words", "regex") or self.content_cleanup_scope not in ("all", "trailing"):
+        if self.content_cleanup_mode not in ("words", "regex"):
+            raise ValueError("presentation cleanup mode or scope is invalid")
+        if self.content_cleanup_scope not in ("all", "leading", "middle", "trailing"):
             raise ValueError("presentation cleanup mode or scope is invalid")
         if type(self.content_cleanup_rule) is not str or len(self.content_cleanup_rule) > 512:
             raise ValueError("presentation cleanup pattern must be bounded text")
@@ -409,35 +417,85 @@ class ReplyTextPolicy:
             local = tuple((max(a, cursor) - cursor, min(b, end) - cursor)
                           for a, b in ranges if a < end and b > cursor)
             chunks = list(_chunks(part, local))
+            first = next((index for index, (_, protected) in enumerate(chunks) if not protected), None)
+            last = next((index for index in range(len(chunks) - 1, -1, -1)
+                         if not chunks[index][1]), None)
+            offset = 0
             for index, (chunk, protected) in enumerate(chunks):
-                if not protected and (self.content_cleanup_scope == "all" or index == len(chunks) - 1):
-                    chunks[index] = (self._clean(chunk, deadline), False)
+                left_edge, right_edge = offset == 0, offset + len(chunk) == len(part)
+                offset += len(chunk)
+                if protected:
+                    continue
+                if self.content_cleanup_scope == "leading" and (index != first or not left_edge):
+                    continue
+                if self.content_cleanup_scope == "trailing" and (index != last or not right_edge):
+                    continue
+                chunks[index] = (self._clean(chunk, deadline, left_edge=left_edge,
+                                             right_edge=right_edge), False)
             result.append("".join(chunk for chunk, _ in chunks))
             cursor = end
         return tuple(result)
 
-    def _clean(self, text, deadline):
-        trailing = self.content_cleanup_scope == "trailing"
+    def _clean(self, text, deadline, *, left_edge=True, right_edge=True):
+        scope = self.content_cleanup_scope
         if self.content_cleanup_mode == "words":
             words = self.words()
-            if not trailing:
+            if scope == "all":
                 for word in words:
                     text = text.replace(word, "")
                 return text
-            words = sorted(set(words), key=len, reverse=True)
-            text = text.rstrip()
-            while text:
-                word = next((word for word in words if text.endswith(word)), None)
-                if word is None:
-                    break
-                text = text[:-len(word)].rstrip()
-            return text
+            if scope == "leading":
+                text = text.lstrip()
+                ordered = sorted(set(words), key=len, reverse=True)
+                while text:
+                    word = next((word for word in ordered if text.startswith(word)), None)
+                    if word is None:
+                        break
+                    text = text[len(word):].lstrip()
+                return text
+            if scope == "trailing":
+                words = sorted(set(words), key=len, reverse=True)
+                text = text.rstrip()
+                while text:
+                    word = next((word for word in words if text.endswith(word)), None)
+                    if word is None:
+                        break
+                    text = text[:-len(word)].rstrip()
+                return text
+            pattern = _word_pattern(tuple(words))
+            if pattern is None:
+                return text
+            result, cursor = [], 0
+            for match in pattern.finditer(text):
+                if (left_edge and match.start() == 0) or (right_edge and match.end() == len(text)):
+                    continue
+                result.append(text[cursor:match.start()])
+                cursor = match.end()
+            result.append(text[cursor:])
+            return "".join(result)
         pattern = _pattern(self.content_cleanup_rule)
         try:
             if monotonic() >= deadline:
                 raise TimeoutError
-            if not trailing:
+            if scope == "all":
                 return pattern.sub("", text, timeout=deadline - monotonic())
+            if scope == "leading":
+                text = text.lstrip()
+                while text:
+                    match = pattern.match(text, timeout=max(0.000001, deadline - monotonic()))
+                    if match is None or match.end() == 0:
+                        break
+                    text = text[match.end():].lstrip()
+                return text
+            if scope == "middle":
+                result, cursor = [], 0
+                for match in pattern.finditer(text, timeout=max(0.000001, deadline - monotonic())):
+                    if (left_edge and match.start() == 0) or (right_edge and match.end() == len(text)):
+                        continue
+                    result.append(text[cursor:match.start()])
+                    cursor = match.end()
+                result.append(text[cursor:])
+                return "".join(result)
             text = text.rstrip()
             while text:
                 match = None

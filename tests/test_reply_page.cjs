@@ -61,7 +61,7 @@ const DEFAULTS = {
   file_understanding_max_size_mb: 8, file_understanding_max_chars: 24000,
   file_understanding_timeout_seconds: 15, file_understanding_prompt: '',
   style_prompt: '', prompt_style_mode: 'free', content_cleanup_enabled: true, content_cleanup_mode: 'words',
-  content_cleanup_scope: 'all', content_cleanup_rule: '[\\n]', content_cleanup_words: '["\\n"]',
+  content_cleanup_scope: 'trailing', content_cleanup_rule: '[\\n]', content_cleanup_words: '["\\n"]',
   content_replacement_enabled: false, content_replacements: '[]', framework_error_guard_enabled: true,
   enable_forbidden_word_recall: false, recall_forbidden_words: '[]', recall_forbidden_scope: 'bot_and_group',
   recall_forbidden_word_case_sensitive: false, forward_message_adaptation_enabled: true,
@@ -407,6 +407,10 @@ test('cleanup mode only shows the control used by the selected mode', async () =
   const instance = live(harnessed);
   let html = harnessed.slots.settings.innerHTML;
   assert.equal(instance.state.draft.content_cleanup_mode, 'words');
+  assert.match(html, /句首/);
+  assert.match(html, /句中/);
+  assert.match(html, /句尾/);
+  assert.doesNotMatch(html, /整段回复/);
   assert.match(html, /data-wb-row="content_cleanup_rule" hidden/);
   assert.doesNotMatch(html, /data-wb-row="content_cleanup_words" hidden/);
 
