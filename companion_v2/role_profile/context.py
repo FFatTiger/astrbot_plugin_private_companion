@@ -27,7 +27,7 @@ FIELD_LABELS = {
     "hair": "发型发色",
     "eyes": "瞳色",
     "clothing": "服饰风格",
-    "image_identity_hint": "头像与图像识别线索",
+    "image_identity_hint": "图像识别线索（头像/截图昵称/水印）",
     "appearance": "外貌补充",
     "personality": "性格描述",
     "first_person": "自称与代词",
