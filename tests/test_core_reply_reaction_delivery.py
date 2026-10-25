@@ -189,6 +189,15 @@ class CoreReplyReactionDeliveryTests(MultiFixture, unittest.IsolatedAsyncioTestC
         wire = await AiocqhttpMessageEvent._parse_onebot_json(event.sent[-1])
         self.assertEqual(wire[0]["data"]["sub_type"], 1)
 
+    async def test_an_already_attempted_reaction_keeps_authored_intent_without_reason(self):
+        event, _ = await self.prepare()
+        core = event.get_extra(CORE_REPLY_CONTEXT_EXTRA)
+        core["_reaction_reply"]["attempted"] = True
+        response = NS(role="assistant", is_chunk=False, tools_call_name=[],
+            completion_text='先不要表情。<pc_reaction_expression>{"intent":"这次已经查过了"}</pc_reaction_expression>')
+        observe_core_reaction_response(event, response)
+        self.assertEqual(response.completion_text, "先不要表情。")
+
     async def test_ordinary_reply_without_protocol_uses_role_reply_context_and_reviews_original(self):
         event, _ = await self.prepare(text="很难受")
         response = NS(role="assistant", is_chunk=False, tools_call_name=[], completion_text="你好呀，挥手！")

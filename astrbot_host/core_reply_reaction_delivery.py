@@ -84,7 +84,7 @@ def observe_core_reaction_response(event, response):
         _capture_reply_intent(core, source)
         logger.info("[CompanionV2][media] stage=response event_ref=%s media=reaction authored_intent=%s lookup=%s reason=%s",
                     core["prepared"].get("event_ref", "unknown"), bool(intent),
-                    bool(reaction.get("intent")), reaction["reason"])
+                    bool(reaction.get("intent")), reaction.get("reason", "unset"))
     if cleaned != source:
         response.completion_text = cleaned
         for part in getattr(getattr(response, "result_chain", None), "chain", ()):
