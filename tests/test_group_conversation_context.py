@@ -303,16 +303,37 @@ class GroupContextTests(GroupFixture, unittest.IsolatedAsyncioTestCase):
 
     async def test_foreign_captured_metadata_cannot_enter_confirmed_reply_history(self):
         app = await self.setup_delivery()
+        original, _ = await self.receive("准备角色资料")
+        from companion_v2.role_profile.configuration import GROUP, target_for
+        profiles = app.messages.role_profile_context
+        target = target_for(original)
+        current = profiles.owner.read(target, profiles.fields)
+        profiles.owner.write(target, profiles.fields, changes={GROUP + ".name": "小雨"}, reset=(),
+                             expected_revision=current.revision, observed_at=self.clock.now())
         _, first = await self.receive("已确认的原回复")
         context, second = await self.receive("下一位成员继续聊天", sender="201")
         saved = json.loads(app.messages.batch(first)["contributions_json"])
+        self.assertIn("cross_window", saved)
+        self.assertEqual(saved["role_profile"]["fields"]["name"], "小雨")
+        saved["busy_delay"] = True
+        with app.runtime.transaction() as connection:
+            connection.execute("UPDATE conversation_batches SET contributions_json=? WHERE batch_id=?",
+                               (encode(saved), first))
         self.assertTrue(any(item["type"] == "confirmed_group_reply"
                             for item in self.history(context, second)))
 
-        for field in ("person_card", "group_network"):
-            with self.subTest(field=field):
+        for field, changes in (("person_card", {"context_key": "another-conversation"}),
+                               ("group_network", {"context_key": "another-conversation"}),
+                               ("cross_window", {"context_key": "another-conversation"}),
+                               ("cross_window", {"payload": {"private_content": "不得带入群聊"}}),
+                               ("role_profile", {"role_id": "another-role"}),
+                               ("busy_delay", 1), ("relationship_profile", {})):
+            with self.subTest(field=field, changes=changes):
                 forged = deepcopy(saved)
-                forged[field]["context_key"] = "another-conversation"
+                if field in forged and type(forged[field]) is dict:
+                    forged[field].update(changes)
+                else:
+                    forged[field] = changes
                 with app.runtime.transaction() as connection:
                     connection.execute("UPDATE conversation_batches SET contributions_json=? WHERE batch_id=?",
                                        (encode(forged), first))
