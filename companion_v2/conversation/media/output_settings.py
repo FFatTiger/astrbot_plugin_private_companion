@@ -76,7 +76,10 @@ def is_rule_image_request(value, *, has_images=False):
 
 
 DEFAULTS = {
-    "allow_user_requests": True, "trigger_mode": "tool", "rule_max_daily": 3,
+    # 默认走规则预筛：明确的「来张自拍 / 画一张 / 把这张改一下」直接命中，
+    # 命中后工具里会带「直接调用，不要只回一段描述」的约束；没命中就不把
+    # 生图工具塞给模型，省掉它对每句话都权衡一次的开销。
+    "allow_user_requests": True, "trigger_mode": "rules", "rule_max_daily": 3,
     "proactive_probability": 0.35, "proactive_max_daily": 1,
     "prompt_format": "traditional", "style": "realistic", "style_prompt": "",
     "negative_mode": "safe_default", "negative_prompt": "",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import shutil
@@ -12,6 +13,9 @@ import tempfile
 from uuid import uuid4
 
 from companion_v2.storage.sqlite_path import readonly_uri
+
+
+logger = logging.getLogger(__name__)
 
 
 PLUGIN_NAME = "astrbot_plugin_private_companion_v2"
@@ -237,15 +241,19 @@ def _finish_pending_cleanup(default: Path, document: dict | None, current: Path)
     if type(source_value) is not str:
         return
     source = Path(source_value).resolve()
-    if source != current:
-        if source == default:
-            _remove_contents(default, preserve={POINTER_NAME})
+    try:
+        if source != current:
+            if source == default:
+                _remove_contents(default, preserve={POINTER_NAME}, tolerant=True)
+            else:
+                _remove_owned_root(source, tolerant=True)
+        if current == default:
+            (default / POINTER_NAME).unlink(missing_ok=True)
         else:
-            _remove_owned_root(source)
-    if current == default:
-        (default / POINTER_NAME).unlink(missing_ok=True)
-    else:
-        _write_pointer(default, {"path": str(current)})
+            _write_pointer(default, {"path": str(current)})
+    except OSError as error:
+        # 收尾失败不影响启动；保留 cleanup_source，下次启动继续尝试。
+        logger.warning("[CompanionV2] 待清理的旧数据根仍未完成 error_type=%s", type(error).__name__)
 
 
 def _files(root: Path):
@@ -268,19 +276,33 @@ def _digest(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _remove_contents(root: Path, *, preserve: set[str] = frozenset()) -> None:
+def _remove_contents(root: Path, *, preserve: set[str] = frozenset(), tolerant: bool = False) -> None:
+    """删除根目录下的内容。
+
+    Windows 上深路径删除可能抛 ``FileNotFoundError``（路径已不存在）或其它
+    ``OSError``；搬迁收尾时这类失败**绝不能**让插件加载失败，所以 ``tolerant``
+    只记录、不抛出，留给下次启动的 ``cleanup_source`` 重试。
+    """
     if not root.is_dir():
         return
     for child in root.iterdir():
         if child.name in preserve:
             continue
-        if child.is_dir() and not _is_link(child):
-            shutil.rmtree(child)
-        else:
-            child.rmdir() if child.is_dir() else child.unlink()
+        try:
+            if child.is_dir() and not _is_link(child):
+                shutil.rmtree(child)
+            else:
+                child.rmdir() if child.is_dir() else child.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            if not tolerant:
+                raise
+            logger.warning("[CompanionV2] 数据根清理未完成 path=%s error_type=%s",
+                           child.name, type(error).__name__)
 
 
-def _remove_owned_root(root: Path) -> None:
+def _remove_owned_root(root: Path, *, tolerant: bool = False) -> None:
     if not root.exists() or _is_link(root):
         return
     owner_path = root / OWNER_NAME
@@ -290,9 +312,14 @@ def _remove_owned_root(root: Path) -> None:
         return
     if not isinstance(owner, dict) or owner.get("format") != _FORMAT:
         return
-    _remove_contents(root, preserve={OWNER_NAME})
-    owner_path.unlink(missing_ok=True)
-    root.rmdir()
+    _remove_contents(root, preserve={OWNER_NAME}, tolerant=tolerant)
+    try:
+        owner_path.unlink(missing_ok=True)
+        root.rmdir()
+    except OSError as error:
+        if not tolerant:
+            raise
+        logger.warning("[CompanionV2] 旧数据根收尾未完成 error_type=%s", type(error).__name__)
 
 
 def _copy_verified(source: Path, destination: Path) -> None:
@@ -356,9 +383,10 @@ def prepare_storage_root(default_root: Path, config: object) -> Path:
                 desired.rmdir()
             os.replace(stage_root, desired)
             _write_pointer(default, {"path": str(desired), "cleanup_source": str(current)})
-            _remove_contents(default, preserve={POINTER_NAME})
+            # 搬迁已经成功：收尾清理任何失败都不能让插件加载失败。
+            _remove_contents(default, preserve={POINTER_NAME}, tolerant=True)
         if current != default:
-            _remove_owned_root(current)
+            _remove_owned_root(current, tolerant=True)
         if is_default_destination:
             pointer.unlink(missing_ok=True)
         else:

@@ -75,6 +75,7 @@ class SinglePageTests(PageRequests, unittest.IsolatedAsyncioTestCase):
             "screen_access_api": PREFIX + "/screen-access",
             # QQ 空间拓展与 Reality/Screen 同层：按角色安装与授权，所以地址跟角色走。
             "qzone_extension_api": PREFIX + "/qzone-extension",
+            "game_access_api": PREFIX + "/game-access",
             "image_material_api": PREFIX + "/image-materials"}])
         self.assertNotIn("provider", json.dumps(listed))
         operator = dashboard_operator(self.controller.runtime, "admin", at=support.NOW)
@@ -271,6 +272,9 @@ class SinglePageTests(PageRequests, unittest.IsolatedAsyncioTestCase):
         pinned = self.controller._read_intent()
         self.assertEqual(progress["data"]["binding"]["role_id"], pinned.persona.role.subject_id)
         self.assertEqual(set(choices["data"]), {"accounts", "personas", "targets", "directory"})
+        from astrbot_host.legacy_api import PREFIX as LEGACY_PREFIX
+        self.assertTrue(any(role.get("legacy_api") == LEGACY_PREFIX
+                            for target in choices["data"]["targets"] for role in target["roles"]))
         self.assertEqual(set(choices["data"]["directory"]), {"complete", "issues"})
         self.assertIsInstance(choices["data"]["directory"]["complete"], bool)
         self.assertIsInstance(choices["data"]["directory"]["issues"], list)
@@ -395,6 +399,35 @@ class SinglePageTests(PageRequests, unittest.IsolatedAsyncioTestCase):
 
 
 class MultiPageTests(PageRequests, MultiFixture, unittest.IsolatedAsyncioTestCase):
+    async def test_setup_targets_publish_migration_paths_before_runtime_starts(self):
+        from astrbot_host.role_paths import HOST_PREFIX, role_legacy_paths
+        from astrbot_host.setup_api import PREFIX as SETUP_PREFIX
+
+        self.controller = self.make_controller(multi_config(group_targets=[dict(
+            target_id="groups", platform_id="qq-main", account_id="100",
+            bot_id="bot-a", group_id="300")]))
+        self.controller.register_routes()
+        routes = {path: handler for path, handler, _, _ in self.native.registered_web_apis}
+        with patch("astrbot_host.setup_api.request", NS(username="admin", query={})):
+            response = await routes[SETUP_PREFIX + "/targets"]()
+        self.assertEqual(response["status"], "ok", response)
+        targets = response["data"]["targets"]
+        private_roles = [role for target in targets if target["scope_kind"] == "private"
+                         for role in target["roles"]]
+        group_roles = [role for target in targets if target["scope_kind"] == "group"
+                       for role in target["roles"]]
+        self.assertTrue(private_roles)
+        self.assertTrue(group_roles)
+        for source_target in targets:
+            for role in source_target["roles"]:
+                expected = role_legacy_paths(source_target["target_id"], role["role_id"],
+                                             source_target["scope_kind"])
+                self.assertEqual(role["legacy_api"], expected["legacy_api"])
+                self.assertEqual(role["legacy_group_data_api"], expected["legacy_group_data_api"])
+                if expected["legacy_api"]:
+                    self.assertTrue(role["legacy_api"].startswith(HOST_PREFIX + "/targets/"))
+        self.assertEqual(self.controller.runtime, None)
+
     async def test_historical_group_for_removed_role_is_not_marked_configured(self):
         from astrbot_host.acquaintance_api import _group_relationship_networks
 

@@ -44,7 +44,18 @@ def core_image_tool_contract(action, description, parameters):
 
 def core_image_tools(session, offered):
     """Keep role-disabled image tools out of this request's private ToolSet."""
-    if not any(item.spec.action in IMAGE_ACTIONS for item in offered):
+    present = [item.spec.action for item in offered if item.spec.action in IMAGE_ACTIONS]
+    if not present:
+        filtered = []
+        diagnostics = getattr(getattr(session.application, "tools", None), "catalog_with_diagnostics", None)
+        if callable(diagnostics):
+            try:
+                _available, filtered = diagnostics(session.context)
+                filtered = [item for item in filtered if item.get("action") in IMAGE_ACTIONS]
+            except Exception:
+                filtered = []
+        logger.info("[CompanionV2][image] stage=catalog offered=%s image_actions=0 filtered=%s",
+                    len(offered), filtered[:4])
         return offered, None
     try:
         values = effective_settings(session.application.runtime, session.context)
@@ -52,6 +63,8 @@ def core_image_tools(session, offered):
         logger.warning("[CompanionV2] 核心生图偏好暂不可用 error_type=%s", type(error).__name__)
         return tuple(item for item in offered if item.spec.action not in IMAGE_ACTIONS), None
     if not values["allow_user_requests"] or values["trigger_mode"] == "off":
+        logger.info("[CompanionV2][image] stage=policy allow=%s mode=%s actions=%s kept=0",
+                    values["allow_user_requests"], values["trigger_mode"], present)
         return tuple(item for item in offered if item.spec.action not in IMAGE_ACTIONS), None
     if values["trigger_mode"] == "rules":
         state = getattr(session, "state", None)
@@ -60,10 +73,13 @@ def core_image_tools(session, offered):
         if command_intent not in {"image_generate", "image_edit"}:
             prepared = getattr(session, "prepared", None)
             original = prepared.get("native_input") if isinstance(prepared, Mapping) else None
-            if not is_rule_image_request(
-                    getattr(original, "text", ""),
-                    has_images=bool(getattr(original, "images", ()))):
+            text = getattr(original, "text", "")
+            matched = is_rule_image_request(text, has_images=bool(getattr(original, "images", ())))
+            if not matched:
+                logger.info("[CompanionV2][image] stage=rules matched=0 text_chars=%s actions=%s kept=0",
+                            len(text or ""), present)
                 return tuple(item for item in offered if item.spec.action not in IMAGE_ACTIONS), None
+    logger.info("[CompanionV2][image] stage=keep mode=%s actions=%s", values["trigger_mode"], present)
     return offered, values
 
 

@@ -184,6 +184,35 @@ class StorageManagementTests(unittest.TestCase):
                              json.dumps({"format": "companion-v2.storage-location.v1",
                                          "path": str(external.resolve())}, sort_keys=True))
 
+    def test_cleanup_failure_after_a_successful_move_never_blocks_loading(self):
+        """搬迁已完成时，旧根清理失败（深路径 / 权限）只能记日志，不能再抛到加载期。"""
+        from unittest.mock import patch
+        import shutil
+        with TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            default = base / "astrbot-data" / PLUGIN_NAME
+            (default / "legacy-v1-archives" / "deep").mkdir(parents=True)
+            (default / "legacy-v1-archives" / "deep" / "export.json").write_text("deep", encoding="utf-8")
+            (default / "config.json").write_text("{}", encoding="utf-8")
+            selected = base / "D-drive" / "AstrBotData"
+            external = selected / PLUGIN_NAME
+            real_rmtree = shutil.rmtree
+
+            def flaky_rmtree(path, *args, **kwargs):
+                if "legacy-v1-archives" in str(path):
+                    raise FileNotFoundError(3, "系统找不到指定的路径", str(path))
+                return real_rmtree(path, *args, **kwargs)
+
+            with patch("astrbot_host.storage_location.shutil.rmtree", side_effect=flaky_rmtree):
+                actual = prepare_storage_root(default, {"storage": {"path": str(selected)}})
+
+            self.assertEqual(actual, external.resolve())
+            self.assertEqual((external / "config.json").read_text(encoding="utf-8"), "{}")
+            self.assertEqual((external / "legacy-v1-archives" / "deep" / "export.json").read_text(encoding="utf-8"),
+                             "deep")
+            pointer = json.loads((default / POINTER_NAME).read_text(encoding="utf-8"))
+            self.assertEqual(pointer["path"], str(external.resolve()))
+
     def test_storage_target_must_be_absolute_and_separate(self):
         with TemporaryDirectory() as temporary:
             default = Path(temporary) / PLUGIN_NAME

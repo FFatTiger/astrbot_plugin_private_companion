@@ -593,6 +593,11 @@ class AstrBotMultiController:
             report_parser_availability(logger)
         except Exception as error:
             logger.warning("[CompanionV2] 文档解析组件自检失败 error_type=%s", type(error).__name__)
+        try:
+            from .image_access import ensure_image_access
+            ensure_image_access(self, self.session)
+        except Exception as error:
+            logger.warning("[CompanionV2] 生图能力授权补齐失败 error_type=%s", type(error).__name__)
         from .knowledge_sources import attach_official_knowledge
         attach_official_knowledge(self.session.application, self.context)
         from .semantic_models import NativeSemanticModels, configured_slang_search_port

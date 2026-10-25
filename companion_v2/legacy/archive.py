@@ -17,6 +17,8 @@ import uuid
 SCHEMA = "companion.legacy-v1-archive.v1"
 REPARSE_POINT = 0x400
 COPY_CHUNK_BYTES = 1024 * 1024
+# Windows 未开启 LongPathsEnabled 时，路径（含目录）超过 259 字符就会失败。
+MAX_WINDOWS_ARCHIVE_PATH = 250
 
 
 @dataclass(frozen=True)
@@ -227,7 +229,11 @@ def copy_v1_archive(plan: V1ArchivePlan, archive_root: str | Path, *, archive_id
             or (metadata is not None and not isinstance(metadata, dict))):
         raise ValueError("archive_identity_invalid")
     root = Path(archive_root).expanduser().resolve(strict=False)
-    if root == plan.root or plan.root in root.parents:
+    # 覆盖升级布局下 V2 数据根本身就在 V1 来源目录里面；归档目录落在被计划
+    # 显式排除的子树里是安全的，不能再按原始祖先关系一刀切拒绝。
+    excluded_roots = tuple((plan.root / Path(relative) for relative in plan.excluded_directories))
+    inside_excluded = any(root == excluded or excluded in root.parents for excluded in excluded_roots)
+    if (root == plan.root or plan.root in root.parents) and not inside_excluded:
         raise ValueError("archive_destination_inside_source")
     root.mkdir(parents=True, exist_ok=True)
     root_info = root.lstat()
@@ -247,7 +253,7 @@ def copy_v1_archive(plan: V1ArchivePlan, archive_root: str | Path, *, archive_id
     if shutil.disk_usage(root).free < plan.total_bytes + 1024 * 1024:
         raise OSError("archive_space_insufficient")
 
-    stage = root / (".staging-" + uuid.uuid4().hex)
+    stage = root / (".staging-" + uuid.uuid4().hex[:16])
     stage.mkdir()
     entries = []
     try:
@@ -256,6 +262,9 @@ def copy_v1_archive(plan: V1ArchivePlan, archive_root: str | Path, *, archive_id
             if _file_key(source) != (item.size, item.modified_ns, item.device, item.inode):
                 raise ValueError("archive_source_changed")
             destination = stage / "files" / Path(*PurePosixPath(item.relative_path).parts)
+            if os.name == "nt" and len(str(destination)) > MAX_WINDOWS_ARCHIVE_PATH:
+                # 没有开长路径支持时，写入会在 259 字符处失败；提前给出可定位的错误码。
+                raise OSError("archive_path_too_long")
             destination.parent.mkdir(parents=True, exist_ok=True)
             digest = hashlib.sha256()
             size = 0

@@ -26,7 +26,9 @@ import asyncio
 import hashlib
 import inspect
 import json
+import logging
 import os
+import re
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -90,6 +92,13 @@ from .legacy_persona_mapping import legacy_account_inventory
 
 PREFIX = "/astrbot_plugin_private_companion/legacy"
 MAX_REQUEST_BYTES = 8192
+logger = logging.getLogger(__name__)
+_WINDOWS_PATH = re.compile(r"[A-Za-z]:\\[^'\"\n]*")
+
+
+def logger_safe_detail(text: str) -> str:
+    """日志里保留错误形状，抹掉绝对路径。"""
+    return _WINDOWS_PATH.sub("<path>", str(text))[:200]
 
 MEMORY_PLUGIN_DATA_NAME = "astrbot_plugin_memory_companion"
 _NO_ACCOUNT_CHANGE = object()
@@ -1583,7 +1592,13 @@ class LegacyMigrationWebAPI:
                 archive_root = migration_archive_root(self.controller, root)
                 archive_result = copy_v1_archive(archive_plan, archive_root, allow_incomplete=True)
             except Exception as error:  # noqa: BLE001 - do not expose source paths or content
+                # 保留原始异常，否则长路径/权限/磁盘错误都会被折叠成同一句，
+                # 用户和日志都无从定位。
+                logger.warning("[CompanionV2] 旧版资料归档失败 error_type=%s detail=%s",
+                               type(error).__name__, logger_safe_detail(str(error)))
                 code = str(error) if str(error).startswith("archive_") else "legacy_archive_failed"
+                if code == "legacy_archive_failed" and getattr(error, "winerror", None) in (206, 3):
+                    code = "archive_path_too_long"
                 return Outcome.failed(code,
                     "V1 只读资料归档未完成；V2 领域数据尚未写入，请重新试算后重试。")
 
