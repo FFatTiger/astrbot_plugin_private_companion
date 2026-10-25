@@ -93,6 +93,9 @@ window.CompanionNativeExtensionPanel = (() => {
       this.root = root; this.name = name; this.options = options;
       this.alive = true; this.ticket = 0; this.busy = false; this.dirty = false;
       this.group = ""; this.query = ""; this.record = null; this.fields = [];
+      /* 只挂一组时（手机连接页复用现实触及的 mobile 分组），不显示分组栏，
+         否则同一份设置会出现两条导航。 */
+      this.onlyGroup = typeof options?.onlyGroup === "string" ? options.onlyGroup : "";
       this.click = event => this.onClick(event);
       this.input = event => this.onInput(event);
       this.submit = event => { event.preventDefault(); this.save(); };
@@ -167,6 +170,7 @@ window.CompanionNativeExtensionPanel = (() => {
       this.management?.stop();
       this.fields = []; this.instance = ++instance;
       this.groups = groupsFor(this.name, this.record.schema);
+      if (this.onlyGroup) this.groups = this.groups.filter(group => group.id === this.onlyGroup);
       if (!this.groups.some(group => group.id === this.group)) this.group = this.groups[0]?.id || "";
       const controls = this.groups.map(group => {
         const content = group.fields.map(([key, field]) => field.type === "object"
@@ -174,7 +178,7 @@ window.CompanionNativeExtensionPanel = (() => {
           : this.field(key, field, this.draft[key], [key], group.id)).join("");
         return `<section class="native-extension-group" data-native-group-panel="${escape(group.id)}" ${group.id !== this.group ? "hidden" : ""}><h3>${escape(group.title)}</h3>${group.hint ? `<p class="native-extension-hint">${escape(group.hint)}</p>` : ""}${content}</section>`;
       }).join("");
-      this.root.innerHTML = `<div class="native-extension-panel"><header class="native-extension-head"><div><span class="native-extension-kicker">V2 内置能力</span><h3>${escape(names[this.name])}</h3><p>${escape(descriptions[this.name])}</p></div><div data-native-runtime></div></header><div class="native-extension-lifecycle" data-native-lifecycle></div>${["reality", "live"].includes(this.name) ? '<div data-native-management></div>' : ""}<form data-native-form><label class="native-extension-search"><span class="sr-only">查找设置项</span><input type="search" placeholder="查找设置项" aria-label="查找${escape(names[this.name])}设置项" data-native-search value="${escape(this.query)}"></label><div class="native-extension-workspace"><nav class="native-extension-nav" aria-label="${escape(names[this.name])}设置分组">${this.groups.map(group => `<button type="button" data-native-group="${escape(group.id)}" aria-pressed="${group.id === this.group}">${escape(group.title)}</button>`).join("")}</nav><div class="native-extension-settings">${controls}<p class="native-extension-no-results" hidden>没有匹配的设置项，换个关键词试试。</p></div></div><footer class="native-extension-savebar"><p role="status" aria-live="polite" data-native-notice></p><div><button class="button small" type="button" data-native-reload>重新读取</button><button class="button small primary" type="submit" data-native-save ${this.dirty ? "" : "disabled"}>保存并应用</button></div></footer></form></div>`;
+      this.root.innerHTML = `<div class="native-extension-panel"><header class="native-extension-head"><div><span class="native-extension-kicker">V2 内置能力</span><h3>${escape(names[this.name])}</h3><p>${escape(descriptions[this.name])}</p></div><div data-native-runtime></div></header><div class="native-extension-lifecycle" data-native-lifecycle></div>${["reality", "live"].includes(this.name) ? '<div data-native-management></div>' : ""}<form data-native-form><label class="native-extension-search"><span class="sr-only">查找设置项</span><input type="search" placeholder="查找设置项" aria-label="查找${escape(names[this.name])}设置项" data-native-search value="${escape(this.query)}"></label><div class="native-extension-workspace${this.onlyGroup ? " is-single" : ""}">${this.onlyGroup ? "" : `<nav class="native-extension-nav" aria-label="${escape(names[this.name])}设置分组">${this.groups.map(group => `<button type="button" data-native-group="${escape(group.id)}" aria-pressed="${group.id === this.group}">${escape(group.title)}</button>`).join("")}</nav>`}<div class="native-extension-settings">${controls}<p class="native-extension-no-results" hidden>没有匹配的设置项，换个关键词试试。</p></div></div><footer class="native-extension-savebar"><p role="status" aria-live="polite" data-native-notice></p><div><button class="button small" type="button" data-native-reload>重新读取</button><button class="button small primary" type="submit" data-native-save ${this.dirty ? "" : "disabled"}>保存并应用</button></div></footer></form></div>`;
       const managementRoot = this.root.querySelector("[data-native-management]");
       this.management = managementRoot ? window.CompanionNativeExtensionManagement?.mount(managementRoot, {
         extensionId:this.name, record:this.record, instance:this.instance,

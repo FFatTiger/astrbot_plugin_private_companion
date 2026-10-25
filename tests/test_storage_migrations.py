@@ -35,8 +35,9 @@ from companion_v2.storage.schema import (
     MIGRATION_V62_TO_V63_FINGERPRINT, MIGRATION_V62_TO_V63_ID, SCHEMA_VERSION_V63,
     MIGRATION_V63_TO_V64_FINGERPRINT, MIGRATION_V63_TO_V64_ID, SCHEMA_VERSION_V64,
     MIGRATION_V64_TO_V65_FINGERPRINT, MIGRATION_V64_TO_V65_ID, SCHEMA_VERSION_V65,
+    MIGRATION_V65_TO_V66_FINGERPRINT, MIGRATION_V65_TO_V66_ID, SCHEMA_VERSION_V66,
 )
-from tests.execution_support import remove_v21, remove_v22, remove_v31, remove_v32, remove_v33, remove_v34, remove_v35, remove_v36, remove_v52, remove_v53, remove_v55, remove_v57, remove_v58, remove_v59, remove_v60, remove_v61, remove_v62, remove_v63, remove_v64, remove_v65
+from tests.execution_support import remove_v21, remove_v22, remove_v31, remove_v32, remove_v33, remove_v34, remove_v35, remove_v36, remove_v52, remove_v53, remove_v55, remove_v57, remove_v58, remove_v59, remove_v60, remove_v61, remove_v62, remove_v63, remove_v64, remove_v65, remove_v66
 
 
 class StorageMigrationTests(unittest.TestCase):
@@ -123,6 +124,14 @@ class StorageMigrationTests(unittest.TestCase):
         )
         self.assertEqual((receipt_migration["to_version"], receipt_migration["fingerprint"]),
                          (SCHEMA_VERSION_V65, MIGRATION_V64_TO_V65_FINGERPRINT))
+        anniversary_migration = runtime.read_one(
+            "SELECT * FROM schema_migrations WHERE migration_id = ?", (MIGRATION_V65_TO_V66_ID,),
+        )
+        self.assertEqual((anniversary_migration["to_version"], anniversary_migration["fingerprint"]),
+                         (SCHEMA_VERSION_V66, MIGRATION_V65_TO_V66_FINGERPRINT))
+        self.assertIsNotNone(runtime.read_one(
+            "SELECT * FROM sqlite_master WHERE type = 'table' AND name = 'relationship_anniversaries'", (),
+        ))
         migration = runtime.read_one(
             "SELECT * FROM schema_migrations WHERE migration_id = ?", (MIGRATION_V60_TO_V61_ID,),
         )
@@ -454,6 +463,27 @@ class StorageMigrationTests(unittest.TestCase):
         columns = {row["name"] for row in upgraded.read_all("PRAGMA table_info(outbox)", ())}
         self.assertIn("receipt_ref", columns)
         self.assertIsNone(upgraded.read_one("SELECT receipt_ref FROM outbox", ())["receipt_ref"])
+
+    def test_v65_upgrade_adds_auto_relationship_anniversaries(self):
+        self.open_runtime().close()
+        with closing(sqlite3.connect(self.database)) as connection:
+            remove_v66(connection)
+            connection.execute("UPDATE runtime_metadata SET value = ? WHERE key = 'schema_version'",
+                               (SCHEMA_VERSION_V65,))
+            connection.commit()
+
+        upgraded = self.open_runtime()
+        migration = upgraded.read_one("SELECT * FROM schema_migrations WHERE migration_id = ?",
+                                      (MIGRATION_V65_TO_V66_ID,))
+        self.assertEqual((migration["from_version"], migration["to_version"], migration["fingerprint"]),
+                         (SCHEMA_VERSION_V65, SCHEMA_VERSION_V66, MIGRATION_V65_TO_V66_FINGERPRINT))
+        columns = {row["name"] for row in upgraded.read_all(
+            "PRAGMA table_info(relationship_anniversaries)", ())}
+        self.assertTrue({"anniversary_id", "owner_key", "label", "month", "day",
+                         "confidence", "evidence_json", "source_run_id", "state"}.issubset(columns))
+        indexes = {row["name"] for row in upgraded.read_all(
+            "SELECT name FROM sqlite_master WHERE type = 'index'", ())}
+        self.assertIn("relationship_anniversary_active_day_idx", indexes)
 
     def test_v52_upgrade_adds_response_diagnostics_and_rolls_back_on_failure(self):
         runtime = self.open_runtime()

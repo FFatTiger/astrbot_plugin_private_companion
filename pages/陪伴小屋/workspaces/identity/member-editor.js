@@ -9,7 +9,7 @@
   const parameters = person => ({subject_id: person.subject_id, ...routeOf(person)});
   const states = new Map();
   let current = null;
-  const fieldLabels = {default_nickname: "对用户的称呼", user_gender: "性别", user_birthday: "生日", user_occupation: "职业",
+  const fieldLabels = {default_nickname: "对用户的称呼", user_gender: "性别", user_birthday: "生日或纪念日", user_occupation: "职业",
     role_relation: "关系定位", interaction: "相处方式", extra: "其他补充"};
   const replyLabels = {
     enabled: "启用消息分段", streaming: "启用模型流式传输", streaming_mode: "流式发送方式",
@@ -66,7 +66,7 @@
     ["关系", [["affection", "想念与亲近"], ["care", "情绪关怀"], ["play", "轻松互动"],
       ["repair", "关系修复"], ["chat", "日常话题"]]],
     ["日程", [["greeting", "问候与纪念"], ["followup", "接回旧话题"], ["invitation", "共同活动邀请"],
-      ["reminder", "约定与提醒"], ["meal", "饭点问候"]]],
+      ["reminder", "约定与提醒"], ["meal", "饭点话题"]]],
     ["分享", [["life", "分享自己的生活"], ["creation", "作品与阅读"], ["news", "外部资讯"],
       ["environment", "环境与状态变化"], ["screen", "已授权屏幕观察"]]],
   ];
@@ -549,7 +549,7 @@
     if (core) {
       factsBlock.body.append(facts([
         ["对用户的称呼", profile.default_nickname], ["关系定位", profile.role_relation],
-        ["性别", profile.user_gender], ["生日", profile.user_birthday],
+        ["性别", profile.user_gender], ["生日/纪念日", profile.user_birthday],
         ["职业", profile.user_occupation], ["相处方式", profile.interaction], ["其他补充", profile.extra],
       ]));
     } else {

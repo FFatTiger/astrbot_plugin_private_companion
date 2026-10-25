@@ -12,7 +12,10 @@ from companion_v2.conversation.reply_settings import ROLE_SHARED_FIELDS, configu
 from companion_v2.conversation.segmentation import SegmentationPolicy
 from companion_v2.proactive.configuration import GROUP as CONTACT_GROUP, configuration_fields as contact_fields
 from companion_v2.proactive.preferences import ContactPreferences
-from companion_v2.proactive.prompts import ORIGIN_INSTRUCTIONS, PURPOSES, PURPOSE_INSTRUCTIONS, request_for
+from companion_v2.proactive.prompts import (INSTRUCTION as CONTACT_INSTRUCTION, ORIGIN_INSTRUCTIONS,
+                                           PURPOSES, PURPOSE_INSTRUCTIONS, VOICE_INSTRUCTION, request_for)
+from companion_v2.proactive.persona_judge import INSTRUCTION as JUDGE_INSTRUCTION
+from companion_v2.proactive.service import role_state_for_prompt
 from companion_v2.role_work.journal.models import JournalKind
 from companion_v2.role_work.journal.prompts import request_for as journal_request_for
 from tests.test_management_access import ROLE, SCOPE
@@ -426,3 +429,33 @@ class JournalStyleTests(RequestForDreamTests):
 
 if __name__ == "__main__":
     unittest.main()
+
+class PromptGuardTests(unittest.TestCase):
+    def test_generic_proactive_state_is_tone_only(self):
+        summary = {
+            "energy": 77, "sleep": "已休息", "hunger": "有点饿",
+            "health": "良好", "location": "家中", "mood": "平稳",
+        }
+        generic = role_state_for_prompt(summary, "play")
+        self.assertEqual(generic, {"energy": 77, "sleep": "已休息", "location": "家中", "mood": "平稳"})
+        self.assertNotIn("hunger", generic)
+        self.assertNotIn("health", generic)
+        meal = role_state_for_prompt(summary, "meal")
+        self.assertEqual(meal["hunger"], "有点饿")
+        self.assertEqual(meal["health"], "良好")
+        self.assertEqual(role_state_for_prompt(summary, None), summary)
+
+    def test_proactive_prompt_rejects_status_reports_and_invented_habits(self):
+        self.assertIn("角色状态只是底色", CONTACT_INSTRUCTION)
+        self.assertIn("不要把状态字段改写成连续近况播报", CONTACT_INSTRUCTION)
+        self.assertIn("人格中的「关心健康/监督饮食」本身不是证据", CONTACT_INSTRUCTION)
+        self.assertIn("不假定对方刚刚或经常有某种饮食", PURPOSE_INSTRUCTIONS["play"])
+        self.assertIn("不凭空说「你又/总是/老是", DEFAULT_PROMPT)
+        self.assertIn("voice_text 只能朗读正文里已有的意思", VOICE_INSTRUCTION)
+        self.assertIn("若正文主要是连续汇报角色自身状态", JUDGE_INSTRUCTION)
+        self.assertIn("必须有材料直接支持", JUDGE_INSTRUCTION)
+
+    def test_generation_prompts_do_not_prime_concrete_food_words(self):
+        generation_prompts = CONTACT_INSTRUCTION + DEFAULT_PROMPT + PURPOSE_INSTRUCTIONS["play"] + VOICE_INSTRUCTION
+        self.assertNotIn("零食", generation_prompts)
+        self.assertNotIn("有点饿", generation_prompts)

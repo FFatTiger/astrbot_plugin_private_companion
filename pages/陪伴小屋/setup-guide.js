@@ -46,6 +46,7 @@ window.CompanionSetup = (() => {
       staging_host_terminated: "插件已停止，请重新打开插件页面。",
       bridge_timeout: "连接超时，请重新读取；原操作结果需要核对。",
       invalid_response: "服务返回的数据不完整，请重新读取。",
+      setup_progress_unavailable: "读取设置进度失败（已保留上次结果）；点「重新读取」再试一次，仍失败请查看 AstrBot 日志。",
       model_route_unavailable: "当前小屋角色没有可编辑的模型路由，请切换到已关联私聊的人格。",
       model_route_scope_changed: "小屋角色已经切换，请重新读取当前角色的模型路由后再保存。",
       legacy_plan_stale: "配置在执行前已更新；重新执行会先重新试算再写入。",
@@ -565,7 +566,7 @@ window.CompanionSetup = (() => {
     platform_group_chat:"群聊称呼", platform_screen:"识屏称呼", platform_bilibili:"视频站称呼",
     platform_qzone:"动态墙称呼", platform_library:"资料柜称呼", platform_names:"平台称呼补充",
     world_adaptation_mode:"世界观适配模式", world_adaptation:"世界观适配指引",
-    default_nickname:"对用户的称呼", user_gender:"用户性别", user_birthday:"用户生日", user_occupation:"用户职业",
+    default_nickname:"对用户的称呼", user_gender:"用户性别", user_birthday:"生日或纪念日", user_occupation:"用户职业",
     role_relation:"用户与角色的关系", interaction:"相处方式", extra:"其他关系补充",
   };
   const TASK_LABELS = {

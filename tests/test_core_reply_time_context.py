@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import json
 from types import SimpleNamespace as NS
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from astrbot_host.core_reply_context import CURRENT_TIME_INSTRUCTION, build_core_reply_prompt
 from companion_v2.foundation.refs import ScopeKind
@@ -63,6 +63,36 @@ class CoreReplyTimeContextTests(unittest.TestCase):
         self.assertIn("perception", group_prompt.sections)
         self.assertIn("current_local_time", group_prompt.perception_context)
         self.assertEqual(group_prompt.perception_options, (True, True, True))
+
+    def test_reflection_created_anniversary_is_available_inside_private_reply_context(self):
+        settings = {"guidance": "", "calendar_timezone": "Asia/Shanghai", "calendar_enabled": False,
+                    "platform_enabled": True, "model_route_enabled": True,
+                    "configured_modalities_enabled": True}
+        messages = NS(
+            role_profile_context=None,
+            acquaintance=NS(card_contribution=lambda *_args, **_kwargs: None),
+            knowledge=None, proactive_inspirations=None, relationship_profile_context=None,
+            memory_context=None, relationship_context=None, life_context=None,
+            role_growth_context=None, role_self_review_context=None, open_items_context=None,
+            role_state_context=None, expression_style_context=None,
+            group_context=NS(authorize=lambda *_args: None),
+        )
+        application = NS(
+            messages=messages,
+            runtime=object(),
+            perception_settings=NS(capture=lambda *_args: {"settings": settings}),
+        )
+        context = NS(scope=NS(kind=ScopeKind.PRIVATE), key="anniversary-private",
+                     actor=NS(), role_binding=NS(role=NS()))
+        anniversary = {"basis": "auto_relationship_anniversary", "label": "第一次认真说出喜欢",
+                       "date": "2026-10-23", "days_until": 0, "calendar": "gregorian"}
+        with patch("companion_v2.relationships.anniversaries.upcoming", return_value=(anniversary,)):
+            prompt = build_core_reply_prompt(
+                application, context, NS(text="今天是什么日子", event_id="anniversary-question"),
+                at=datetime(2026, 10, 23, 8, 0, tzinfo=timezone.utc))
+        perception = json.loads(prompt.perception_context)
+        self.assertEqual(perception["personal_date_context"]["auto_anniversaries"], [anniversary])
+        self.assertTrue(any("auto_anniversaries" in item for item in prompt.perception_instructions))
 
     def test_stable_role_guidance_is_separate_from_turn_background(self):
         from companion_v2.conversation.reply_settings import GROUP

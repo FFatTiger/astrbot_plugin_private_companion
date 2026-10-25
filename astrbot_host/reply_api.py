@@ -112,6 +112,15 @@ class ReplyWebAPI:
                 if result.is_success and action in ("status", "configure"):
                     status = result.value if action == "status" else result.value["status"]
                     status["tts"] = self._tts_catalog()
+                    # 附件解析器是否装好，直接随设置一起下发，理解页不用另开接口。
+                    from .files.parsing import parser_availability
+                    status["documents"] = parser_availability()
+                    try:
+                        from companion_v2.conversation.web_understanding import WebUnderstandingSettings
+                        status["web"] = WebUnderstandingSettings(
+                            session.application.configuration).read(session.profile.target, controller.now())
+                    except Exception:
+                        status["web"] = {}
                 return outcome_response(result)
         except (TaskError, ConfigurationError) as error:
             return outcome_response(Outcome.failed(error.code, str(error)))

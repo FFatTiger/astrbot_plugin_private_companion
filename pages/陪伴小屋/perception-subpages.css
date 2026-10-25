@@ -77,3 +77,22 @@
 }
 @media(prefers-reduced-motion:reduce){.perception-config-nav button{transition:none}}
 :root[data-motion="off"] .perception-config-nav button{transition:none}
+
+/* 现实触及：竖列分组导航 + 单列内容。
+   这一页原来把授权、屏幕解读、设备与米家全部叠在两条折叠块里，越往下越难找；
+   现在左侧固定一条分组栏，右侧只显示当前分组，分组本身仍是原来的挂载点。 */
+.reality-config-shell{display:grid;grid-template-columns:200px minmax(0,1fr);align-items:start;gap:var(--sp-4);min-width:0}
+.reality-config-rail{position:sticky;top:var(--sp-2);z-index:5;display:grid;gap:2px;padding:var(--sp-2);border:1px solid var(--t-line);border-radius:var(--r-sm);background:var(--t-surface)}
+.reality-config-rail button{display:flex;align-items:center;gap:var(--sp-2);min-width:0;min-height:40px;padding:var(--sp-2) var(--sp-3);border:0;border-radius:var(--r-sm);background:transparent;color:var(--t-text-soft);font:inherit;font-size:var(--fs-body);line-height:1.4;text-align:left;cursor:pointer}
+.reality-config-rail button svg{width:16px;height:16px;flex:none}
+.reality-config-rail button:hover{background:var(--t-surface-soft);color:var(--t-text-strong)}
+.reality-config-rail button.active{background:var(--t-accent-quiet);color:var(--t-accent-ink);font-weight:650}
+.reality-config-rail button:focus-visible{outline:2px solid var(--t-accent);outline-offset:2px}
+.reality-config-panes{display:grid;gap:var(--sp-3);min-width:0}
+.reality-config-pane{min-width:0}
+.reality-config-pane[hidden]{display:none}
+@media(max-width:1000px){
+  .reality-config-shell{grid-template-columns:minmax(0,1fr)}
+  .reality-config-rail{position:static;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);overflow-x:auto}
+  .reality-config-rail button{justify-content:center;text-align:center}
+}

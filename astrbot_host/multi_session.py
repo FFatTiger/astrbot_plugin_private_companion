@@ -899,7 +899,17 @@ class MultiHostSession:
                     from .core_reply_context import build_core_reply_prompt
                     if not group_admission or group_admission.get("reason") != "repeat":
                         build_started_at = self.now()
-                        prompt = build_core_reply_prompt(self.application, context, captured, at=self.now())
+                        keyword_entries = ()
+                        registry = getattr(self.application, "keyword_materials", None)
+                        if registry is not None:
+                            try:
+                                keyword_entries = await registry.prepare(
+                                    context, getattr(captured, "text", "") or "", at=self.now())
+                            except Exception as error:
+                                logger.warning("[CompanionV2] 关键词材料未注入 error_type=%s",
+                                               type(error).__name__)
+                        prompt = build_core_reply_prompt(self.application, context, captured, at=self.now(),
+                                                         keyword_materials=keyword_entries)
                         prompt_instruction = getattr(prompt, "context_instruction", prompt.instruction)
                         stable_prompt_instruction = getattr(prompt, "stable_instruction", "")
                         context_sections = prompt.sections

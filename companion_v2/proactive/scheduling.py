@@ -63,7 +63,7 @@ SYNTHETIC_DIAGNOSTIC_EVENTS = {
     "followup": "先前聊到如果能有一间自己的小书店会怎样布置，还没展开；角色现在想到自己的布置想法，想分享着接回话题，不催答。",
     "invitation": "角色现在想找对方一起做点事：挑一项具体活动，例如一起玩一局五子棋或海龟汤，或者打个语音电话，主动问对方要不要参加；不假定对方有空，不说成已经开局或拨通。",
     "reminder": "双方先前已接受一项一起听歌的约定，约定即将开始；角色主动提醒这一件事，不声称对方已经赴约或必须参加。",
-    "meal": "角色有一个自己的用餐念头，想在饭点和对方说说；不推断对方是否用餐，不要求报平安。",
+    "meal": "角色自己的饭点到了，但这只是角色生活里的一个时间背景；角色可以分享自己此刻的一点具体日常或接回原对话，也可能决定不打扰。不推断对方是否用餐，不要求报平安，不把饭点写成每日打卡。",
     "life": "角色刚把书桌上散落的纸页整理好，留出一块干净的小角落，想把这点生活变化和自己的感受分享给对方；不增加其他经历。",
     "creation": "角色刚写下一句短句：给普通的一天留一盏小灯。想把这一句和自己的创作想法分享给对方；不杜撰书名或阅读进度。",
     "news": "一则创作工具资讯介绍了把简单手绘变成小动画的功能；角色对这个亮点好奇，想分享自己的想法，不增加产品名、发布机构或未经提供的细节。",
@@ -101,7 +101,7 @@ class ContactSchedule:
         self.calendar_events = CalendarContactEvents(contacts, calendar) if calendar is not None else None
         self.reminiscence_events = (ReminiscenceContactEvents(contacts, relationships)
                                     if relationships is not None else None)
-        self.date_events = DateContactEvents(contacts)
+        self.date_events = DateContactEvents(contacts, messages)
         self.greeting_events = GreetingContactEvents(contacts, role_state)
         self.meal_events = MealContactEvents(contacts)
         self.weather_events = WeatherContactEvents(contacts, role_state, weather_port) if role_state is not None else None

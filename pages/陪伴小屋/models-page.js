@@ -1960,7 +1960,12 @@ window.CompanionModelsPage = (() => {
        现在改成读不到就说读不到，并给一个重新读取的入口——刷新之后桥通常就在了。 */
     const identity = product.identity();
     const endpoint = Object.hasOwn(options, "endpoint") ? options.endpoint : product.role()?.model_api;
-    if (!product.hosted() || typeof endpoint !== "string" || !endpoint.startsWith(PREFIX) || /[?#%\\:]/.test(endpoint) || endpoint.split("/").slice(1).some(p => !p || p === "." || p === "..") || !identity.operator_id) { root.innerHTML = `<div class="model-empty">${product.hosted()?'当前对象没有模型配置工作区。请选择已关联角色的私聊窗口。':'角色与会话目录暂未读到，请稍后重新读取。'}<div class="dialog-actions"><button class="button small" type="button" data-workspace-retry>重新读取</button><button class="button small" type="button" data-go="manage" data-manage="host">账号与会话</button></div></div>`; return; }
+    if (!product.hosted() || typeof endpoint !== "string" || !endpoint.startsWith(PREFIX) || /[?#%\\:]/.test(endpoint) || endpoint.split("/").slice(1).some(p => !p || p === "." || p === "..") || !identity.operator_id) {
+      const hint = product.workspaceHint?.() || "";
+      const message = product.hosted() ? (hint || "当前对象没有模型配置工作区。请选择已关联角色的私聊窗口。")
+        : "角色与会话目录暂未读到，请稍后重新读取。";
+      root.innerHTML = `<div class="model-empty">${message}<div class="dialog-actions"><button class="button small" type="button" data-workspace-retry>重新读取</button><button class="button small" type="button" data-go="manage" data-manage="host">账号与会话</button></div></div>`; return;
+    }
     /* path 是每一次请求的基址（model_api + /configure、/voice、/tts/providers…），
        也是 localStorage 键的一部分。桥要插件相对路径，所以切掉插件目录名。 */
     path = endpoint.slice(PREFIX.length); key = "companion-model-edit.v2:" + JSON.stringify([identity.installation_id, identity.operator_id, path]);

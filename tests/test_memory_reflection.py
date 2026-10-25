@@ -78,6 +78,38 @@ class MemoryReflectionTests(HostFixture, unittest.IsolatedAsyncioTestCase):
             end=self.clock.now(), role_instruction="原角色人格提示").unwrap()
         self.assertEqual(next_batch["state"], "empty")
 
+    async def test_reflection_creates_an_anniversary_only_from_user_evidence(self):
+        host, context, prepared = await self.setup_reflection()
+
+        async def respond(envelope):
+            if envelope.original.output_format != "memory_reflection":
+                return answered("知道了。")
+            source = json.loads(next(m.payload for m in envelope.original.context.materials
+                                     if m.purpose == "reflection_source"))
+            return answered(encode({
+                "summary": "今天用户明确说起了第一次告白，可以记作互动纪念日。",
+                "proposals": [],
+                "pending_decisions": [],
+                "anniversaries": [{
+                    "label": "第一次认真说出喜欢",
+                    "reason": "用户原话明确说出今天第一次向角色告白。",
+                    "confidence": 0.92,
+                    "evidence_handle": source["handle"],
+                }],
+            }))
+        self.model_behavior = respond
+        reflection = host.application.memory_reflection
+        result = (await reflection.run(context, prepared["batch_id"])).unwrap()
+        self.assertEqual(result["state"], "complete", result)
+        rows = host.application.runtime.read_all(
+            "SELECT label, state FROM relationship_anniversaries", ())
+        self.assertEqual([(row["label"], row["state"]) for row in rows],
+                         [("第一次认真说出喜欢", "active")])
+        first = (await reflection.run(context, prepared["batch_id"])).unwrap()
+        self.assertEqual(first["state"], "complete")
+        self.assertEqual(len(host.application.runtime.read_all(
+            "SELECT * FROM relationship_anniversaries", ())), 1)
+
     async def test_configured_model_wait_and_fallback_fit_inside_the_reflection_task(self):
         host, context, prepared = await self.setup_reflection()
         app = host.application

@@ -1939,7 +1939,7 @@ window.CompanionMaintenancePage = (() => {
     ["repair", "关系修复"], ["chat", "日常话题"], ["greeting", "问候与纪念"],
     ["life", "分享自己的生活"], ["creation", "作品与阅读"], ["news", "外部资讯"],
     ["followup", "接回旧话题"], ["invitation", "共同活动邀请"], ["reminder", "约定与提醒"],
-    ["environment", "环境与状态变化"], ["meal", "饭点问候"], ["screen", "已授权屏幕观察"],
+    ["environment", "环境与状态变化"], ["meal", "饭点话题"], ["screen", "已授权屏幕观察"],
   ];
 
   function proactiveTestMarkup() {

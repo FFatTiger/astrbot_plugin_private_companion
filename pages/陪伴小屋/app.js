@@ -744,6 +744,7 @@ function renderSectionPanel(id){
     'identity-access':renderIdentityAccessPage,'identity-feelings':renderIdentityFeelingsPage,
     contact:renderContactPage,memory:renderMemoryPage,
     models:renderModelsPage,maintenance:renderMaintenancePage,learning:renderLearningPage,
+    mobile:renderMobileConnection,
     setup:renderSetupPage,host:renderHostPage,appearance:renderAppearancePage,
     data:renderData}[id];
   if(!renderer)return renderHomePanel();
@@ -959,6 +960,10 @@ function mountPanelWorkspaces(){
     ?window.CompanionImageMaterialsPage?.mount(imageMaterialsHost)
     :window.CompanionImageMaterialsPage?.unmount());
   if($('#modelWorkspace'))guarded('模型与连接',()=>window.CompanionModelsPage?.mount($('#modelWorkspace')));
+  const mobileConnectionHost=$('#mobileConnectionWorkspace');
+  guarded('手机连接',()=>mobileConnectionHost
+    ?window.CompanionNativeExtensionPanel?.mount(mobileConnectionHost,{extensionId:'reality',onlyGroup:'mobile'})
+    :window.CompanionNativeExtensionPanel?.prune());
   const semanticLearningHost=$('#semanticLearningWorkspace');
   const semanticExpressionHost=$('#semanticExpressionWorkspace');
   const semanticScope=semanticExpressionHost?learningScope('expression'):null;
@@ -1705,7 +1710,7 @@ function renderAppearanceSurfaces(){
 }
 const manageTabs=[
   ['perception','scan-eye','感知'],['understanding','brain-circuit','理解'],['decision','brain','决策'],['action','play','行动'],['contact','heart-handshake','主动联系'],['expression','message-square-more','表达'],['output','shapes','产出'],['governance','user-round','自我'],
-  ['identity','network','关系网'],['identity-people','users-round','用户'],['identity-groups','messages-square','群聊'],['identity-access','shield-check','访问规则'],['identity-feelings','heart-handshake','关系与情感'],['memory','orbit','事实与经历'],['learning','graduation-cap','学习与成长'],['models','sliders-horizontal','模型与连接'],['maintenance','settings-2','治理与维护'],
+  ['identity','network','关系网'],['identity-people','users-round','用户'],['identity-groups','messages-square','群聊'],['identity-access','shield-check','访问规则'],['identity-feelings','heart-handshake','关系与情感'],['memory','orbit','事实与经历'],['learning','graduation-cap','学习与成长'],['models','sliders-horizontal','模型与连接'],['maintenance','settings-2','治理与维护'],['mobile','smartphone','手机连接'],
   ['setup','rocket','开始使用'],
   ['host','power','账号与会话'],['appearance','palette','外观与设置'],['data','database','资料与备份'],
 ];
@@ -1862,6 +1867,9 @@ function activatePerceptionTab(destination,{focus=false,scroll=false,modelTab=''
   const selectedSubpanel=subpanel&&panel.contains?.(subpanel)&&!subpanel.hidden
     ?subpanel:availableSubpanels.find(item=>item.open)||availableSubpanels[0]||null;
   if(selectedSubpanel)selectedSubpanel.open=true;
+  /* 深链接指向某个折叠块时，先把包含它的竖列分组切出来，否则块虽展开却停在隐藏面板里。 */
+  const realityPane=selectedSubpanel?.closest?.('[data-reality-panel]');
+  if(realityPane)selectRealitySection(realityPane.dataset.realityPanel);
   const anchor=selectedSubpanel||panel;
   tabs.forEach(tab=>{
     const active=tab===target;
@@ -1891,6 +1899,25 @@ function activatePerceptionTab(destination,{focus=false,scroll=false,modelTab=''
 /* 仪表盘与其他页面入口共用配置定位；模型、TTS 与生图也在下方的同一工作区编辑。 */
 /* 地址栏用的公开名是 openPerceptionTab；activate 留着兼容现有调用。 */
 window.CompanionPerceptionTabs={activate:activatePerceptionTab,openPerceptionTab:activatePerceptionTab};
+/* 现实触及页的竖列导航：左侧一条分组栏，右侧只显示当前分组。
+   分组用的是页面内已有的挂载点，切换只改可见性，不动各自的读写通道。 */
+function selectRealitySection(section){
+  const shell=document.querySelector('[data-reality-config]');
+  if(!shell||!section)return false;
+  const tabs=[...shell.querySelectorAll('[data-reality-tab]')];
+  if(!tabs.some(tab=>tab.dataset.realityTab===section))return false;
+  tabs.forEach(tab=>{
+    const active=tab.dataset.realityTab===section;
+    tab.classList.toggle('active',active);
+    tab.setAttribute('aria-selected',String(active));
+    tab.tabIndex=active?0:-1;
+  });
+  shell.querySelectorAll('[data-reality-panel]').forEach(pane=>{
+    pane.hidden=pane.dataset.realityPanel!==section;
+  });
+  icons();
+  return true;
+}
 function renderPerceptionOriginal(){
   /* 缺目标时整页一条引导，而不是让四个挂载点各自渲染一遍空态。 */
   const guide = pageNeedsTarget('感知设置');
@@ -1954,33 +1981,46 @@ function renderPerceptionOriginal(){
       </section>
       <section class="perception-config-page" id="perception-page-reality" role="tabpanel" aria-labelledby="perception-tab-reality" data-perception-page="config-screen" hidden>
         <header class="perception-config-page-heading"><span>03</span><h2>现实触及功能</h2></header>
-        <div class="perception-config-grid perception-config-grid-reality">
-          <section class="perception-config-zone" id="config-screen" tabindex="0">
-            <details class="perception-subpanel" id="perception-detail-device-access" open>
-              <summary><span><strong>屏幕、手机与摄像头授权</strong></span>${I('chevron-down')}</summary>
-              <div class="perception-subpanel-body">
-                ${configEditors('screenConfigWorkspace',['screen'],'屏幕解读与日记素材')}
-                <section class="perception-access-block" aria-labelledby="perceptionAccessTitle">
-                  <div class="perception-access-heading"><div><h3 id="perceptionAccessTitle">对话能力授权</h3></div></div>
+        <div class="reality-config-shell" id="config-screen" data-reality-config>
+          <nav class="reality-config-rail" role="tablist" aria-label="现实触及设置" aria-orientation="vertical">
+            <button type="button" role="tab" id="reality-tab-access" aria-selected="true" aria-controls="reality-panel-access" class="active" data-reality-tab="access">${I('shield-check')}<span>授权与隐私</span></button>
+            <button type="button" role="tab" id="reality-tab-screen" aria-selected="false" aria-controls="reality-panel-screen" tabindex="-1" data-reality-tab="screen">${I('monitor-dot')}<span>屏幕与感知</span></button>
+            <button type="button" role="tab" id="reality-tab-devices" aria-selected="false" aria-controls="reality-panel-devices" tabindex="-1" data-reality-tab="devices">${I('camera')}<span>设备与终端</span></button>
+            <button type="button" role="tab" id="reality-tab-home" aria-selected="false" aria-controls="reality-panel-home" tabindex="-1" data-reality-tab="home">${I('house')}<span>米家与家居</span></button>
+          </nav>
+          <div class="reality-config-panes">
+            <section class="reality-config-pane" id="reality-panel-access" role="tabpanel" aria-labelledby="reality-tab-access" data-reality-panel="access">
+              <details class="perception-subpanel" id="perception-detail-device-access" open>
+                <summary><span><strong>对话能力授权</strong></span>${I('chevron-down')}</summary>
+                <div class="perception-subpanel-body">
                   <div data-screen-access class="reality-consent-workspace"></div>
                   <div data-screen-observation></div>
                   <div data-reality-access class="reality-consent-workspace"></div>
-                </section>
-                <div id="perceptionContactScreenWorkspace" class="perception-scope">${consoleLoading('正在读取设备观察契机…')}</div>
-              </div>
-            </details>
-          </section>
-          <section class="perception-config-zone" id="config-screen-extensions" tabindex="0">
-            <details class="perception-subpanel" id="perception-detail-providers" open>
-              <summary><span><strong>感知扩展</strong></span>${I('chevron-down')}</summary>
-              <div class="perception-subpanel-body"><div class="perception-provider-list perception-scope" id="perceptionProviderWorkspace">${perceptionProviders.map(renderPerceptionProvider).join('')}</div>
-                <details class="perception-subpanel perception-mihome-subpanel" id="perception-detail-mihome" hidden open>
-                  <summary><span><strong>米家设备状态</strong></span>${I('chevron-down')}</summary>
-                  <div class="perception-subpanel-body"><div id="mihomeStatusWorkspace" class="perception-mihome-workspace" aria-live="polite"></div></div>
-                </details>
-              </div>
-            </details>
-          </section>
+                </div>
+              </details>
+            </section>
+            <section class="reality-config-pane" id="reality-panel-screen" role="tabpanel" aria-labelledby="reality-tab-screen" data-reality-panel="screen" hidden>
+              <details class="perception-subpanel" id="perception-detail-screen" open>
+                <summary><span><strong>屏幕解读与观察契机</strong></span>${I('chevron-down')}</summary>
+                <div class="perception-subpanel-body">
+                  ${configEditors('screenConfigWorkspace',['screen'],'屏幕解读与日记素材')}
+                  <div id="perceptionContactScreenWorkspace" class="perception-scope">${consoleLoading('正在读取设备观察契机…')}</div>
+                </div>
+              </details>
+            </section>
+            <section class="reality-config-pane" id="reality-panel-devices" role="tabpanel" aria-labelledby="reality-tab-devices" data-reality-panel="devices" hidden>
+              <details class="perception-subpanel" id="perception-detail-providers" open>
+                <summary><span><strong>摄像头、音响与手机终端</strong></span>${I('chevron-down')}</summary>
+                <div class="perception-subpanel-body"><div class="perception-provider-list perception-scope" id="perceptionProviderWorkspace">${perceptionProviders.map(renderPerceptionProvider).join('')}</div></div>
+              </details>
+            </section>
+            <section class="reality-config-pane" id="reality-panel-home" role="tabpanel" aria-labelledby="reality-tab-home" data-reality-panel="home" hidden>
+              <details class="perception-subpanel perception-mihome-subpanel" id="perception-detail-mihome" open>
+                <summary><span><strong>米家设备状态</strong></span>${I('chevron-down')}</summary>
+                <div class="perception-subpanel-body"><div id="mihomeStatusWorkspace" class="perception-mihome-workspace" aria-live="polite"></div></div>
+              </details>
+            </section>
+          </div>
         </div>
       </section>
       <section class="perception-config-page" id="perception-page-external" role="tabpanel" aria-labelledby="perception-tab-external" data-perception-page="config-news" hidden>
@@ -3595,6 +3635,22 @@ function renderMemoryPageOriginal(){return consoleSections([
 function renderModelsPage(){return `<div class="models-management-page"><section id="modelWorkspace" class="console-section" aria-label="任务模型配置">${consoleLoading('正在读取任务模型配置…')}</section><section class="models-budget-section" aria-labelledby="models-budget-heading"><div><h2 id="models-budget-heading">后台任务预算</h2><p>达到限额后暂停启动新的可选任务；已运行的任务会完成，交互回复不受影响。</p></div>${configEditors('budgetConfigWorkspace',['budget'],'后台任务预算')}</section></div>`;}
 /* 治理与维护 = 账号与会话运行状态 + 备份与还原。风控与用量那两块本来就没有可写端点，
    旧版各放一张 boundaryCard 解释「为什么没有开关」；按「接不上就删」直接去掉。 */
+/* 手机连接：配对与网关设置单独一页。
+   字段仍由现实触及的 mobile 分组提供，这里只挂那一组，避免和感知页出现两份表单。 */
+function renderMobileConnection(){
+  return `<div class="mobile-connection-page">
+    <section class="mobile-connection-guide" aria-labelledby="mobileConnectionGuideTitle">
+      <h2 id="mobileConnectionGuideTitle">手机陪伴终端怎么连</h2>
+      <ol>
+        <li>打开下面的「启用移动端网关」，填好监听地址与端口；同一局域网填本机内网地址。</li>
+        <li>设置「移动端配对令牌」，并把「绑定的 AstrBot 用户 ID」填成要接收消息的那个用户。</li>
+        <li>手机端填同一组地址与令牌完成配对；位置、屏幕共享与身体数据再按各自开关上报。</li>
+      </ol>
+      <p>令牌只在保存时写入，页面不回显；换令牌后手机端需要重新配对。</p>
+    </section>
+    <section id="mobileConnectionWorkspace" class="mobile-connection-settings" aria-label="手机连接设置">${consoleLoading('正在读取手机连接设置…')}</section>
+  </div>`;
+}
 function renderMaintenancePageOriginal(){
   if(maintenancePane==='patrol')return `<div class="maintenance-page"><nav class="maint-subnav" aria-label="治理与维护二级导航"><button type="button" data-go="manage" data-manage="maintenance">返回运行诊断</button><button type="button" aria-current="page">每日巡视</button></nav><section id="roleStateWorkspace" data-state-section="patrol" aria-label="每日巡视维护设置"></section></div>`;
   return `<div class="maintenance-page"><div class="maintenance-settings-entry"><button class="button small" type="button" data-maint-open-patrol>${I('clipboard-check')}每日巡视设置</button></div><section id="maintenanceWorkspace" aria-label="运行诊断与排障"></section></div>`;
@@ -3619,7 +3675,11 @@ function configEditors(id,kinds,title,note,endpoint='',scoped=false){
   const hint = (text,retry) => `<p class="config-editors-hint">${I('info')}<span>${text}</span></p>${retry?'<div class="dialog-actions"><button class="button small" type="button" data-workspace-retry>重新读取</button></div>':''}`;
   const current=product.role?.();
   if(!scoped&&(typeof endpoint!=='string'||!endpoint))endpoint=roleConfigApi(current);
-  if(typeof endpoint!=='string'||!endpoint.startsWith('/astrbot_plugin_private_companion/'))return hint(`先在账号与会话中完成 Bot 账号与人格映射，${title}才会出现。`,true);
+  if(typeof endpoint!=='string'||!endpoint.startsWith('/astrbot_plugin_private_companion/')){
+    /* 读不到就说明卡在哪一步：桥没到、目标没选、角色没映射、还是窗口没有该路由。 */
+    const reason=product.workspaceHint?.()||`先在账号与会话中完成 Bot 账号与人格映射，${title}才会出现。`;
+    return hint(reason,true);
+  }
   return `<section id="${id}" class="config-editors" data-config-api="${escapeHTML(endpoint)}" aria-label="${title}">${consoleLoading('正在读取设置…')}</section>`;
 }
 /* 目标未选时的整页引导：替代让每个挂载点各渲染一遍自己的空态。
@@ -3677,6 +3737,7 @@ function renderConfigEditors(){
   if($('#busyGateWorkspace'))configEditorMounts.push(mountConfigEditor('busyGateWorkspace',['busy_gate']));
   if($('#recallConfigWorkspace'))configEditorMounts.push(mountConfigEditor('recallConfigWorkspace',['recall']));
   if($('#screenConfigWorkspace'))configEditorMounts.push(mountConfigEditor('screenConfigWorkspace',['screen']));
+  if($('#webUnderstandingWorkspace'))configEditorMounts.push(mountConfigEditor('webUnderstandingWorkspace',['web_understanding']));
   if($('#perceptionDatesWorkspace'))configEditorMounts.push(mountConfigEditor('perceptionDatesWorkspace',['proactive.contact'],{
     'proactive.contact':{sectionIds:['meal','date'],title:'重要日子与饭点',note:'日期和饭点只提供联系素材，是否主动联系仍受主动联系总开关与免打扰规则约束。'}
   }));
@@ -3828,6 +3889,7 @@ function renderUnderstanding(){
       <button type="button" role="tab" aria-selected="false" data-understanding-tab="image">${I('image')}图片理解</button>
       <button type="button" role="tab" aria-selected="false" data-understanding-tab="video">${I('video')}视频理解</button>
       <button type="button" role="tab" aria-selected="false" data-understanding-tab="file">${I('file-text')}文件理解</button>
+      <button type="button" role="tab" aria-selected="false" data-understanding-tab="web">${I('globe')}网页理解</button>
       <button type="button" role="tab" aria-selected="false" data-understanding-tab="forwards">${I('corner-up-right')}合并转发</button>
       <span class="understanding-tabs-scope">窗口配置 · 角色许可</span>
     </nav>
@@ -3876,6 +3938,10 @@ function renderUnderstanding(){
     <section class="understanding-panel" role="tabpanel" data-understanding-panel="file" hidden>
       <div class="understanding-stats" data-understanding-stats="file" aria-live="polite"></div>
       <div data-understanding-editor-slot="file"></div>
+    </section>
+    <section class="understanding-panel" role="tabpanel" data-understanding-panel="web" hidden>
+      <div class="understanding-stats" data-understanding-stats="web" aria-live="polite"></div>
+      <div data-understanding-editor-slot="web">${configEditors('webUnderstandingWorkspace',['web_understanding'],'网页理解')}</div>
     </section>
     <section class="understanding-panel" role="tabpanel" data-understanding-panel="forwards" hidden>
       <div class="understanding-stats" data-understanding-stats="forwards" aria-live="polite"></div>
@@ -4794,6 +4860,7 @@ document.addEventListener('click',event=>{
   }
   if(el.dataset.configSection){document.getElementById('config-'+el.dataset.configSection)?.scrollIntoView({behavior:state.reduceMotion?'instant':'smooth',block:'start'});return;}
   if(el.dataset.perceptionSection){document.getElementById('perception-'+el.dataset.perceptionSection)?.scrollIntoView({behavior:state.reduceMotion?'instant':'smooth',block:'start'});return;}
+  if(el.dataset.realityTab){selectRealitySection(el.dataset.realityTab);return;}
   if(el.dataset.perceptionFocus || el.dataset.perceptionTab){
     const id=el.dataset.perceptionFocus||el.dataset.perceptionTab;
     activatePerceptionTab(id,{scroll:true});return;

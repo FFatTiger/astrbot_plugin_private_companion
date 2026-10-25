@@ -42,6 +42,7 @@ from .management_identity import dashboard_operator
 from .settings import HostControlError, HostSettings
 from .voice import NativeVoiceReply
 from .weather_settings import configured_weather_ports
+from .files.parsing import parser_availability
 from .service_balance import configured_balance_port
 from .news import configured_news_port
 from .solar_terms import configured_solar_term_port
@@ -488,6 +489,24 @@ class AstrBotStagingController:
             await self.native_extensions.aclose()
             raise TaskError(loaded.failure.code, loaded.failure.reason)
         self.session = loaded.unwrap()
+        # 关键词材料：服务余额、当前模型与链接正文；读不到时各自判定不可用，登记本身不拦启动。
+        try:
+            from .service_balance import balance_keyword_material
+            from .model_route_material import model_route_keyword_material
+            from .web_read_material import web_read_keyword_material
+            from companion_v2.conversation.keyword_materials import KeywordMaterials
+            self.session.application.keyword_materials = KeywordMaterials((
+                balance_keyword_material(self.session.application),
+                model_route_keyword_material(self.session.application, self.context),
+                web_read_keyword_material(self.session.application),
+            ))
+        except Exception as error:
+            logger.warning("[CompanionV2] 关键词材料登记失败 error_type=%s", type(error).__name__)
+        try:
+            from .files.parsing import report_parser_availability
+            report_parser_availability(logger)
+        except Exception as error:
+            logger.warning("[CompanionV2] 文档解析组件自检失败 error_type=%s", type(error).__name__)
         from .knowledge_sources import attach_official_knowledge
         attach_official_knowledge(self.session.application, self.context)
         self.session.bridge.forward_intake = self.settings.forward_intake
@@ -1105,6 +1124,7 @@ class AstrBotStagingController:
             "model_request_sent_by_status": False,
             "platform_message_sent_by_status": False,
             "delivery_authorization": delivery_authorization,
+            "parser_availability": parser_availability(),
         }
 
     def register_routes(self) -> None:

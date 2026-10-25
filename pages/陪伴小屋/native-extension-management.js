@@ -85,9 +85,13 @@ window.CompanionNativeExtensionManagement = (() => {
       if (login.qr_available && login.qr_image) this.lastQr = qr;
       if (!login.qr_available || logged) this.lastQr = "";
       const qrMarkup = available && login.qr_available && !logged && qr ? `<div class="native-management-qr"><img src="${escape(qr)}" alt="米家登录二维码" width="180" height="180"><p>用米家 App 扫描，并在手机上确认登录。</p></div>` : "";
+      const loginDetail = !logged && login.status === "error" && typeof login.detail === "string" ? login.detail.trim() : "";
+      const loginDetailMarkup = loginDetail ? `<p class="native-management-login-detail">登录诊断：${escape(loginDetail)}</p>` : "";
+      const qrNoticeMarkup = available && !logged && login.status === "waiting_scan" && !login.qr_available
+        ? `<p class="native-management-login-detail">二维码图片未能显示或已过期，请重新发起扫码登录。</p>` : "";
       const devices = Array.isArray(mi.devices) ? mi.devices : [];
       const devicesMarkup = devices.length ? `<div class="native-management-table"><table><thead><tr><th>设备</th><th>位置</th><th>状态</th></tr></thead><tbody>${devices.map(device => `<tr><td>${escape(device.name || device.alias || device.did || "设备")}<small>${escape(device.model || "")}</small></td><td>${escape([device.home_name, device.room_name].filter(Boolean).join(" · ") || device.room || "—")}</td><td>${device.online === true ? "在线" : device.online === false ? "离线" : "尚未读取"}</td></tr>`).join("")}</tbody></table></div>` : `<p class="native-management-muted">${!available ? "米家就绪后可登录并同步设备。" : logged ? "设备目录还是空的，点击同步设备读取。" : "登录后可以同步设备。"}</p>`;
-      return `<div class="native-management"><details open><summary>米家账号与设备 <span>${escape(state)}</span></summary><div class="native-management-body"><div class="native-management-actions">${this.button("mihome_start_login", logged ? "重新扫码登录" : "扫码登录")}${this.button("mihome_login_status")}${this.button("mihome_sync_devices", undefined, logged ? "" : "data-native-requires-login")}${this.button("mihome_logout", undefined, logged ? "" : "data-native-requires-login")}</div>${qrMarkup}<p class="native-management-muted">${escape(!available ? mi.reason || "米家管理状态暂不可读取，请刷新核对。" : login.message || auth.last_login_error || "")}</p>${devicesMarkup}${mi.snapshot_at ? `<small class="native-management-muted">最近同步：${escape(mi.snapshot_at)}</small>` : ""}</div></details>${this.camera(data)}${this.audio(data)}<div class="native-management-bottom"><button class="button small" type="button" data-native-management-refresh>刷新管理状态</button><p data-native-action-notice role="status" aria-live="polite"></p></div></div>`;
+      return `<div class="native-management"><details open><summary>米家账号与设备 <span>${escape(state)}</span></summary><div class="native-management-body"><div class="native-management-actions">${this.button("mihome_start_login", logged ? "重新扫码登录" : "扫码登录")}${this.button("mihome_login_status")}${this.button("mihome_sync_devices", undefined, logged ? "" : "data-native-requires-login")}${this.button("mihome_logout", undefined, logged ? "" : "data-native-requires-login")}</div>${qrMarkup}<p class="native-management-muted">${escape(!available ? mi.reason || "米家管理状态暂不可读取，请刷新核对。" : login.message || auth.last_login_error || "")}</p>${loginDetailMarkup}${qrNoticeMarkup}${devicesMarkup}${mi.snapshot_at ? `<small class="native-management-muted">最近同步：${escape(mi.snapshot_at)}</small>` : ""}</div></details>${this.camera(data)}${this.audio(data)}<div class="native-management-bottom"><button class="button small" type="button" data-native-management-refresh>刷新管理状态</button><p data-native-action-notice role="status" aria-live="polite"></p></div></div>`;
     }
     camera(data) {
       const users = Array.isArray(data.users) ? data.users : [], camera = data.camera || {};
@@ -276,7 +280,7 @@ window.CompanionNativeExtensionManagement = (() => {
         this.render();
         if (record.result?.confirmation_required) this.notice(record.result.prompt || "请由本人在私聊中完成音频授权确认。");
         else if (action === "request_auth" && record.management.authenticated !== true) this.notice("授权还未完成。请到 VTube Studio 弹窗中点“允许”，再重新连接核对。", true);
-        else if (action === "mihome_start_login") { this.reads = 0; this.notice("登录已发起，请用米家 App 扫码确认。"); this.scheduleRead(); }
+        else if (action === "mihome_start_login") { this.reads = 0; this.notice("登录已发起，正在生成二维码；显示后用米家 App 扫描并确认。"); this.scheduleRead(); }
         else if (action === "test_camera") this.notice(this.cameraTestResult.message, this.cameraTestResult.status === "error");
         else this.notice(`${actionNames[action] || "操作"}已完成。`);
       } catch (error) {

@@ -330,6 +330,13 @@ class CalendarPlanningTests(StateFixture, unittest.IsolatedAsyncioTestCase):
                 "important_date_lookahead_days": 2,
                 "quiet_timezone": "Asia/Shanghai",
             }}).unwrap()
+        from companion_v2.relationships import anniversaries
+        anniversaries.remember(app.runtime, context, {
+            "label": "第一次一起看星星", "reason": "用户原话明确说这是第一次一起看星星。",
+            "confidence": 0.91, "evidence_handle": "s1",
+            "occurred_at": self.clock.now().isoformat(), "month": target_day.month,
+            "day": target_day.day, "timezone": "Asia/Shanghai",
+        }, source_run_id="important-date-context", at=self.clock.now())
         source = self.source(app, context, "important-date-context")
         event = InboundConversationEvent("important-date-context", context.actor.principal, context.scope,
                                          source, "text", "important-date-context", self.clock.now())
@@ -340,7 +347,11 @@ class CalendarPlanningTests(StateFixture, unittest.IsolatedAsyncioTestCase):
         projection = json.loads(material.payload)
         self.assertEqual(projection["entries"], [{"label": "相识纪念日", "date": target_day.isoformat(),
                                                   "days_until": 2, "calendar": "gregorian"}])
+        self.assertEqual(projection["auto_anniversaries"], [{
+            "basis": "auto_relationship_anniversary", "label": "第一次一起看星星",
+            "date": target_day.isoformat(), "days_until": 2, "calendar": "gregorian"}])
         self.assertIn("不证明用户与日期的关系", request.instruction)
+        self.assertIn("自动纪念日", request.instruction)
 
     async def plan(self, app, context, *, slot="manual-day", mode="daily", occurrence=None,
                    manual=False, refresh=False):

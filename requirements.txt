@@ -11,6 +11,14 @@ cryptography>=42
 lunarcalendar>=0.0.9
 # Bounded execution for administrator-configured presentation cleanup patterns.
 regex>=2024.11.6
+# Attachment text extraction (astrbot_host/files/parsing.py). These are imported
+# lazily per suffix, so a missing one only breaks that format — and until 7.0.1
+# none of them were declared, which meant PDF and PPTX failed on a clean install
+# even though the feature was switched on.
+PyMuPDF>=1.24
+python-docx>=1.1
+openpyxl>=3.1
+python-pptx>=0.6.23
 # Local Reality audio device enumeration, decoding, and playback.
 numpy>=1.26
 sounddevice>=0.5

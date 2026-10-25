@@ -452,6 +452,36 @@ window.CompanionProduct = (() => {
     return value;
   }
 
+  /* 工作区空态要说得准：桥没到、目录没读、还没有窗口目标、有目标但没角色、
+     有角色但没有模型路由——这五种情况的下一步完全不同，用一句「请选择已关联
+     角色的私聊窗口」盖住，用户就会以为映射白做了（4.29 上就是这么报的）。 */
+  function workspaceState() {
+    if (!bridgeReady || !bridge) return {code:"bridge"};
+    if (!catalog) return {code:"catalog"};
+    const targets = catalog.targets || [];
+    if (!targets.length) return {code:"targets"};
+    const current = role();
+    if (!current) return {code:"role", targets:targets.length};
+    if (typeof current.model_api !== "string" || !current.model_api) {
+      return {code:"model_api", targets:targets.length};
+    }
+    if (!catalog.operator_id) return {code:"operator", targets:targets.length};
+    return {code:"ready", targets:targets.length};
+  }
+  const workspaceMessages = {
+    bridge: "正在连接 AstrBot 管理界面…",
+    catalog: "正在读取账号与会话…",
+    targets: "还没有选定窗口目标：到「账号与会话」勾选要交给插件处理的窗口并保存目标。",
+    role: "这个账号下还没有已映射的角色：到「账号与会话」保存角色映射。",
+    model_api: "当前窗口没有模型路由：回到「账号与会话」重新保存角色映射后再读取。",
+    operator: "Dashboard 身份还没就绪，请重新登录管理界面后再打开。",
+  };
+  function workspaceHint() {
+    const state = workspaceState();
+    return state.code === "ready" ? "" : (workspaceMessages[state.code] || "工作区暂时读不到，请重新读取。");
+  }
+  const workspaceDiagnosis = () => ({...workspaceState(), hint: workspaceHint(),
+    targets: (catalog?.targets || []).length});
   function chooseDefault() {
     const choices = roleChoices();
     const choice = choices.find(item => item.role.role_id === selected.role_id) || choices[0];
@@ -1177,6 +1207,7 @@ window.CompanionProduct = (() => {
     provider:id=>manifest?.providers?.find(p=>p.capability_id===id),
     capability:id=>manifest?.extensions?.find(p=>p.capability_id===id)||manifest?.providers?.find(p=>p.capability_id===id),
     statusLabel:id=>labels[id]||"状态未知",unavailable,
+    workspaceDiagnosis,workspaceHint,
     when,lifeActivities,lifeJournals,stateValues,stateLabel,unavailableReason,
     unavailableCode:name=>failureCodes[name]||"",
     /* 各页共用一个「等桥注进来」的实现。桥的注入晚于脚本执行是正常时序，

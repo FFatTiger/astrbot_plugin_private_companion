@@ -46,7 +46,15 @@ def remove_v64(connection):
     connection.execute("DELETE FROM schema_migrations WHERE migration_id = 'companion-v2.storage.v63-to-v64'")
 
 
+def remove_v66(connection):
+    connection.execute('DROP INDEX IF EXISTS "relationship_anniversary_active_day_idx"')
+    connection.execute('DROP INDEX IF EXISTS "relationship_anniversary_active_idx"')
+    connection.execute('DROP TABLE IF EXISTS "relationship_anniversaries"')
+    connection.execute("DELETE FROM schema_migrations WHERE migration_id = 'companion-v2.storage.v65-to-v66'")
+
+
 def remove_v65(connection):
+    remove_v66(connection)
     columns = {row[1] for row in connection.execute('PRAGMA table_info("outbox")')}
     if "receipt_ref" in columns:
         connection.execute('ALTER TABLE outbox DROP COLUMN "receipt_ref"')

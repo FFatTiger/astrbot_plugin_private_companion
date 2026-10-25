@@ -119,7 +119,7 @@ _MANAGEMENT_PAGES = {
     "manage_host": "陪伴小屋 → 账号与会话或资料与维护",
     "manage_image": "陪伴小屋 → 生图与图片素材",
     "manage_native": "陪伴小屋 → 对应内置能力设置",
-    "manage_dates": "陪伴小屋 → 主动与联系 → 纪念日",
+    "manage_dates": "陪伴小屋 → 感知设置 → 重要日子与饭点（生日和纪念日自动读取）",
     "manage_diagnostics": "陪伴小屋 → 治理与维护 → 诊断与配置",
     "manage_efficiency": "陪伴小屋 → 治理与维护 → 近期回复效率",
     "manage_hdsi": "陪伴小屋 → 状态维护 → 日程模式",
@@ -131,7 +131,8 @@ _HELP = (
     "私聊：陪伴 状态、能力列表、主动判定；陪伴 日程/查看日程、日记、梦境、记忆 <线索>、"
     "长期记忆 <线索>、片段 <线索>、答疑 <问题>；待审建议用“陪伴 答疑确认 <编号>”或“陪伴 答疑取消 <编号>”；"
     "日记、梦境、画像；生成日程、刷新日程、重新生成日程；"
-    "陪伴画图 <描述>、陪伴合照 <修改要求>；重要日期用 陪伴 日期列表、日期添加 <名称> <日期>、日期删除 <名称>。\n"
+    "陪伴画图 <描述>、陪伴合照 <修改要求>；重要日期用 陪伴 日期列表、日期添加 <名称> <日期>、日期删除 <名称>；"
+    "日期列表也会列出每日反思自动记下的互动纪念日。\n"
     "群聊：陪伴群 状态、话题、黑话 <词>、片段 <线索>、关闭LLM、开启LLM、LLM状态。\n"
     "查询依赖本轮实际授权工具；其他配置、权限、清理与重置请在陪伴小屋对应页面操作。"
 )
@@ -241,8 +242,8 @@ def _base_instruction(command: FunctionalCommand | None) -> str:
                 "「陪伴小屋 → 关系与记忆」入口，不要凭标题直接断言已删。")
     if intent in {"dates_list", "dates_add", "dates_remove"}:
         return ("本轮重要日期由程序读取或写入并附独立回执。若没有回执，说明本条没有更改日期；"
-                "有回执时只转述回执里的名称、日期与结果，不把日历计划或出生资料当成纪念日，"
-                "也不声称主动问候开关已打开。")
+                "有回执时只转述回执里的名称、日期与结果；自动纪念日以日期列表或删除回执为准，"
+                "不把日历计划或出生资料当成纪念日，也不声称主动问候开关已打开。")
     if intent == "voice_language":
         return ("本轮语音语种由程序写入并附独立回执。没有回执就说明没有更改；有回执时只转述设定与"
                 "「语音回复开关是否开启」，不得声称已经用新语种说过话，也不把本轮普通回复当成语音。")
@@ -461,6 +462,7 @@ def _execute_important_dates(command, application, context):
     from companion_v2.execution.models import digest
     from companion_v2.foundation.refs import OperationRef, VersionRef
     from companion_v2.proactive.configuration import GROUP, target_for
+    from companion_v2.relationships import anniversaries
 
     if command.surface != "private":
         return "未执行：重要日期只在私聊里维护。"
@@ -477,10 +479,20 @@ def _execute_important_dates(command, application, context):
         rows = _important_date_rows(snapshot.values.get(GROUP + ".important_dates", "[]"))
     except (ValueError, TypeError):
         return "未执行：现有重要日期记录无法解析，请先到陪伴小屋核对。"
+    runtime = getattr(application, "runtime", None)
+    auto_rows = ()
+    if runtime is not None:
+        try:
+            auto_rows = anniversaries.list_active(runtime, context)
+        except Exception:
+            auto_rows = ()
     if command.intent == "dates_list":
-        if not rows:
+        values = [_important_date_text(row) for row in rows]
+        values.extend(f"{row['label']}（{row['month']}月{row['day']}日，每日反思自动记下）"
+                      for row in auto_rows)
+        if not values:
             return "当前没有记录重要日期。"
-        return "当前记录的重要日期：" + "；".join(_important_date_text(row) for row in rows) + "。"
+        return "当前记录的重要日期：" + "；".join(values) + "。"
     if command.intent == "dates_add":
         try:
             label, month, day, lunar = parse_important_date(command.argument)
@@ -498,6 +510,14 @@ def _execute_important_dates(command, application, context):
         try:
             rows, removed = _remove_important_date(rows, command.argument)
         except ValueError as error:
+            auto_name = " ".join((command.argument or "").split())
+            if runtime is not None and auto_name:
+                try:
+                    auto_removed = anniversaries.retract_by_label(runtime, context, auto_name)
+                except Exception:
+                    auto_removed = ()
+                if auto_removed:
+                    return f"已删除：每日反思记下的互动纪念日「{auto_removed[0]}」。"
             return f"未删除：{error}"
         action = "删除"
     identifier = "chat-important-dates-" + digest(

@@ -332,7 +332,16 @@ class SetupWebAPI:
                         finished_at=datetime.now(timezone.utc).isoformat(), error_code="setup_test_interrupted")
             document = self._status_document()
             from .upgrade_setup import UpgradeSetup
-            document["upgrade"], _ = await UpgradeSetup(self.controller).plan()
+            try:
+                document["upgrade"], _ = await UpgradeSetup(self.controller).plan()
+            except (TaskError, ValueError, OSError, UnicodeError) as error:
+                # 升级计划读不出来不该把整页设置进度一起弄没：页面还能显示绑定、
+                # 模型和步骤，只把这一块标成不可用，并把原因留在日志里。
+                logger.warning("[CompanionV2] 升级计划读取失败 error_type=%s code=%s",
+                               type(error).__name__, getattr(error, "code", ""))
+                document["upgrade"] = {"present": False, "configured": False, "can_prepare": False,
+                                       "unavailable": True,
+                                       "reason": getattr(error, "code", None) or type(error).__name__}
             names = display_names(self.controller)
             if document["binding"].get("participant_id"):
                 document["binding"] = (await names.targets([document["binding"]]))[0]
@@ -340,7 +349,9 @@ class SetupWebAPI:
             return self._response(Outcome.success(document))
         except TaskError as error:
             return self._error(error.code, str(error))
-        except (ValueError, OSError, UnicodeError):
+        except (ValueError, OSError, UnicodeError) as error:
+            logger.warning("[CompanionV2] 设置进度读取失败 error_type=%s detail=%s",
+                           type(error).__name__, str(error)[:200])
             return self._error("setup_progress_unavailable", "the saved setup progress cannot be read")
 
     async def prepare_upgrade(self):

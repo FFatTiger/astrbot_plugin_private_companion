@@ -236,6 +236,15 @@ class LocalDateContextTests(unittest.TestCase):
              "days_until": 1, "calendar": "gregorian"},
         ])
 
+    def test_anniversary_wording_stays_owned_and_lookahead_covers_configured_window(self):
+        at = datetime(2026, 10, 23, 8, 0, tzinfo=timezone.utc)
+        projected = project_personal_dates(
+            at, "Asia/Shanghai", user_birthday="相识纪念日 10月27日", lookahead_days=30)
+        self.assertEqual(projected["entries"], [{"subject": "user", "label": "对方纪念日",
+            "date": "2026-10-27", "days_until": 4, "calendar": "gregorian"}])
+        with self.assertRaises(ValueError):
+            project_personal_dates(at, "Asia/Shanghai", user_birthday="10月27日", lookahead_days=31)
+
     def test_lunar_personal_birthday_and_ambiguous_text(self):
         at = datetime(2026, 10, 23, 8, 0, tzinfo=timezone.utc)
         with patch("companion_v2.conversation.date_context.lunar_date_parts",

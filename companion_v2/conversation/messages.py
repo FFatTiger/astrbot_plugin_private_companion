@@ -586,7 +586,15 @@ class ConversationMessages:
                 ContributionState.READY, calendar_payload))
             if important_date_settings is not None:
                 date_context = project_important_dates(calendar_at, important_date_settings)
-                if date_context["entries"]:
+                try:
+                    from companion_v2.relationships import anniversaries
+                    date_context["auto_anniversaries"] = list(anniversaries.upcoming(
+                        self.runtime, context, calendar_at,
+                        timezone_name=date_context["timezone"],
+                        lookahead_days=important_date_settings["lookahead_days"]))
+                except Exception:
+                    date_context["auto_anniversaries"] = []
+                if date_context["entries"] or date_context["auto_anniversaries"]:
                     contributions.append(ContextContribution(
                         "important-dates:" + date_context["timezone"], "conversation.calendar",
                         "upcoming_important_dates", ContributionState.READY,

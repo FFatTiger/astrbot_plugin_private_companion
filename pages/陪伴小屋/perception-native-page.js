@@ -109,7 +109,8 @@ window.CompanionNativePerceptionPage = (() => {
   function publicSnapshot() {
     if (!status) return {ready:false, loading:!notices.load, error:notices.load || ""};
     const environment = status.environment.settings || {}, model = status.model.settings || {};
-    const contact = status.contact?.settings || {};
+    const contactStatus = status.contact || {};
+    const contact = contactStatus.settings || {};
     let locationName = "";
     try { locationName = JSON.parse(environment.planning_weather_location || "{}").name || ""; } catch (_) {}
     return {
@@ -123,9 +124,11 @@ window.CompanionNativePerceptionPage = (() => {
         almanacEnabled:model.almanac_enabled === true, platformEnabled:model.platform_enabled === true,
         routeEnabled:model.model_route_enabled === true, modalitiesEnabled:model.configured_modalities_enabled === true},
       contact:{dateCheckinEnabled:contact.date_checkin_enabled === true,
-        dates:typeof contact.important_dates === "string" ? contact.important_dates : "[]",
-        lookaheadDays:Number.isInteger(contact.important_date_lookahead_days)
-          ? contact.important_date_lookahead_days : 0,
+        dates:typeof contactStatus.dates === "string" ? contactStatus.dates
+          : typeof contact.important_dates === "string" ? contact.important_dates : "[]",
+        lookaheadDays:Number.isInteger(contactStatus.lookaheadDays)
+          ? contactStatus.lookaheadDays : Number.isInteger(contact.important_date_lookahead_days)
+            ? contact.important_date_lookahead_days : 0,
         timezone:contact.quiet_timezone || "",
         balanceAwarenessEnabled:contact.balance_awareness_enabled === true,
         automaticAllowed:status.contact?.effective?.automatic_allowed === true},

@@ -106,6 +106,8 @@ from companion_v2.conversation.relay_settings import (RelayConfigurationOwner, R
     configuration_fields as relay_configuration_fields)
 from companion_v2.conversation.recall_settings import (RecallConfigurationOwner, RecallSettings,
     configuration_fields as recall_configuration_fields)
+from companion_v2.conversation.web_understanding import (WebUnderstandingConfigurationOwner,
+    WebUnderstandingSettings, configuration_fields as web_configuration_fields)
 from companion_v2.library.configuration import (LibraryConfigurationOwner, LibrarySettings,
     configuration_fields as library_configuration_fields)
 from companion_v2.library.provider import (CATALOG_CAPABILITY as LIBRARY_CATALOG_CAPABILITY,
@@ -209,6 +211,9 @@ class CompanionApplication:
             raise ValueError("external tools need capacity for both parent and child")
         self.runtime, self.owns_runtime = runtime, owns_runtime
         self.now = now or (lambda: datetime.now(timezone.utc))
+        # 关键词材料（如服务余额）只有登记项自己需要时才会去取；端口留着由它按需调用。
+        self.balance_port = balance_port
+        self.keyword_materials = None
         self.role_attention = RoleAttention()
         self.external = external
         self.semantics = None
@@ -236,6 +241,7 @@ class CompanionApplication:
             *busy_gate_configuration_fields(), *group_participation_configuration_fields(),
             *knowledge_configuration_fields(), *budget_configuration_fields(),
             *screen_configuration_fields(), *recall_configuration_fields(),
+            *web_configuration_fields(),
             *library_configuration_fields(),
             *reference_configuration_fields(),
             *wardrobe_configuration_fields(),
@@ -260,6 +266,7 @@ class CompanionApplication:
                     ReactionConfigurationOwner(runtime), BusyGateConfigurationOwner(runtime),
                     GroupParticipationConfigurationOwner(runtime), KnowledgeConfigurationOwner(runtime),
                     ScreenConfigurationOwner(runtime), RecallConfigurationOwner(runtime),
+                    WebUnderstandingConfigurationOwner(runtime),
                     RelayConfigurationOwner(runtime),
                     LibraryConfigurationOwner(runtime),
                     reference_configuration_owner,

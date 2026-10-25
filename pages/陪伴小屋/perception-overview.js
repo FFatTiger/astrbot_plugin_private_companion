@@ -8,7 +8,7 @@ window.CompanionPerceptionOverviewPage = (() => {
   let root = null, scope = "", snapshot = null, runtimeSnapshot = null, runtimeState = "loading";
   let modelStatus = null, modelState = "loading", voiceStatus = null, voiceState = "loading";
   let imageStatus = null, imageState = "loading", semanticStatus = null, semanticState = "loading";
-  let recallStatus = null, recallState = "loading", mihomeStatus = null, mihomeState = "loading";
+  let recallStatus = null, recallState = "loading", recallError = "", mihomeStatus = null, mihomeState = "loading";
   let balanceConfig = null, balanceDraft = null, balanceExpanded = false, balanceConfigLoading = false;
   let balanceWorkspace = null, balanceMarkup = "", selectedDestination = "", selectedModelTab = "";
   let balanceStatus = null, balanceStatusLoading = false, balanceStatusRefreshQueued = false, balanceStatusError = "";
@@ -200,7 +200,18 @@ window.CompanionPerceptionOverviewPage = (() => {
     try { today = localParts(now, timezone); } catch (_) { return []; }
     const todayNumber = dayNumber(today), found = [];
     for (const row of rows) {
-      if (!row || typeof row.label !== "string" || !Number.isInteger(row.month) || !Number.isInteger(row.day)) continue;
+      if (!row || typeof row.label !== "string") continue;
+      /* The runtime already projects profile dates in the local timezone.
+         Prefer its authoritative date/days_until pair; keep the legacy
+         month/day calculation for older bridges and cached snapshots. */
+      if (typeof row.date === "string" && Number.isInteger(row.days_until)) {
+        if (row.days_until >= 0 && row.days_until <= lookahead) {
+          found.push({label: row.label, days: row.days_until,
+                      calendar: row.calendar === "lunar" ? "lunar" : "gregorian"});
+        }
+        continue;
+      }
+      if (!Number.isInteger(row.month) || !Number.isInteger(row.day)) continue;
       if (row.calendar === "lunar") {
         let formatterReady = true;
         try { chineseParts(now, timezone); } catch (_) { formatterReady = false; }
@@ -629,7 +640,12 @@ window.CompanionPerceptionOverviewPage = (() => {
         : recalls.length ? `${recalls.length} 条近期记录` : "近期没有可读记录";
     const recallDetail = recalls[0]
       ? `${recalls[0].local_time || ageLabel(recalls[0].withdrawn_at)} · ${String(recalls[0].text || "").slice(0, 72)}`
-      : recallState === "error" ? "检查当前会话授权与撤回转录开关。"
+      : recallState === "error" ? (
+        recallError === "core_access_required"
+          ? "仅核心管理员可读这个角色窗口的撤回记录；当前 Dashboard 账号权限不足。"
+          : recallError === "recall_scope_denied"
+            ? "这个角色窗口还没解析出可读范围；确认它已绑定会话后再试。"
+            : `读取失败（${recallError || "原因未知"}）· 检查当前角色窗口的授权与撤回转录开关。`)
         : recallStatus?.enabled === false ? "打开下方撤回转录设置后，才会显示授权范围内的记录。"
           : "仅显示当前会话授权范围内的记录，不会重新进入对话。";
     const configuredDevices = (mihomeStatus?.devices || []).filter(item => item?.configured === true || item?.aliases?.length);
@@ -755,7 +771,7 @@ window.CompanionPerceptionOverviewPage = (() => {
     channel("device-recalls", "external", {tab:"config-recall:perception-detail-recalls", icon:"message-square-quote", title:"撤回记录",
       value:recallValue, detail:recallDetail,
       state:recallState === "error" || recallState === "loading" ? "pending" : recalls.length ? "ready" : "off",
-      tag:recallState === "error" ? "读取失败" : recallState === "loading" ? "读取中" : recalls.length ? "只读记录" : "无记录"});
+      tag:recallState === "error" ? "读取失败" : recallState === "loading" ? "读取中" : recallStatus?.enabled === false ? "未启用" : recalls.length ? "只读记录" : "无记录"});
     if (mihomeEnabled) channel("device-mihome", "devices", {tab:"config-screen:perception-detail-mihome", icon:"plug-zap", title:"米家设备",
       value:mihomeSummary,
       detail:configuredDevices.slice(0, 3).map(item => `${item.name || item.aliases?.[0] || "设备"} ${item.online === true ? "在线" : item.online === false ? "离线" : "状态未知"}`).join(" · ")
@@ -864,7 +880,7 @@ window.CompanionPerceptionOverviewPage = (() => {
           </span>
         </button>
         ${calendarView?.detail ? `<button type="button" class="perception-wx-calendar" ${destinationAttrs(tabCalendar)}>${esc(calendarView.detail)}</button>` : ""}
-        <button type="button" class="perception-wx-events" ${destinationAttrs("config-environment:perception-detail-important-days")}>${icon("calendar-heart")}<span>${events.length ? events.map(event => `${esc(event.label)} · ${event.days === 0 ? "今天" : event.days === 1 ? "明天" : `${event.days} 天后`}`).join("；") : "配置重要日子与饭点"}</span></button>
+        <button type="button" class="perception-wx-events" ${destinationAttrs("config-environment:perception-detail-important-days")}>${icon("calendar-heart")}<span>${events.length ? events.map(event => `${esc(event.label)} · ${event.days === 0 ? "今天" : event.days === 1 ? "明天" : `${event.days} 天后`}`).join("；") : "暂无近期生日与纪念日"}</span></button>
       </div>`;
     })();
     const boardBodyMarkup = spec => {
@@ -924,7 +940,7 @@ window.CompanionPerceptionOverviewPage = (() => {
     const recallWorkspace = page?.querySelector("#perceptionRecallWorkspace");
     if (recallWorkspace) recallWorkspace.innerHTML = recallState === "loading"
       ? `<p class="memory-notice" role="status">正在读取当前窗口的撤回记录…</p>`
-      : recallState === "error" ? `<p class="memory-notice" role="status">撤回记录暂不可读；检查当前窗口授权和转录配置。</p>`
+      : recallState === "error" ? `<p class="memory-notice" role="status">这个角色窗口的撤回记录暂不可读（${esc(recallError || "原因未知")}）；检查角色窗口授权和撤回转录开关。</p>`
         : recallStatus?.enabled === false ? `<p class="memory-notice" role="status">撤回转录未启用。配置开启后，只读记录会在设定时限内显示。</p>`
           : recalls.length ? `<ul>${recalls.map(item => `<li class="perception-recall-item"><span><strong>${esc(item.local_time || ageLabel(item.withdrawn_at))}</strong><small>${item.author ? `发送账号 ${esc(item.author)}` : "当前会话记录"}</small></span><p>${esc(item.text || "（无可展示文本）")}</p></li>`).join("")}</ul>`
             : `<p class="memory-notice" role="status">当前保留时限内没有可读的撤回记录。</p>`;
@@ -1015,11 +1031,20 @@ window.CompanionPerceptionOverviewPage = (() => {
       const value = product.unwrap(await bridge.apiGet("reply/recalls", {limit:5}));
       if (!validRoot(ticket)) return;
       if (!Array.isArray(value.entries)) throw new Error("invalid recall status");
-      recallStatus = value; recallState = "ready"; rememberOverview("recallStatus", value, "recallState", "ready");
-    } catch (_) {
+      recallStatus = value; recallState = "ready"; recallError = "";
+      rememberOverview("recallStatus", value, "recallState", "ready");
+    } catch (error) {
       if (!validRoot(ticket)) return;
-      recallStatus = null; recallState = "error";
-      forgetOverview("recallStatus", "recallState");
+      /* 「撤回原文转写」关闭是正常状态，不是读取失败：后端会以
+         recall_transcribe_disabled 拒绝读取。把它画成故障会让人跑去查授权。 */
+      if (error?.code === "recall_transcribe_disabled") {
+        recallStatus = {enabled: false, entries: []}; recallState = "ready";
+        rememberOverview("recallStatus", recallStatus, "recallState", "ready");
+      } else {
+        recallStatus = null; recallState = "error";
+        recallError = typeof error?.code === "string" && error.code ? error.code : "recall_request_failed";
+        forgetOverview("recallStatus", "recallState");
+      }
     }
     render();
   }

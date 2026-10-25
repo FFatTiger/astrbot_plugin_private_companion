@@ -168,17 +168,21 @@ test("the overview subscription publishes display fields without exposing config
   const unsubscribe = page.subscribe(value => { snapshot = value; });
   const next = status();
   next.environment.settings.planning_weather_location = JSON.stringify({name:"用户配置区域", latitude:12.34, longitude:56.78});
-  next.contact.settings.important_dates = JSON.stringify([{calendar:"gregorian",month:10,day:3,label:"相识纪念日"}]);
+  next.contact.settings.important_dates = JSON.stringify([{calendar:"gregorian",month:10,day:3,label:"旧版手动日期"}]);
   next.contact.settings.important_date_lookahead_days = 4;
+  next.contact.dates = JSON.stringify([{basis:"profile_role_birthday",label:"角色生日",
+    date:"2026-10-03",days_until:2,calendar:"gregorian"}]);
+  next.contact.lookaheadDays = 7;
   requests[0].resolve({status:"ok", data:next});
   await flush();
 
   assert.equal(snapshot.ready, true);
   assert.equal(snapshot.environment.locationName, "用户配置区域");
-  assert.equal(snapshot.contact.lookaheadDays, 4);
+  assert.equal(snapshot.contact.lookaheadDays, 7);
   assert.equal(snapshot.contact.balanceAwarenessEnabled, true);
   assert.equal(snapshot.contact.automaticAllowed, true);
-  assert.match(snapshot.contact.dates, /相识纪念日/);
+  assert.match(snapshot.contact.dates, /角色生日/);
+  assert.doesNotMatch(snapshot.contact.dates, /旧版手动日期/);
   assert.doesNotMatch(JSON.stringify(snapshot), /balance_(?:low|critical)_threshold|balance_include_amount_in_message/);
   assert.doesNotMatch(JSON.stringify(snapshot), /latitude|longitude|113\.75|23\.04/);
   unsubscribe();

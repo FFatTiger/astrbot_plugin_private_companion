@@ -1,6 +1,7 @@
 import json
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from companion_v2.foundation.outcome import Outcome
 from companion_v2.foundation.refs import SubjectKind, SubjectRef
@@ -81,6 +82,22 @@ class ImportantDateCommandTests(unittest.TestCase):
         self.assertIn("已删除", self.run_command("陪伴 日期删除 11月2日"))
         self.assertIn("没有记录", self.run_command("陪伴 日期列表"))
         self.assertIn("未删除", self.run_command("陪伴 日期删除 生日"))
+
+    def test_reflection_created_anniversary_is_listed_and_deletable(self):
+        self.application.runtime = object()
+        row = {"anniversary_id": "anniversary:one", "label": "第一次认真说出喜欢",
+               "month": 10, "day": 25, "timezone": "Asia/Shanghai"}
+        with patch("companion_v2.relationships.anniversaries.list_active", return_value=(row,)):
+            listing = self.run_command("陪伴 日期列表")
+        self.assertIn("第一次认真说出喜欢", listing)
+        self.assertIn("每日反思自动记下", listing)
+        with patch("companion_v2.relationships.anniversaries.list_active", return_value=(row,)), \
+                patch("companion_v2.relationships.anniversaries.retract_by_label",
+                      return_value=("第一次认真说出喜欢",)):
+            deleted = self.run_command("陪伴 日期删除 第一次认真说出喜欢")
+        self.assertIn("已删除", deleted)
+        self.assertIn("每日反思记下的互动纪念日", deleted)
+        self.assertEqual(self.configuration.patches, [])
 
     def test_ambiguous_label_is_not_deleted(self):
         self.run_command("陪伴 日期添加 生日 5月20日")

@@ -77,6 +77,14 @@
   gap: var(--sp-5);
   align-items: start;
 }
+/* 只挂一组时不画分组栏：设置项占满整行，避免同一页出现两条导航。 */
+.native-extension-workspace.is-single { grid-template-columns: minmax(0, 1fr); }
+.mobile-connection-page { display: grid; gap: var(--sp-4); min-width: 0; }
+.mobile-connection-guide { padding: var(--sp-4); border: 1px solid var(--t-line); border-radius: var(--r-sm); background: var(--t-surface-soft); }
+.mobile-connection-guide h2 { margin: 0 0 var(--sp-2); font-size: var(--fs-title); }
+.mobile-connection-guide ol { margin: 0; padding-left: 1.25rem; color: var(--t-text); line-height: 1.9; }
+.mobile-connection-guide p { margin: var(--sp-2) 0 0; color: var(--t-text-soft); font-size: var(--fs-body); line-height: 1.8; }
+.mobile-connection-settings { min-width: 0; }
 .native-extension-nav {
   display: flex;
   flex-direction: column;
@@ -216,6 +224,7 @@
 .native-management summary::after { content: "+"; color: var(--muted); }
 .native-management details[open] > summary::after { content: "−"; }
 .native-management-body { padding: var(--sp-2) 0 var(--sp-4); }
+.native-management-login-detail { margin: calc(var(--sp-1) * -1) 0 var(--sp-3); color: var(--t-risk-ink); font-size: var(--fs-micro); line-height: 1.8; overflow-wrap: anywhere; }
 .native-management-muted, .native-management > p { color: var(--muted); font-size: var(--fs-micro); line-height: 1.8; margin: var(--sp-3) 0; overflow-wrap: anywhere; }
 .native-management-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin: var(--sp-3) 0; }
 .native-management-qr { display: flex; align-items: center; gap: var(--sp-4); margin: var(--sp-4) 0; }

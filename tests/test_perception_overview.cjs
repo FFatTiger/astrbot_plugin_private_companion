@@ -14,7 +14,7 @@ class FixedDate extends Date {
   static now() { return fixedNow.getTime(); }
 }
 
-function harness({runtimeWeatherState="available",mihomeEnabled=true,balanceEnabled=true,automaticAllowed=true,balanceConfigured=false,balanceResponse=null,otherInjections=[{label:"参考资料",detail:"本轮加入 1 项"}],recallEnabled=true,recallEntries=[{local_time:"17:42",withdrawn_at:"2026-10-01T09:42:00Z",author:"user-1",text:"周末去公园走走"}],imageTask=true,imageProviderId="image-live",imagePreferred=null}={}) {
+function harness({runtimeWeatherState="available",mihomeEnabled=true,balanceEnabled=true,automaticAllowed=true,balanceConfigured=false,balanceResponse=null,otherInjections=[{label:"参考资料",detail:"本轮加入 1 项"}],recallEnabled=true,recallEntries=[{local_time:"17:42",withdrawn_at:"2026-10-01T09:42:00Z",author:"user-1",text:"周末去公园走走"}],imageTask=true,imageProviderId="image-live",imagePreferred=null,contactDates=[{calendar:"gregorian",month:10,day:3,label:"相识纪念日"}],contactLookaheadDays=3}={}) {
   let listener = null, intervalCallback = null, cleared = false, requested = [], bridgeRequests = [];
   const failedRequests = new Set(), tabActivations = [], focused = [];
   const currentBalance = balanceResponse || (balanceConfigured
@@ -44,9 +44,9 @@ function harness({runtimeWeatherState="available",mihomeEnabled=true,balanceEnab
   let snapshot = {ready:true,
     environment:{weatherReady:true, alertsReady:true, locationName:"用户配置区域", weatherEnabled:true, timezone:"Asia/Shanghai"},
     model:{calendarEnabled:true, timezone:"Asia/Shanghai", modalitiesEnabled:true},
-    contact:{dateCheckinEnabled:true, lookaheadDays:3, timezone:"Asia/Shanghai",
+    contact:{dateCheckinEnabled:true, lookaheadDays:contactLookaheadDays, timezone:"Asia/Shanghai",
       balanceAwarenessEnabled:balanceEnabled, automaticAllowed,
-      dates:JSON.stringify([{calendar:"gregorian",month:10,day:3,label:"相识纪念日"}])},
+      dates:JSON.stringify(contactDates)},
     news:{ready:true,assembled:true,networkStatus:"succeeded",itemCount:2,label:"AstrBot 网页搜索",sourceKind:"search",explorationEnabled:true,
       explorationInterests:"科技,生活",explorationIntervalHours:8,explorationResultCount:6,
       externalSelfLinkEnabled:true,lastCheckedAt:"2026-10-01 17:50"}};
@@ -208,6 +208,21 @@ test("overview shows the requested context, live routes, authorized devices and 
   page.page.unmount();
   assert.equal(page.intervals.size, 0);
   assert.equal(page.cleared, true);
+});
+
+test("upcoming dates use the server-projected profile date without manual month/day parsing", async () => {
+  const page = harness({contactLookaheadDays:7,
+    contactDates:[{basis:"profile_role_birthday", label:"角色生日", date:"2026-10-03",
+      days_until:2, calendar:"gregorian"},
+      {basis:"profile_relationship_date", label:"相识纪念日", date:"2026-10-01",
+       days_until:0, calendar:"gregorian"}]});
+  page.page.mount(page.root);
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.match(page.root.innerHTML, /角色生日 · 2 天后/);
+  assert.match(page.root.innerHTML, /相识纪念日 · 今天/);
+  assert.doesNotMatch(page.root.innerHTML, /暂无近期生日与纪念日/);
+  page.page.unmount();
 });
 
 test("image card shows the configured preferred model instead of the native owner id", async () => {

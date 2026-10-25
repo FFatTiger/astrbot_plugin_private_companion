@@ -16,6 +16,7 @@ from companion_v2.foundation.refs import SourceRef, VersionRef
 from companion_v2.foundation.refs import ScopeKind
 from companion_v2.model_gateway.models import ModelTaskProfile
 from companion_v2.sources.models import SourceRecord
+from companion_v2.relationships import anniversaries
 
 from . import codec
 from .configuration import target_for
@@ -497,6 +498,29 @@ class MemoryReflection:
                     manifest = json.loads(row["manifest_json"])
                     output.setdefault("rejected", []).append({"item_id": entry["item_id"], "raw": proposal_for_repair(entry["proposal"], manifest), "kind": "proposal",
                         "problem": {"code": result.failure.code, "path": "proposal"}})
+                receipts["sequence"] = self._sequence(context)
+                connection.execute("UPDATE memory_reflections SET receipts_json = ?, result_json = ?, updated_at = ? WHERE batch_id = ?",
+                                   (encode(receipts), encode(output), stamp(self.tasks.now()), batch_id))
+        for entry in output.get("anniversaries", []):
+            with self.runtime.transaction() as connection:
+                row = self._row(context, batch_id)
+                self._validate_inputs(context, row)
+                receipts = json.loads(row["receipts_json"])
+                key = entry["item_id"]
+                if key in receipts["items"]:
+                    continue
+                try:
+                    result = anniversaries.remember(
+                        self.runtime, context, entry, source_run_id=batch_id, at=self.tasks.now())
+                except (TypeError, ValueError, KeyError):
+                    result = {"state": "rejected", "code": "anniversary_invalid"}
+                receipts["items"][key] = result
+                if result.get("state") in {"limit", "rejected"}:
+                    output.setdefault("rejected", []).append({
+                        "item_id": key, "raw": entry, "kind": "anniversary",
+                        "problem": {"code": result.get("code", "anniversary_limit"),
+                                    "path": "anniversaries"},
+                    })
                 receipts["sequence"] = self._sequence(context)
                 connection.execute("UPDATE memory_reflections SET receipts_json = ?, result_json = ?, updated_at = ? WHERE batch_id = ?",
                                    (encode(receipts), encode(output), stamp(self.tasks.now()), batch_id))

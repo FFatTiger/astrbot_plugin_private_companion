@@ -155,13 +155,18 @@ def persona_instruction(persona):
     if not isinstance(prompt, str):
         raise TaskError("host_persona_invalid", "selected host persona has no text prompt")
     dialogs = persona.get("_begin_dialogs_processed") or []
+    # AstrBot 4.29 给每条示例附了 ``_no_save`` 这类内部标记，宿主自己也不把它写回
+    # 人格。按"必须恰好只有 role/content"判会把这些正常人格判成格式无法读取
+    # （4.29.1 的现场就是保存映射失败、提示人格提示词或对话示例格式无法读取）。
+    # 这里只要求 role/content 存在且可用，注入前再把多余字段剥掉。
     if not isinstance(dialogs, list) or any(
-        not isinstance(d, dict) or set(d) != {"role", "content"}
-        or d["role"] not in ("user", "assistant") or not isinstance(d["content"], str) for d in dialogs
+        not isinstance(d, dict) or d.get("role") not in ("user", "assistant")
+        or not isinstance(d.get("content"), str) for d in dialogs
     ):
         raise TaskError("host_persona_invalid", "persona examples require the verified text format")
-    if dialogs:
-        prompt += "\n\n以下为人格的对话示例，用于保持说话风格，不代表本会话发生过的事情：\n" + encode(dialogs)
+    cleaned = [{"role": d["role"], "content": d["content"]} for d in dialogs]
+    if cleaned:
+        prompt += "\n\n以下为人格的对话示例，用于保持说话风格，不代表本会话发生过的事情：\n" + encode(cleaned)
     return prompt
 
 

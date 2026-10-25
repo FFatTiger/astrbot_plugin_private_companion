@@ -121,9 +121,13 @@ class MediaScopeSettingsOwner(RoleSharedSettingsOwner):
 
 def intake_fields():
     """Use the registered group's layer contract; the owner handles role sharing."""
+    from ..reply_settings import ROLE_SHARED_FIELDS
+
     return tuple(FieldDefinition(GROUP + "." + key, GROUP, GROUP,
         {bool: ValueKind.BOOLEAN, int: ValueKind.INTEGER, str: ValueKind.TEXT}[type(default)], default,
-        layers=(ConfigLayer.WINDOW,), owner_id=GROUP,
+        layers=((ConfigLayer.ROLE, ConfigLayer.WINDOW)
+                if key in ROLE_SHARED_FIELDS else (ConfigLayer.WINDOW,)),
+        owner_id=GROUP,
         **(dict(zip(("minimum", "maximum"), LIMITS[key])) if key in LIMITS else {}))
         for key, default in DEFAULTS.items())
 

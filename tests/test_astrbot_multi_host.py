@@ -550,8 +550,12 @@ class MultiHostTests(MultiFixture, unittest.IsolatedAsyncioTestCase):
                             for handler in memory_handlers))
 
         request = NS(username="dashboard-admin", query=_Query())
-        with patch("astrbot_host.multi_api.request", request), patch("astrbot_host.memory_api.request", request):
-            self.assertEqual((await registered[MULTI_HOST_PREFIX + "/status"]())["status"], "ok")
+        expected_parsers = {".pdf": True, ".docx": False, ".xlsx": True, ".pptx": False}
+        with patch("astrbot_host.multi_api.request", request), patch("astrbot_host.memory_api.request", request), \
+                patch("astrbot_host.multi_controller.parser_availability", return_value=expected_parsers):
+            status_response = await registered[MULTI_HOST_PREFIX + "/status"]()
+            self.assertEqual(status_response["status"], "ok")
+            self.assertEqual(status_response["data"]["parser_availability"], expected_parsers)
             self.assertEqual((await registered[MULTI_HOST_PREFIX + "/probe"]())["status"], "ok")
             self.assertEqual((await registered[MULTI_HOST_PREFIX + "/initialize"]())["status"], "ok")
             self.assertEqual((await registered[MULTI_HOST_PREFIX + "/start"]())["status"], "ok")

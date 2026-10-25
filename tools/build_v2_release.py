@@ -14,7 +14,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 CORE_ID = "astrbot_plugin_private_companion"
-VERSION = "7.0.1"
+VERSION = "7.0.2"
 RELEASE_SCHEMA = "companion.v2.release.v2"
 NATIVE_EXTENSION_FILES = {
     "content": ("companion_v2/content/assembly.py", "companion_v2/content/provider.py",
@@ -30,6 +30,7 @@ NATIVE_EXTENSION_FILES = {
                 "astrbot_host/native_extensions/reality/runtime.py",
                 "astrbot_host/native_extensions/reality/_mihome_login_worker.py",
                 "astrbot_host/native_extensions/reality/_mihome_spec_worker.py",
+                "astrbot_host/native_extensions/reality/mihome_arc4_compat.py",
                 "astrbot_host/native_extensions/reality/settings-schema.json",
                 "astrbot_host/native_extensions/reality/settings-defaults.json",
                 "astrbot_host/native_extensions/reality/assets/reality_touch_device_test.mp3"),

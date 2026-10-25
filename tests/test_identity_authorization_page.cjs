@@ -761,7 +761,7 @@ test("私聊联系页提供每日实际联系上限、未回应降频和恢复�
     quiet_start: "22:00", quiet_end: "08:00", quiet_timezone: "Asia/Shanghai", pause_until: "", note: "", style_prompt: ""};
   const purposeGroups = [
     [["affection", "想念与亲近"], ["care", "情绪关怀"], ["play", "轻松互动"], ["repair", "关系修复"], ["chat", "日常话题"]],
-    [["greeting", "问候与纪念"], ["followup", "接回旧话题"], ["invitation", "共同活动邀请"], ["reminder", "约定与提醒"], ["meal", "饭点问候"]],
+    [["greeting", "问候与纪念"], ["followup", "接回旧话题"], ["invitation", "共同活动邀请"], ["reminder", "约定与提醒"], ["meal", "饭点话题"]],
     [["life", "分享自己的生活"], ["creation", "作品与阅读"], ["news", "外部资讯"], ["environment", "环境与状态变化"], ["screen", "已授权屏幕观察"]],
   ];
   for (const [name] of purposeGroups.flat()) {

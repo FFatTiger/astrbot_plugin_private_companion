@@ -65,6 +65,27 @@ _SEGMENTATION_SETTINGS_KEYS = _SEGMENTATION_KEYS | frozenset((
 logger = logging.getLogger(__name__)
 
 
+def role_state_for_prompt(summary, purpose):
+    """Keep bodily status out of generic proactive contact prompts.
+
+    Hunger and health are useful to meal, care or environment contacts, but a
+    playful or chatty contact that receives "hungry" as a live field tends to
+    turn it into a status report and invent the user's eating habits. Keep the
+    rest of the already-reviewed state material intact so pacing and sleep
+    presentation continue to use the same contract.
+    """
+
+    if not isinstance(summary, dict) or purpose is None:
+        return summary
+    result = dict(summary)
+    purpose = str(purpose)
+    if purpose not in ("meal", "environment"):
+        result.pop("hunger", None)
+    if purpose not in ("meal", "care", "environment"):
+        result.pop("health", None)
+    return result or None
+
+
 def contact_profile(provider, *, max_output_tokens=1024):
     return ModelTaskProfile(CONTACT_KIND, Lane.BACKGROUND, provider,
         "保持原人格；基于真实来源决定是否主动联系，允许没有合适内容时不发送。",
@@ -801,7 +822,8 @@ class ProactiveContacts:
                 expression=self._expression_materials(job, contact_id),
                 rhythm_snapshot=(None if job.administrator_test else
                                  self.budget.rhythm_snapshot(job.context, preferences, at)),
-                role_state=None if job.administrator_test else self._role_state_summary(job.context, at),
+                role_state=(None if job.administrator_test else role_state_for_prompt(
+                    self._role_state_summary(job.context, at), job.intent.purpose)),
                 recent_life=(None if job.administrator_test
                              or (source_origin and any(k in source_origin for k in ("activity_event", "journal_event")))
                              else self._recent_life_summary(job.context, at)))
@@ -1248,7 +1270,8 @@ class ProactiveContacts:
                  "note": preferences.values["note"], "confidence": data.get("decision_confidence", 1.0),
                  "role_instruction": batch["role_instruction"], "observed_at": at,
                  "cause_id": run.task.task_id,
-                 "role_state": self._role_state_summary(context, at)}
+                 "role_state": role_state_for_prompt(
+                     self._role_state_summary(context, at), data["purpose"])}
         completion = await self.gateway.generate(run, judge_request(entry))
         if completion.draft is None:
             raise ValueError("persona judgement requires a final decision")

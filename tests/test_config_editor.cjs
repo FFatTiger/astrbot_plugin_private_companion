@@ -465,8 +465,8 @@ test('the settings search catalogue exposes field metadata without reading confi
   const {window} = harness(['proactive.contact', 'knowledge']);
   const entries = plain(window.CompanionConfigEditors.searchEntries());
   const contact = entries.filter(item => item.group === 'proactive.contact');
-  assert.equal(contact.length, 174);
-  assert.equal(new Set(contact.map(item => item.field)).size, 174);
+  assert.equal(contact.length, 173);
+  assert.equal(new Set(contact.map(item => item.field)).size, 173);
   assert.ok(contact.some(item => item.field === 'morning_chain_enabled'
     && item.sectionTitle === '起床与晨间确认'));
   assert.ok(contact.some(item => item.field === 'balance_awareness_enabled'
@@ -1712,14 +1712,14 @@ test('a group participation refusal is translated instead of shown raw', async (
   assert.match(markup, /打断语只能是一行/);
 });
 
-/* ==== 主动联系偏好（proactive.contact）：174 项、四层、24 段 ====
+/* ==== 主动联系偏好（proactive.contact）：173 个页面可编辑项、四层、24 段 ====
  *
- * 这一组此前四个触点全缺（编辑器 / SECTIONS / spec / 挂载点），174 项里 92 项
+ * 这一组此前四个触点全缺（编辑器 / SECTIONS / spec / 挂载点），173 个可编辑项里 92 项
  * 在任何页面上都点不到。字段名与类型按注册表抄成独立的一份：页面与它逐项对齐
  * 才算「没有字段被丢掉」，而页面与**注册表**的对齐由
  * tools/audit_page_config_coverage.py 的 MODULES 表保证。
  *
- * 数量本身就是断言：47 boolean / 58 integer / 48 text / 17 weight / 4 probability。
+ * 数量本身就是断言：47 boolean / 58 integer / 47 text / 17 weight / 4 probability。
  */
 const CONTACT_KINDS = {
   boolean: [
@@ -1767,7 +1767,7 @@ const CONTACT_KINDS = {
     "affection.pause_until", "balance_currency_label", "care.pause_until", "chat.pause_until",
     "creation.pause_until", "date_checkin_time", "dedup_policies", "environment.pause_until",
     "followup.pause_until", "greeting.pause_until", "greeting_evening_window", "greeting_morning_window",
-    "greeting_noon_window", "important_dates", "insomnia_night_end", "insomnia_night_start",
+    "greeting_noon_window", "insomnia_night_end", "insomnia_night_start",
     "invitation.pause_until", "life.pause_until", "meal.pause_until", "meal_dinner_time",
     "meal_lunch_time", "news.pause_until", "news_hot_sources", "news_source_kind", "news_source_uid",
     "news_source_url", "note", "official_alert_min_severity", "pause_until", "play.pause_until",
@@ -1795,7 +1795,7 @@ const CONTACT_DEFAULTS = {
   morning_nudge_delay_minutes: 25, morning_nudge_max_attempts: 1, routine_window_days: 60,
   wake_contact_window_minutes: 90, wake_contact_min_confidence: 65, wake_contact_max_daily: 1,
   wake_morning_start: '05:00', wake_morning_end: '11:30', morning_wake_confidence_floor: 0.25,
-  important_dates: '[]', dedup_policies: 'semantic,content_fingerprint,life_event,event_revision',
+  dedup_policies: 'semantic,content_fingerprint,life_event,event_revision',
   contact_followup_after_minutes: 45, contact_followup_cooldown_minutes: 180,
   news_source_kind: 'host', news_hot_sources: 'weibo,hackernews', official_alert_min_severity: '',
   proactive_intensity_preset: 'off', balance_currency_label: '元',
@@ -1916,15 +1916,15 @@ test('a legacy pending revision conflict restores its draft without replaying th
   await drains();
 });
 
-test('the contact section renders all 174 fields exactly once', async () => {
+test('the contact section renders all 173 editable fields exactly once', async () => {
   const harnessed = await contactLoaded();
   const painted = harnessed.painted['proactive.contact'];
   assert.ok(painted, '主动联系偏好必须画进自己的挂载点');
   const container = harnessed.editors.state.instances[0].state.container;
   const rendered = plain(container.groups.flatMap(group => group.fields));
   const expected = plain(Object.keys(CONTACT_FIELDS));
-  assert.equal(rendered.length, 174, '174 项一个都不能少');
-  assert.equal(new Set(rendered).size, 174, '同一个字段不能出现在两段里');
+  assert.equal(rendered.length, 173, '173 个可编辑字段一个都不能少');
+  assert.equal(new Set(rendered).size, 173, '同一个字段不能出现在两段里');
   assert.deepEqual(rendered.slice().sort(), expected.slice().sort());
   assert.deepEqual(plain(container.order).slice().sort(), expected.slice().sort());
   /* 24 段全部画出来，段落 id 是测试能定位依赖说明的锚点。 */
@@ -1947,6 +1947,8 @@ test('the contact section renders all 174 fields exactly once', async () => {
   assert.ok(!plain(harnessed.editors.state.instances[0].state.status.fields.max_contacts_24h.editable_layers)
     .includes('relationship'));
   assert.doesNotMatch(painted, /data-layer="relationship"|data-layer="window"/);
+  assert.doesNotMatch(painted, /data-wb-row="important_dates"/,
+    '生日与纪念日自动读取资料，不再渲染手动 JSON 清单');
 });
 
 test('the contact card clearly identifies global defaults and personal overrides', async () => {
@@ -1979,7 +1981,7 @@ test('the contact audit blocks malformed shapes before any request', async () =>
     ['dedup_policies', 'semantic,nope', /只能填允许的名字/],
     ['news_hot_sources', 'weibo,weibo', /不能重复/],
     ['proactive_persona_judge_exempt_purposes', 'nope', /只能填允许的名字/],
-    ['important_dates', '{', /JSON 数组/],
+    ['date_checkin_time', '25:00', /二十四小时制/],
     ['news_source_kind', 'bilibili', /十进制 UID/],
   ];
   for (const [name, value, expected] of cases) {

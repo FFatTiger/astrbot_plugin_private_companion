@@ -38,6 +38,7 @@ from .binding_store import PendingBinding, binding_path, clear_binding, read_bin
 from .news import configured_news_port
 from .service_balance import configured_balance_port
 from .weather_settings import configured_weather_ports
+from .files.parsing import parser_availability
 from .qzone_transport import build_qzone_transport
 from .solar_terms import configured_solar_term_port
 from .session_topology import SessionTopology
@@ -573,6 +574,25 @@ class AstrBotMultiController:
                 self.config.get("solar_terms") if isinstance(self.config, dict) else None))
         from .worker_lifecycle import AstrBotWorkerLifecycle
         self.session.application.tasks.bind_worker_lifecycle(AstrBotWorkerLifecycle())
+        # 关键词材料：服务余额、当前模型、链接正文。各自判断可用性，
+        # 所以这里无条件登记，不额外做配置判断。
+        try:
+            from .service_balance import balance_keyword_material
+            from .model_route_material import model_route_keyword_material
+            from .web_read_material import web_read_keyword_material
+            from companion_v2.conversation.keyword_materials import KeywordMaterials
+            self.session.application.keyword_materials = KeywordMaterials((
+                balance_keyword_material(self.session.application),
+                model_route_keyword_material(self.session.application, self.context),
+                web_read_keyword_material(self.session.application),
+            ))
+        except Exception as error:
+            logger.warning("[CompanionV2] 关键词材料登记失败 error_type=%s", type(error).__name__)
+        try:
+            from .files.parsing import report_parser_availability
+            report_parser_availability(logger)
+        except Exception as error:
+            logger.warning("[CompanionV2] 文档解析组件自检失败 error_type=%s", type(error).__name__)
         from .knowledge_sources import attach_official_knowledge
         attach_official_knowledge(self.session.application, self.context)
         from .semantic_models import NativeSemanticModels, configured_slang_search_port
@@ -1238,7 +1258,8 @@ class AstrBotMultiController:
                 "failure_code": session.application.failure_code if session else None,
                 "failure_detail": session.application.failure_detail if session else None,
                 "targets": self.web_api.target_inventory(), "last_failure": self.last_failure,
-                "settings_error": getattr(self.settings_error, "code", None)}
+                "settings_error": getattr(self.settings_error, "code", None),
+                "parser_availability": parser_availability()}
 
     def register_routes(self):
         self.web_api.register()
