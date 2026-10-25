@@ -50,13 +50,23 @@ class SetupStateTests(unittest.TestCase):
         self.assertTrue(state["ready"])
 
     def test_setup_progress_does_not_require_mode_selection(self):
-        for step in ("model", "knowledge", "relationships"):
+        for step in ("model", "knowledge", "relationships", "proactive", "life", "group"):
             self.store.complete(step)
 
         state = self.store.begin_proactive_test(attempt_id="attempt-1", started_at="2026-10-05T00:00:00+00:00")
 
         self.assertEqual(state["proactive_test"]["attempt_id"], "attempt-1")
         self.assertNotIn("mode", state)
+
+    def test_every_guided_step_must_be_done_or_skipped_before_the_proactive_test(self):
+        for step in ("model", "knowledge", "relationships", "proactive", "life"):
+            self.store.complete(step)
+        with self.assertRaises(ValueError):
+            self.store.begin_proactive_test(attempt_id="attempt-2", started_at="2026-10-05T00:00:00+00:00")
+        state = self.store.complete("group", skipped=True)
+        self.assertEqual(state["skipped"], ["group"])
+        state = self.store.begin_proactive_test(attempt_id="attempt-3", started_at="2026-10-05T00:00:00+00:00")
+        self.assertEqual(state["proactive_test"]["attempt_id"], "attempt-3")
 
 
 if __name__ == "__main__":

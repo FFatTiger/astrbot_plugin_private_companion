@@ -83,6 +83,7 @@ class NativeExtensionRegistry(AstrBotToolPort):
         self.screen = None
         self.camera = None
         self._entries, discovered_issues = discover(context, excluded_extensions=managed_extensions)
+        self.managed_extensions = frozenset(managed_extensions)
         self._bundled_extensions = tuple(bundled_extensions)
         for lease in self._bundled_extensions:
             self._entries.update({item.host_tool_id: (item, lease) for item in lease.declarations()})
@@ -202,8 +203,48 @@ class NativeExtensionRegistry(AstrBotToolPort):
         for lease in self._bundled_extensions:
             if self._closed:
                 break
+            self._ensure_installation(lease)
             if self._should_start(lease):
                 lease.begin_start()
+
+    # 只在插件自带的「生图」模块上自动补齐：它的接口配置已经存在，缺的只是装配记录。
+    # 其他模块仍由用户显式装配，避免悄悄扩大能力授权。
+    AUTO_INSTALL_EXTENSIONS = frozenset({"image"})
+
+    def _ensure_installation(self, lease):
+        """随插件一起发货的原生模块，配置好就应该能用。
+
+        能力安装记录只由「装配」动作创建；如果用户只是在小屋里填好生图接口，
+        安装记录一直缺着，模块永远不会启动，模型也就拿不到生图工具。这里对
+        插件自带的生图模块做一次幂等补齐（已安装或未启用时什么都不做）。
+        """
+        extension_id = lease.manifest.package.extension_id
+        if (self._closed or self.runtime is None or extension_id not in self.managed_extensions
+                or extension_id not in self.AUTO_INSTALL_EXTENSIONS):
+            return
+        if extension_id == "image" and self.image_enabled is False:
+            return
+        repository = CapabilityRepository(self.runtime)
+        installed = repository.installation(extension_id=extension_id)
+        if installed.is_success:
+            return
+        if installed.failure is not None and installed.failure.code != "capability_not_installed":
+            return
+        package = lease.manifest.package
+        observed_at = self.now()
+        registered = repository.register_descriptor(package, registered_at=observed_at)
+        if registered.failure is not None and registered.failure.code not in ("capability_descriptor_conflict",
+                                                                             "capability_identity_conflict"):
+            logging.getLogger(__name__).warning(
+                "[CompanionV2] 原生模块装配登记失败 extension=%s code=%s",
+                extension_id, registered.failure.code)
+            return
+        acquired = repository.acquire(extension_id=extension_id, package_id=package.package_id,
+            package_version=package.package_version, expected_revision=0, observed_at=observed_at)
+        if acquired.failure is not None:
+            logging.getLogger(__name__).warning(
+                "[CompanionV2] 原生模块自动装配失败 extension=%s code=%s",
+                extension_id, acquired.failure.code)
 
     async def aclose(self):
         self.close()

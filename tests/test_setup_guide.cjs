@@ -35,6 +35,7 @@ function harness({status, responses = {}, targets = [], refreshedTargets = targe
     '#setupQuickReplyHost': {},
     '#setupQuickDecisionHost': {},
     '#setupQuickStateHost': {},
+    '#setupStepEditor': {},
     '#setupLegacySettingsHost': {},
   };
   const node = {
@@ -524,6 +525,22 @@ test('first-run stages start with binding, then model, knowledge, relationships 
   assert.match(page.html, /多个人格/);
   assert.doesNotMatch(page.html, /选择运行规模|单账号|单目标运行实例/);
   assert.doesNotMatch(page.html, /十年|预览模式|review|授权有效期/);
+});
+
+test('first-run stages follow the old guide layout with grouped steps, time hints and a checklist', async () => {
+  const page = harness({status: {step: 'model', mode: {accounts: 'single', personas: 'single'}, ready: false}});
+  page.mount();
+  await settle();
+
+  // 旧版引导的四段分组标题 + 「第 N 步 · 约 N 分钟」时间提示。
+  for (const group of ['目标用户与平台', '核心模型配置', '主动功能与其他配置', '主动消息测试']) {
+    assert.match(page.html, new RegExp(group));
+  }
+  assert.match(page.html, /第 2 步 · 约 3 分钟/);
+  // 每步上方有说明与要点清单，表单在下方。
+  assert.match(page.html, /setup-stage-banner/);
+  assert.match(page.html, /setup-checklist/);
+  assert.match(page.html, /选择插件通用模型/);
 });
 
 test('confirming the core window advances to model without preparing early', async () => {
@@ -1141,6 +1158,25 @@ test('start page lists the configuration guide and opens the matching editor in 
   assert.match(page.html, /setup-advanced-shell/);
   assert.deepEqual(page.editorCalls.at(-1).kinds,
     ['role_profile', 'relationship_profile', 'knowledge', 'private_access']);
+});
+
+test('the guide carries the proactive, schedule and group steps with their editors in place', async () => {
+  const steps = [
+    ['proactive', '主动功能与强度', ['proactive.contact']],
+    ['life', '日程与观察', ['life']],
+    ['group', '群聊配置', ['group_participation']],
+  ];
+  for (const [step, label, kinds] of steps) {
+    const page = harness({status: {step, prepared: true, ready: false,
+      mode: {accounts: 'single', personas: 'single'}}});
+    page.mount();
+    await settle();
+    assert.match(page.html, new RegExp(label), step);
+    assert.match(page.html, /id="setupStepEditor"/, step);
+    assert.match(page.html, /data-setup-action="complete-step"/, step);
+    assert.match(page.html, /data-setup-action="skip-step"/, step);
+    assert.deepEqual(page.editorCalls.at(-1).kinds, kinds, step);
+  }
 });
 
 test('quick setup edits common V2 settings in place without leaving the start page', async () => {

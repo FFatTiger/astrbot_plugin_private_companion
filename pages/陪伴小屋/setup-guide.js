@@ -2,7 +2,10 @@
 "use strict";
 window.CompanionSetup = (() => {
   const PREFIX = "setup";
-  const ORDER = ["binding", "model", "knowledge", "relationships", "proactive_test"];
+  /* 八步对齐旧版引导：基础连通 → 模型 → 人格与世界知识 → 关系教学 →
+     主动功能（含私聊强度） → 日程与观察 → 群聊配置 → 主动消息测试。 */
+  const ORDER = ["binding", "model", "knowledge", "relationships", "proactive", "life", "group",
+                 "proactive_test"];
   /* 四步角色驱动迁移：设置角色 → 只读核对 → 显式迁移 → 完成。
      逐项能力移出向导，放在独立的「逐项迁移」页面。 */
   const MIGRATION_STEPS = [
@@ -13,8 +16,116 @@ window.CompanionSetup = (() => {
   ];
   const LABELS = {
     binding: "核心管理员窗口",
-    model: "插件模型", knowledge: "世界知识", relationships: "关系教学", proactive_test: "主动消息测试",
+    model: "插件模型", knowledge: "世界知识", relationships: "关系教学",
+    proactive: "主动功能与强度", life: "日程与观察", group: "群聊配置",
+    proactive_test: "主动消息测试",
   };
+  /* 旧版配置引导的四段说明与「要点清单」：每一步先告诉用户这步在解决什么、
+     大约花多久、要确认哪几件事，再给表单。 */
+  const STEP_GROUPS = [
+    {title: "目标用户与平台", steps: ["binding"]},
+    {title: "核心模型配置", steps: ["model"]},
+    {title: "主动功能与其他配置", steps: ["knowledge", "relationships", "proactive", "life", "group"]},
+    {title: "主动消息测试", steps: ["proactive_test"]},
+  ];
+  const STEP_META = {
+    binding: {
+      tag: "第 1 步 · 约 2 分钟",
+      body: "先在需要接收主动消息的私聊窗口发送绑定指令，本页会读取真实用户 ID 和平台会话；确认后，这个窗口同时作为管理员控制入口。",
+      checks: ["在目标私聊发送绑定指令", "刷新并核对平台、Bot 账号与私聊对象", "确认这个窗口用于管理员指令与主动投递"],
+    },
+    model: {
+      tag: "第 2 步 · 约 3 分钟",
+      body: "插件自身的主动联系、日程、状态和每日反思都需要模型。日常对话仍跟随 AstrBot 当前人格与主链，这里只选插件内部任务用哪个 Provider。",
+      checks: ["选择插件通用模型", "按需给主动联系、日程等任务分配路由", "日常回复模型在 AstrBot 主链里配置，不在这里改动"],
+    },
+    knowledge: {
+      tag: "第 3 步 · 可选",
+      body: "从 AstrBot 当前人格整理角色稳定档案。草稿会先给你核对，确认后才写入；想先跑通聊天可以跳过，之后随时回来补。",
+      checks: ["确认人格来源", "按需补充已确认的角色事实", "不覆盖已有档案内容"],
+    },
+    relationships: {
+      tag: "第 4 步 · 可选",
+      body: "整理对主要陪伴对象的称呼、关系和相处方式，只保存到这段私聊的熟人卡，不会带到其他用户或群聊。",
+      checks: ["确认对用户的称呼", "按需补充关系与相处方式", "已有内容默认保留，需要时再勾选覆盖"],
+    },
+    proactive: {
+      tag: "第 5 步 · 约 2 分钟",
+      body: "只选主动能力的大开关和私聊强度：要不要主动开口、多久一次、哪些时段安静。更细的契机、新闻与空间素材不在这里，避免一次堆太多。",
+      checks: ["选择是否开启私聊主动", "选择主动强度与每日上限", "确认免打扰时段仍然生效"],
+    },
+    life: {
+      tag: "第 6 步 · 可选",
+      body: "给角色安排一天的生活节奏，主动联系才有真实由头。日程是增强项，不影响基础聊天与保存；想先跑通可以先跳过。",
+      checks: ["按需填写日常作息与固定安排", "确认日程不会写成任务汇报", "跳过也不影响回复与主动开关"],
+    },
+    group: {
+      tag: "第 7 步 · 可选",
+      body: "如果角色也进群，这里决定它在群里的参与方式：被叫到时怎么接、平时是否观察、要不要主动插话。私聊配置不受影响。",
+      checks: ["选择群聊参与方式", "按需设置唤醒与插话", "只在需要的群里生效"],
+    },
+    proactive_test: {
+      tag: "第 5 步 · 约 1 分钟",
+      body: "最后跑一次主动消息测试：默认只生成候选、复核与发送闸结果，真实发送仍需二次确认，避免首次配置时误发。",
+      checks: ["生成一次主动候选", "确认复核与发送闸判断", "不开启主动也可以直接完成配置"],
+    },
+  };
+  const stepMeta = step => STEP_META[step] || STEP_META.binding;
+  /* 这些步骤直接复用对应配置组的工作台：旧版引导也是「在向导里改完就保存」，
+     改完点「已完成这部分」，不必先跳到别的页面。 */
+  const STEP_EDITORS = {
+    proactive: {kinds: ["proactive.contact"], views: {"proactive.contact": {
+      sectionIds: ["master", "rhythm", "quiet", "greeting"],
+      title: "主动联系", note: "决定是否主动开口、多久一次、哪些时段安静。"}}},
+    life: {kinds: ["life"], views: {life: {
+      sectionIds: ["routine", "sleep"], title: "日程与作息",
+      note: "角色的日常作息与固定安排；只会变成自然的生活由头，不写成任务清单。"}}},
+    group: {kinds: ["group_participation"], views: {group_participation: {
+      sectionIds: ["atmosphere", "denoise", "interjection"], title: "群聊参与",
+      note: "被叫到时怎么接、平时是否观察、要不要主动插话。"}}},
+  };
+  let stepEditor = null;
+  function stopStepEditor() {
+    stepEditor?.stop?.();
+    stepEditor = null;
+  }
+  function mountStepEditor(step) {
+    const block = STEP_EDITORS[step];
+    const host = root?.querySelector("#setupStepEditor");
+    if (!block || !host) return;
+    stepEditor = window.CompanionConfigEditors?.create?.(block.kinds, () => host, block.views || {});
+    if (stepEditor) {
+      stepEditor.restore?.();
+      stepEditor.paint?.();
+      void stepEditor.read?.();
+    } else {
+      host.innerHTML = `<p class="setup-inline-unavailable">当前角色的设置工作台暂不可用，请重新读取后再试。</p>`;
+    }
+  }
+  function renderSettingsStep(step) {
+    const complete = (state?.completed || []).includes(step);
+    const skipped = (state?.skipped || []).includes(step);
+    return `<section class="setup-stage">
+      <p class="setup-kicker">${escape(stepMeta(step).tag)}</p><h3>${escape(LABELS[step] || step)}</h3>
+      <p>改完下面的设置后点「已完成这部分」；这一步也可以先跳过，之后在对应页面继续调整。</p>
+      <div id="setupStepEditor" class="setup-inline-editor"></div>
+      ${!state?.prepared ? `<p class="setup-inline-loading" role="status">完成模型配置后，这里才能保存设置。</p>` : ""}
+      ${complete || skipped ? `<p class="setup-recorded">${skipped ? "已选择暂时跳过" : "已标记完成"}</p>` : ""}
+      ${noticeMarkup()}
+      <div class="setup-actions">
+        ${button("complete-step", complete ? "重新确认完成" : skipped ? "改为已完成" : "已完成这部分", {primary: true})}
+        ${button("skip-step", "暂时跳过")}
+      </div>
+    </section>`;
+  }
+  function stageBanner(step) {
+    const meta = stepMeta(step);
+    return `<section class="setup-stage-banner" aria-label="本步说明">
+      <p class="setup-kicker">${escape(meta.tag)}</p>
+      <p class="setup-stage-body">${escape(meta.body)}</p>
+      <ul class="setup-checklist">${meta.checks.map(item => `<li>${escape(item)}</li>`).join("")}</ul>
+    </section>`;
+  }
   const ADVANCED_BLOCKS = [
     {id: "understanding", label: "回复与分段", note: "在同一处调整分段规则，并即时查看消息效果。", mount: "reply"},
     {id: "relationships", label: "人物与资料", note: "角色资料、关系资料、世界知识与新用户默认权限。",
@@ -496,11 +607,26 @@ window.CompanionSetup = (() => {
   }
 
   function renderRail(step) {
-    return `<ol class="setup-progress" aria-label="首次连接进度">${progress().map((item, index) => `
-      <li class="${item.complete ? "complete" : ""} ${item.id === step ? "current" : ""}">
-        <span class="setup-progress-marker">${item.complete ? "✓" : String(index + 1).padStart(2, "0")}</span>
-        <span>${escape(item.label)}</span>
-      </li>`).join("")}</ol>`;
+    /* 旧版引导的分组树：四段标题下挂各自的步骤，完成打勾、当前高亮。 */
+    const items = progress();
+    const byId = new Map(items.map(item => [item.id, item]));
+    const groups = STEP_GROUPS.map(group => {
+      const rows = group.steps.map(id => {
+        const item = byId.get(id);
+        if (!item) return "";
+        const index = items.findIndex(entry => entry.id === id);
+        return `<li class="setup-progress-step ${item.complete ? "complete" : ""} ${item.id === step ? "current" : ""}">
+          <span class="setup-progress-marker">${item.complete ? "✓" : String(index + 1).padStart(2, "0")}</span>
+          <span>${escape(item.label)}</span>
+        </li>`;
+      }).join("");
+      const complete = group.steps.every(id => byId.get(id)?.complete);
+      return `<li class="setup-progress-group ${complete ? "complete" : ""}">
+        <strong>${escape(group.title)}</strong>
+        <ol class="setup-progress-steps">${rows}</ol>
+      </li>`;
+    }).join("");
+    return `<ol class="setup-progress" aria-label="首次连接进度">${groups}</ol>`;
   }
 
   function noticeMarkup() {
@@ -2728,8 +2854,8 @@ window.CompanionSetup = (() => {
 
   function renderSection(step) {
     const definitions = {
-      knowledge: {number: "STEP 4", title: "从人格整理角色设定", target: "role_profile", canSkip: true},
-      relationships: {number: "STEP 5", title: "整理熟人卡", target: "relationship_profile", canSkip: true},
+      knowledge: {number: "STEP 3", title: "从人格整理角色设定", target: "role_profile", canSkip: true},
+      relationships: {number: "STEP 4", title: "整理熟人卡", target: "relationship_profile", canSkip: true},
     }[step];
     const complete = state?.completed?.includes(step);
     const skipped = state?.skipped?.includes(step);
@@ -2778,7 +2904,7 @@ window.CompanionSetup = (() => {
       return `<details class="setup-task-route"><summary><strong>${escape(taskLabel(task.kind))}</strong><small>${escape(task.kind)} · ${escape(task.lane)}</small></summary><div class="setup-task-route-fields"><label><span>主 Provider</span><select data-setup-model-task="${escape(task.kind)}" data-setup-model-field="provider" ${busy || !choices.length ? "disabled" : ""}>${choices.map(item => `<option value="${escape(item.id)}" ${provider === item.id ? "selected" : ""}>${escape(item.name || item.id)}</option>`).join("")}</select></label><label><span>备用 Provider</span><select data-setup-model-task="${escape(task.kind)}" data-setup-model-field="fallback" ${busy || !choices.length ? "disabled" : ""}><option value="">不设置</option>${choices.filter(item => item.id !== provider).map(item => `<option value="${escape(item.id)}" ${fallback === item.id ? "selected" : ""}>${escape(item.name || item.id)}</option>`).join("")}</select></label>${button(`save-task:${task.kind}`, "保存路由", {disabled: !choices.length})}</div></details>`;
     }).join("");
     return `<section class="setup-stage">
-      <p class="setup-kicker">STEP 3</p><h3>配置插件模型</h3>
+      <p class="setup-kicker">STEP 2</p><h3>配置插件模型</h3>
       <p>选择初始 Provider。初始化后，任务路由可直接使用 AstrBot 中已加载的文本 Provider。</p>
       ${connectionDiagnostic()}
       ${providers.length ? `<label class="setup-model-field"><span>初始主 Provider</span>
@@ -2807,7 +2933,7 @@ window.CompanionSetup = (() => {
     }
     if (test?.state === "started" || test?.state === "unknown") {
       return `<section class="setup-stage">
-        <p class="setup-kicker">STEP 6</p><h3>主动测试结果未知</h3>
+        <p class="setup-kicker">STEP 8</p><h3>主动测试结果未知</h3>
         <p>主动联系已经经过模型生成与策略检查，但投递结果没有得到确定回执。为避免重复发送，本次不会重放。请到已绑定的私聊核对结果。</p>
         <p class="setup-test-receipt">${test?.state === "started" ? "等待平台确认" : "结果未知"}</p>
         ${noticeMarkup()}
@@ -2815,10 +2941,10 @@ window.CompanionSetup = (() => {
       </section>`;
     }
     if (test?.state === "failed") {
-      return `<section class="setup-stage"><p class="setup-kicker">STEP 6</p><h3>主动联系没有送达</h3><p>本次模型或投递链路明确失败，可以检查目标私聊和模型路由后重试。</p>${noticeMarkup()}<label class="setup-opt-in"><input type="checkbox" data-setup-proactive-opt-in ${proactiveOptIn ? "checked" : ""} ${busy ? "disabled" : ""}><span>我同意当前版本向已绑定的管理员私聊发送一次主动联系测试</span></label><div class="setup-actions">${button("proactive-test", "重新运行主动联系", {primary: true, disabled: !proactiveOptIn})}${button("refresh", "刷新状态")}</div></section>`;
+      return `<section class="setup-stage"><p class="setup-kicker">STEP 8</p><h3>主动联系没有送达</h3><p>本次模型或投递链路明确失败，可以检查目标私聊和模型路由后重试。</p>${noticeMarkup()}<label class="setup-opt-in"><input type="checkbox" data-setup-proactive-opt-in ${proactiveOptIn ? "checked" : ""} ${busy ? "disabled" : ""}><span>我同意当前版本向已绑定的管理员私聊发送一次主动联系测试</span></label><div class="setup-actions">${button("proactive-test", "重新运行主动联系", {primary: true, disabled: !proactiveOptIn})}${button("refresh", "刷新状态")}</div></section>`;
     }
     return `<section class="setup-stage">
-      <p class="setup-kicker">STEP 6</p><h3>测试主动消息</h3>
+      <p class="setup-kicker">STEP 8</p><h3>测试主动消息</h3>
       <p>当前版本会为当前角色建立一次性联系机会，经过主动联系模型、策略检查和真实投递。只有明确同意后才开始；未知结果不会重复发送。</p>
       <label class="setup-opt-in"><input type="checkbox" data-setup-proactive-opt-in ${proactiveOptIn ? "checked" : ""} ${busy ? "disabled" : ""}><span>我同意当前版本向已绑定的管理员私聊发送一次主动联系测试</span></label>
       ${noticeMarkup()}
@@ -3005,13 +3131,15 @@ window.CompanionSetup = (() => {
     const content = step === "binding" ? renderBinding()
       : step === "model" ? renderModel()
       : step === "proactive_test" ? renderProactiveTest()
+      : STEP_EDITORS[step] ? renderSettingsStep(step)
       : renderSection(step);
     const current = stepIndex(step);
     root.innerHTML = `<div class="setup-shell">
       <header class="setup-header"><div><span class="setup-kicker">我会永远陪着你</span><h2>开始使用</h2></div>
         <div class="setup-header-actions">${state.prepared ? `<button type="button" class="button" data-setup-action="advanced-open">快速配置</button>` : ""}<span class="setup-step-count">${String(current + 1).padStart(2, "0")} / ${String(ORDER.length).padStart(2, "0")}</span></div></header>
-      ${renderRail(step)}<div class="setup-content">${upgradeCard()}${content}</div>
+      ${renderRail(step)}<div class="setup-content">${upgradeCard()}${stageBanner(step)}${content}</div>
     </div>`;
+    if (STEP_EDITORS[step] && state.prepared) mountStepEditor(step);
   }
 
   async function loadStepData(result) {
@@ -4484,6 +4612,7 @@ window.CompanionSetup = (() => {
     mountGeneration++;
     stopLegacySettings();
     stopQuickWorkspace();
+    stopStepEditor();
     if (root) {
       root.removeEventListener("click", onClick);
       root.removeEventListener("change", onChange);

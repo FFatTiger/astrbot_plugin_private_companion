@@ -100,6 +100,9 @@ function updateProfileAvatarPreview(dataUrl){
     if(emblem)emblem.hidden=hasAvatar;
     if(remove)remove.hidden=!hasAvatar;
   });
+  document.querySelectorAll('[data-profile-avatar-label]').forEach(label=>{
+    label.textContent=hasAvatar?'更换头像':'上传头像';
+  });
 }
 function setProfileAvatar(dataUrl){
   const field=$('#roleProfileConfigWorkspace [data-wb-field="avatar_data_url"]');
@@ -3565,7 +3568,7 @@ function renderGovernanceOriginal(){
         <img data-profile-avatar alt="" src="${escapeHTML(avatarDataUrl)}"${avatarDataUrl?'':' hidden'}>
         <span data-profile-emblem data-profile-fallback="${escapeHTML(roleValue?Array.from(roleValue)[0]||'':'设')}" aria-hidden="true"${avatarDataUrl?' hidden':''}>${emblem}</span>
         <label class="portrait-upload" title="上传或更换角色头像">
-          <input type="file" data-profile-avatar-file accept="image/png,image/jpeg,image/webp" aria-label="上传或更换角色头像">
+          <input id="profile-avatar-input" type="file" data-profile-avatar-file accept="image/png,image/jpeg,image/webp" aria-label="上传或更换角色头像">
           ${I('image-plus')}
         </label>
         <button type="button" class="portrait-remove" data-profile-avatar-remove aria-label="移除角色头像" title="移除头像"${avatarDataUrl?'':' hidden'}>${I('x')}</button>
@@ -3573,6 +3576,7 @@ function renderGovernanceOriginal(){
       <div class="journal-id">
         <div class="journal-name-row"><h2 data-profile-name data-profile-fallback="${escapeHTML(roleLabel)}">${escapeHTML(roleLabel)}</h2>
           <span class="live" data-state="${escapeHTML(connection.state||'unknown')}"><i aria-hidden="true"></i><span data-profile-status>${escapeHTML(liveLabel)}</span></span></div>
+        <div class="journal-avatar-action"><label class="profile-avatar-upload" for="profile-avatar-input" data-profile-avatar-label>${avatarDataUrl?'更换头像':'上传头像'}</label></div>
         <div class="stickers" aria-label="角色速览">
           ${[['identity','身份'],['appearance','识别点'],['personality','性格'],['voice','口吻'],['world','所在世界']].map(([id,label])=>`<button type="button" class="sticker" data-self-focus="${id}"><b>${label}</b><span data-profile-signal="${id}">正在读取…</span></button>`).join('')}
         </div>

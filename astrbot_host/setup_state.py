@@ -9,7 +9,9 @@ from uuid import uuid4
 
 
 SCHEMA_VERSION = 3
-SETUP_STEPS = ("model", "knowledge", "relationships")
+# 与旧版配置引导一致的八步：窗口、模型、人格与世界知识、关系教学、主动功能与强度、
+# 日程与观察、群聊配置，最后是主动消息测试（测试完成才算 ready）。
+SETUP_STEPS = ("model", "knowledge", "relationships", "proactive", "life", "group")
 
 
 def empty_state() -> dict:

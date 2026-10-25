@@ -2376,3 +2376,23 @@
   .setup-guide-item { grid-template-columns: 36px minmax(0, 1fr); }
   .setup-guide-item > .button { grid-column: 2; justify-self: start; }
 }
+
+/* 旧版引导的分组步骤树 + 每步说明与要点清单。 */
+.setup-progress-group { display: grid; gap: var(--sp-1); margin: 0 0 var(--sp-3); }
+.setup-progress-group > strong { color: var(--muted); font-size: var(--fs-micro); font-weight: 700; letter-spacing: .04em; }
+.setup-progress-group.complete > strong { color: var(--ink); }
+.setup-progress-steps { display: grid; gap: var(--sp-1); margin: 0; padding: 0; list-style: none; }
+.setup-progress-step { display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center;
+  gap: var(--sp-2); min-height: 38px; color: var(--muted); font-size: var(--fs-body); line-height: 1.35; }
+.setup-progress-step.current { color: var(--ink); font-weight: 700; }
+.setup-progress-step.complete .setup-progress-marker { border-color: var(--line-strong); color: var(--ink); }
+.setup-stage-banner { display: grid; gap: var(--sp-2); margin: 0 0 var(--sp-4); padding: var(--sp-3);
+  border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); }
+.setup-stage-body { margin: 0; max-width: 72ch; color: var(--muted); font-size: var(--fs-body); line-height: 1.7; }
+.setup-checklist { display: grid; gap: var(--sp-1); margin: 0; padding: 0; list-style: none; }
+.setup-checklist li { position: relative; padding-left: var(--sp-4); color: var(--ink); font-size: var(--fs-tiny); line-height: 1.6; }
+.setup-checklist li::before { content: ""; position: absolute; left: 4px; top: .62em; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--line-strong); }
+@media (max-width: 960px) {
+  .setup-stage-banner { padding: var(--sp-2); }
+}
