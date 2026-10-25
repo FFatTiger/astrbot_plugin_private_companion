@@ -1,8 +1,7 @@
 """回答「你现在用的什么模型」时的只读材料：四类，只给名称。
 
-数据分两处：对话与语音合成是宿主 AstrBot 当前选中的 Provider，视觉理解是 V2
-自己的任务路由；生图走原生图像后端，回复链路读不到具体模型名——这一项照实
-标注，不拿别的字段凑。
+这份材料从当前会话的 V2 路由和原生 Image 公共配置读取，不走需要管理权限的
+模型管理页面，也不读取或暴露任何密钥。
 """
 
 from __future__ import annotations
@@ -12,10 +11,14 @@ from typing import Any
 KEYWORDS = ("模型", "视觉", "生图", "画图", "语音", "tts", "provider")
 INSTRUCTION = (
     "这是当前角色窗口实际生效的模型摘要，只列名称，不含密钥、额度或费用。"
-    "被问到「你在用什么模型」时按它回答，不要回答看不到；某一项标成 unavailable 时，"
-    "照实说明那一项读不到、并指到「模型与连接」页，不要拿别的项顶替，也不要猜模型名。")
+    "被问到「你在用什么模型」时按摘要中的 provider 和 model 回答；摘要里有 model 就不要回答看不到。"
+    "摘要只有 provider 而没有 model 时，只说明已公开的 provider，并明确具体型号未提供，"
+    "不要把 provider 名当成模型名。"
+    "某一项标成 unavailable 时，照实说明那一项读不到、并指到「模型与连接」页，"
+    "不要拿别的项顶替，也不要猜模型名。")
 
 VISION_KIND = "conversation.context_image_caption"
+VISION_KINDS = ("screen.interpretation", VISION_KIND, "image_review", "conversation.image_review")
 
 
 def _label(meta) -> str:
@@ -50,21 +53,165 @@ def _host_provider(host_context, kind: str, umo):
     return provider, meta
 
 
-def route_snapshot(application, context):
-    """复用「感知 → 模型能力」那张卡读的同一份快照（tasks + providers）。
-
-    扩展页读得到是因为它走的是 ``ModelManagement.status``；回复链路没必要另开一套
-    读法，直接拿同一份快照，卡片上显示什么、这里就注入什么。
-    """
+def _now(application):
+    clock = getattr(application, "now", None)
     try:
-        from companion_v2.model_gateway.management import ModelManagement
-        value = ModelManagement(application, context).status(context.actor, layer="window")
-        payload = value.unwrap() if hasattr(value, "unwrap") else value
-        if isinstance(payload, dict) and isinstance(payload.get("tasks"), list):
-            return payload
+        return clock() if callable(clock) else None
     except Exception:
         return None
+
+
+def _configuration_target(context):
+    """Build the same window target used by the model router."""
+    from companion_v2.configuration.models import ConfigLayer, ConfigTarget
+
+    scope = getattr(context, "scope", None)
+    role_binding = getattr(context, "role_binding", None)
+    role = getattr(role_binding, "role", None)
+    installation_id = getattr(scope, "installation_id", None)
+    if scope is None or role is None or not installation_id:
+        return None
+    try:
+        return ConfigTarget(installation_id, ConfigLayer.WINDOW, role, scope,
+                            bot_id=getattr(scope, "bot_id", None))
+    except (TypeError, ValueError):
+        return None
+
+
+def _unwrap_read(value):
+    if value is None:
+        return None
+    if getattr(value, "is_success", False):
+        try:
+            return value.unwrap()
+        except Exception:
+            return None
+    if isinstance(value, dict):
+        return value
     return None
+
+
+def _route_snapshot_from_router(application, context):
+    """Read task fields through the ordinary configuration-read path.
+
+    ``ModelManagement.status`` is an operator page API and requires management
+    permissions.  The reply path only needs the route values already visible to
+    the current task, so it reads each model group directly and falls back to the
+    router's provider default when a lightweight host fixture cannot read config.
+    """
+    router = getattr(application, "router", None)
+    profiles = getattr(router, "profiles", None)
+    if router is None or not profiles:
+        return None
+    configuration = getattr(application, "configuration", None)
+    actor = getattr(context, "actor", None)
+    target = _configuration_target(context)
+    observed_at = _now(application)
+    tasks = []
+    for profile in profiles.values() if hasattr(profiles, "values") else profiles:
+        snapshot = None
+        if (configuration is not None and callable(getattr(configuration, "read", None)
+                ) and actor is not None and target is not None and observed_at is not None):
+            try:
+                snapshot = _unwrap_read(configuration.read(actor, target=target,
+                    group_id=profile.group, observed_at=observed_at))
+            except Exception:
+                snapshot = None
+        provider_id = None
+        if snapshot is not None:
+            try:
+                provider_id = router.provider_default(context, profile, snapshot)
+                snapshot = router.apply_provider_default(profile, snapshot, provider_id)
+            except Exception:
+                provider_id = None
+            fields = {}
+            raw_fields = (snapshot.get("fields", {}) if isinstance(snapshot, dict)
+                          else getattr(snapshot, "fields", {}))
+            for name, field in raw_fields.items():
+                value = (field.get("value") if isinstance(field, dict)
+                         else getattr(field, "value", None))
+                fields[name.rsplit(".", 1)[-1]] = {"value": value}
+            provider_id = fields.get("provider", {}).get("value") or provider_id
+        else:
+            try:
+                provider_id = router.provider_default(context, profile, None)
+            except Exception:
+                provider_id = None
+            provider_id = provider_id or getattr(profile, "default_provider", None)
+            fields = {"provider": {"value": provider_id}} if provider_id else {}
+        if fields:
+            tasks.append({"kind": getattr(profile, "kind", ""), "fields": fields})
+    providers = []
+    provider_values = getattr(router, "providers", {})
+    values = provider_values.values() if hasattr(provider_values, "values") else provider_values
+    for provider in values:
+        binding = getattr(provider, "binding", None)
+        provider_id = getattr(binding, "provider", None)
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            continue
+        model = getattr(provider, "model", "")
+        providers.append({"id": provider_id.strip(),
+                          "model": model if isinstance(model, str) else "",
+                          "capabilities": list(getattr(provider, "capabilities", ()) or ())})
+    return {"tasks": tasks, "providers": providers}
+
+
+def route_snapshot(application, context):
+    return _route_snapshot_from_router(application, context)
+
+
+def image_route_snapshot(native_tool_port):
+    """Project the public native Image configuration into model-safe names."""
+    unavailable = {"state": "unavailable", "reason": "生图扩展未启用或没有可用路由"}
+    if native_tool_port is None:
+        return unavailable
+    try:
+        api = native_tool_port.image_extension_api()
+        output = api.output_configuration() if api is not None else None
+        settings = output.get("settings") if isinstance(output, dict) else None
+        if not isinstance(settings, dict) or settings.get("enabled") is not True:
+            return unavailable
+        endpoints = {item.get("id"): item for item in settings.get("endpoints", ())
+                     if isinstance(item, dict) and isinstance(item.get("id"), str)}
+        route_config = settings.get("operation_routes")
+        if isinstance(route_config, dict):
+            routes = route_config.get("generate", ())
+        else:
+            # Older saved image settings did not persist operation routes; the
+            # public endpoint list is still enough to identify its default path.
+            routes = ["online:" + identifier for identifier, item in endpoints.items()
+                      if item.get("enabled") is True]
+            for backend in ("sd_webui", "comfyui"):
+                if isinstance(settings.get(backend), dict) and settings[backend].get("base_url"):
+                    routes.append(backend)
+        entries = []
+        for route in routes:
+            if not isinstance(route, str):
+                continue
+            if route.startswith("online:"):
+                endpoint = endpoints.get(route[7:])
+                if not isinstance(endpoint, dict) or endpoint.get("enabled") is not True:
+                    continue
+                if not endpoint.get("base_url"):
+                    continue
+                model = endpoint.get("model", "")
+                platform = endpoint.get("platform", "auto")
+                if isinstance(model, str) and model.strip():
+                    entries.append(_entry(str(platform).strip() or "auto", model.strip()))
+            elif route in ("sd_webui", "comfyui"):
+                backend = settings.get(route)
+                if isinstance(backend, dict) and backend.get("base_url"):
+                    model = backend.get("model", "")
+                    entries.append(_entry(route, str(model).strip() if isinstance(model, str) else ""))
+        if not entries:
+            return unavailable
+        result = dict(entries[0])
+        if len(entries) > 1:
+            result["models"] = [item.get("model", "") for item in entries]
+            result["providers"] = [item["provider"] for item in entries]
+        return result
+    except Exception:
+        return unavailable
 
 
 def _route_from_snapshot(snapshot, *kinds):
@@ -83,16 +230,19 @@ def _route_from_snapshot(snapshot, *kinds):
     return None
 
 
-def build_summary(application, host_context, umo, context, at):
-    """汇总四类模型；有快照优先用快照，没有才退回宿主 Provider。"""
+def build_summary(application, host_context, umo, context, at, native_tool_port=None):
+    """汇总四类模型；配置读取失败时只退回当前宿主对话 Provider。"""
     summary: dict[str, Any] = {}
     snapshot = route_snapshot(application, context)
     for title, kinds, getter, reason in (
             ("对话", ("conversation.reply",), "get_using_provider", "宿主没有返回当前对话 Provider"),
-            ("视觉理解", ("vision.review", "screen.interpretation"), None, "任务路由未配置"),
-            ("生图", ("image.generate",), None, "生图任务路由未配置"),
+            ("视觉理解", VISION_KINDS, None, "视觉任务路由未配置"),
             ("语音合成", (), "get_using_tts_provider", "没有启用或没有选中 TTS Provider")):
         entry = _route_from_snapshot(snapshot, *kinds) if kinds else None
+        # Accept snapshots produced by older material providers while all new
+        # snapshots use the registered task kinds above.
+        if entry is None and title == "视觉理解":
+            entry = _route_from_snapshot(snapshot, "vision.review")
         if entry is not None:
             summary[title] = entry
             continue
@@ -102,6 +252,10 @@ def build_summary(application, host_context, umo, context, at):
                               else {"state": "unavailable", "reason": reason})
         except Exception as error:
             summary[title] = {"state": "unavailable", "reason": type(error).__name__}
+    image_summary = image_route_snapshot(native_tool_port)
+    if image_summary.get("state") == "unavailable":
+        image_summary = _route_from_snapshot(snapshot, "image.generate") or image_summary
+    summary["生图"] = image_summary
     return summary
 
 
@@ -116,14 +270,15 @@ def scope_umo(context) -> str:
     return f"{platform}:{kind}:{native}" if platform and native else ""
 
 
-def model_route_keyword_material(application, host_context):
+def model_route_keyword_material(application, host_context, native_tool_port=None):
     from companion_v2.conversation.keyword_materials import KeywordMaterialSpec
     from companion_v2.expression.configuration import source_subject_allowed_for_context
     from companion_v2.foundation.refs import ScopeKind
 
     async def prepare(context, text, at):
         return {"state": "ok",
-                "models": build_summary(application, host_context, scope_umo(context) or None, context, at)}
+                "models": build_summary(application, host_context, scope_umo(context) or None,
+                                         context, at, native_tool_port=native_tool_port)}
 
     def available(context):
         if context.scope.kind is not ScopeKind.PRIVATE:

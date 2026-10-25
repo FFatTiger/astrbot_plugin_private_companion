@@ -497,7 +497,8 @@ class AstrBotStagingController:
             from companion_v2.conversation.keyword_materials import KeywordMaterials
             self.session.application.keyword_materials = KeywordMaterials((
                 balance_keyword_material(self.session.application),
-                model_route_keyword_material(self.session.application, self.context),
+                model_route_keyword_material(self.session.application, self.context,
+                                             native_tool_port=self.native_extensions),
                 web_read_keyword_material(self.session.application),
             ))
         except Exception as error:
@@ -509,7 +510,7 @@ class AstrBotStagingController:
             logger.warning("[CompanionV2] 文档解析组件自检失败 error_type=%s", type(error).__name__)
         try:
             from .image_access import ensure_image_access
-            ensure_image_access(self, self.session)
+            ensure_image_access(self.runtime, self.session.profile.target, observed_at=self.now())
         except Exception as error:
             logger.warning("[CompanionV2] 生图能力授权补齐失败 error_type=%s", type(error).__name__)
         from .knowledge_sources import attach_official_knowledge

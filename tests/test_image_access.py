@@ -1,94 +1,193 @@
-"""生图能力要同时有「装配 + 角色启用 + 私聊授权」才发工具；这里补齐后两项。"""
+"""Real persisted Image defaults retain explicit decisions and native route isolation."""
 
-from __future__ import annotations
+from dataclasses import replace
+from datetime import timedelta
+from types import SimpleNamespace as NS
+from unittest.mock import patch
 
-from datetime import datetime, timezone
-from types import SimpleNamespace
-import unittest
-
-from astrbot_host import image_access
-from companion_v2.foundation.outcome import Outcome
-
-
-class FakeRepository:
-    def __init__(self, *, installed=True, role_enabled=False, authorized=False):
-        self.installed = installed
-        self.role_enabled = role_enabled
-        self.authorized = authorized
-        self.calls = []
-
-    def installation(self, *, extension_id):
-        return Outcome.success({"extension_id": extension_id}) if self.installed \
-            else Outcome.failed("capability_not_installed", "missing")
-
-    def require_role_enabled(self, *, extension_id, role, bot_id=None):
-        return Outcome.success(object()) if self.role_enabled \
-            else Outcome.failed("capability_role_disabled", "off")
-
-    def set_role_enabled(self, **kwargs):
-        self.calls.append(("role", kwargs))
-        self.role_enabled = True
-        return Outcome.success(object())
-
-    def authorize(self, *, extension_id, capability_id, subject, scope):
-        return Outcome.success(object()) if self.authorized \
-            else Outcome.failed("capability_consent_missing", "missing")
-
-    def set_authorization(self, **kwargs):
-        self.calls.append(("authorization", kwargs))
-        return Outcome.success(object())
+from astrbot_host.image_access import IMAGE_CAPABILITIES, ensure_image_access
+from companion_v2.capabilities import CapabilityAuthorizationState, CapabilityPackageDescriptor
+from companion_v2.capabilities.repositories import CapabilityRepository
+from companion_v2.foundation.refs import ScopeKind
+from companion_v2.identity_policy.models import AuthorizationTier
+from companion_v2.identity_policy.repository import PersistentIdentityDirectory
+from tests.g6_support import G6Fixture, NOW
 
 
-def session():
-    scope = SimpleNamespace(bot_id="bot-1", platform="default", native_scope_id="995051631")
-    context = SimpleNamespace(role_binding=SimpleNamespace(role="role-1"), scope=scope,
-                              actor=SimpleNamespace(subject="human-1"))
-    return SimpleNamespace(profile=SimpleNamespace(target=context))
-
-
-class ImageAccessTests(unittest.TestCase):
+class ImageAccessTests(G6Fixture):
     def setUp(self):
-        self.original = image_access.CapabilityRepository
+        super().setUp()
+        self.scope = replace(self.scope, bot_id="bot-a", account_id="100",
+                             conversation_id="conversation-a", session_id="200")
+        self.context = NS(scope=self.scope, actor=NS(subject=self.subject), role_binding=NS(role=self.role))
+        self.package = CapabilityPackageDescriptor(
+            "image", "native-image", "companion", "1", "image-hash", IMAGE_CAPABILITIES)
+        self.capabilities.register_descriptor(self.package, registered_at=NOW).unwrap()
 
-    def tearDown(self):
-        image_access.CapabilityRepository = self.original
+    def install_image(self):
+        self.capabilities.acquire(extension_id="image", package_id=self.package.package_id,
+            package_version=self.package.package_version, expected_revision=0, observed_at=NOW).unwrap()
 
-    def test_enables_the_role_and_grants_every_image_capability_once(self):
-        repository = FakeRepository()
-        image_access.CapabilityRepository = lambda runtime: repository
-        controller = SimpleNamespace(runtime=object(), now=lambda: datetime.now(timezone.utc))
+    def ensure(self, context=None):
+        ensure_image_access(self.runtime, context or self.context, observed_at=self.clock.now())
 
-        image_access.ensure_image_access(controller, session())
+    def consent(self, capability="image.generate", context=None):
+        context = context or self.context
+        return self.capabilities.consent(extension_id="image", capability_id=capability,
+                                         subject=context.actor.subject, scope=context.scope)
 
-        kinds = [kind for kind, _ in repository.calls]
-        self.assertEqual(kinds, ["role", "authorization", "authorization", "authorization"])
-        capabilities = [kwargs["capability_id"] for kind, kwargs in repository.calls if kind == "authorization"]
-        self.assertEqual(capabilities, list(image_access.IMAGE_CAPABILITIES))
-        role_call = repository.calls[0][1]
-        self.assertTrue(role_call["enabled"])
-        self.assertEqual(role_call["bot_id"], "bot-1")
+    def choose(self, state, *, revision=1, context=None):
+        context = context or self.context
+        return self.capabilities.set_authorization(extension_id="image", capability_id="image.generate",
+            subject=context.actor.subject, scope=context.scope, state=state, expected_revision=revision,
+            observed_at=self.clock.now()).unwrap()
 
-    def test_nothing_is_written_when_already_enabled_and_authorized(self):
-        repository = FakeRepository(role_enabled=True, authorized=True)
-        image_access.CapabilityRepository = lambda runtime: repository
-        controller = SimpleNamespace(runtime=object(), now=lambda: datetime.now(timezone.utc))
-        image_access.ensure_image_access(controller, session())
-        self.assertEqual(repository.calls, [])
+    def records(self):
+        return tuple(tuple(tuple(row) for row in self.runtime.read_all("SELECT * FROM " + table, ()))
+                     for table in ("capability_role_selections", "capability_authorizations"))
 
-    def test_missing_installation_is_left_to_the_assembly_step(self):
-        repository = FakeRepository(installed=False)
-        image_access.CapabilityRepository = lambda runtime: repository
-        controller = SimpleNamespace(runtime=object(), now=lambda: datetime.now(timezone.utc))
-        image_access.ensure_image_access(controller, session())
-        self.assertEqual(repository.calls, [])
+    def test_missing_installation_can_be_repaired_after_native_start(self):
+        self.ensure()
+        self.assertEqual(self.records(), ((), ()))
+        self.install_image()
+        self.ensure()
+        self.assertEqual(len(self.records()[0]), 1)
+        self.assertEqual(len(self.records()[1]), 3)
+        for capability in IMAGE_CAPABILITIES:
+            self.assertEqual(self.consent(capability).unwrap().state, CapabilityAuthorizationState.ACTIVE)
+        before = self.records()
+        self.clock.advance(timedelta(minutes=1))
+        self.ensure()
+        self.assertEqual(self.records(), before)
 
-    def test_no_session_context_is_a_no_op(self):
-        repository = FakeRepository()
-        image_access.CapabilityRepository = lambda runtime: repository
-        controller = SimpleNamespace(runtime=object(), now=lambda: datetime.now(timezone.utc))
-        image_access.ensure_image_access(controller, SimpleNamespace(profile=None))
-        self.assertEqual(repository.calls, [])
+    def test_explicit_role_disable_is_not_retried_or_overwritten(self):
+        self.install_image()
+        self.capabilities.set_role_enabled(extension_id="image", role=self.role, bot_id=self.scope.bot_id,
+            enabled=False, expected_revision=0, observed_at=NOW).unwrap()
+        before = self.records()
+        with self.assertNoLogs("astrbot_host.image_access", level="WARNING"):
+            self.ensure()
+        self.assertEqual(self.records(), before)
 
+    def test_revocation_survives_repeat_and_storage_reopen(self):
+        self.install_image()
+        self.ensure()
+        self.choose(CapabilityAuthorizationState.REVOKED)
+        before = self.records()
+        self.runtime.close()
+        self.runtime = self.open_runtime()
+        self.capabilities = CapabilityRepository(self.runtime)
+        with self.assertNoLogs("astrbot_host.image_access", level="WARNING"):
+            self.ensure()
+        self.assertEqual(self.records(), before)
+        self.assertEqual(self.consent().failure.code, "capability_consent_revoked")
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_paused_or_removing_module_does_not_gain_defaults(self):
+        self.install_image()
+        self.capabilities.pause(extension_id="image", expected_revision=1, observed_at=NOW).unwrap()
+        self.ensure()
+        self.assertEqual(self.records(), ((), ()))
+        self.capabilities.request_discard(extension_id="image", expected_revision=2, observed_at=NOW).unwrap()
+        self.ensure()
+        self.assertEqual(self.records(), ((), ()))
+
+    def test_group_does_not_inherit_private_defaults(self):
+        self.install_image()
+        self.ensure(NS(scope=replace(self.scope, kind=ScopeKind.GROUP),
+                       actor=self.context.actor, role_binding=self.context.role_binding))
+        self.assertEqual(self.records(), ((), ()))
+
+    def test_new_conversation_keeps_revocation_without_implicit_cross_scope_access(self):
+        self.install_image()
+        self.ensure()
+        self.choose(CapabilityAuthorizationState.REVOKED)
+        new = NS(scope=replace(self.scope, conversation_id="new-conversation"),
+                 actor=self.context.actor, role_binding=self.context.role_binding)
+        self.assertEqual(self.consent(context=new).failure.code, "capability_consent_missing")
+        self.ensure(new)
+        self.assertEqual(self.consent(context=new).failure.code, "capability_consent_revoked")
+        for capability in IMAGE_CAPABILITIES[1:]:
+            self.assertTrue(self.consent(capability, new).is_success)
+        # A later deliberate re-enable is the next conversation's default.
+        self.clock.advance(timedelta(minutes=1))
+        self.choose(CapabilityAuthorizationState.ACTIVE, context=new)
+        latest = NS(scope=replace(self.scope, conversation_id="latest-conversation"),
+                    actor=self.context.actor, role_binding=self.context.role_binding)
+        self.ensure(latest)
+        self.assertTrue(self.consent(context=latest).is_success)
+
+    def test_route_choices_do_not_cross_user_bot_account_platform_or_window(self):
+        self.install_image()
+        self.ensure()
+        self.choose(CapabilityAuthorizationState.REVOKED)
+        contexts = [NS(scope=self.scope, actor=NS(subject=replace(self.subject, subject_id="other")),
+                       role_binding=self.context.role_binding)]
+        for field, value in (("bot_id", "bot-b"), ("account_id", "101"), ("platform", "other-platform"),
+                             ("native_scope_id", "201"), ("session_id", "201")):
+            contexts.append(NS(scope=replace(self.scope, **{field: value}),
+                               actor=self.context.actor, role_binding=self.context.role_binding))
+        for context in contexts:
+            with self.subTest(scope=context.scope, subject=context.actor.subject):
+                self.ensure(context)
+                self.assertTrue(self.consent(context=context).is_success)
+        self.assertEqual(self.consent().failure.code, "capability_consent_revoked")
+
+    def test_failed_default_write_rolls_back_partial_role_selection(self):
+        self.install_image()
+        with patch.object(CapabilityRepository, "set_authorization", side_effect=RuntimeError("synthetic")), \
+                self.assertLogs("astrbot_host.image_access", level="WARNING"):
+            self.ensure()
+        self.assertEqual(self.records(), ((), ()))
+
+    def test_invocation_grant_is_idempotent_and_keeps_revocation_across_conversations(self):
+        self.install_image()
+        self.ensure()
+        identities = PersistentIdentityDirectory(self.runtime)
+        grants = identities.grants_for_subject(self.subject)
+        self.assertEqual(len(grants), 1)
+        self.assertEqual(grants[0].capability, "extension.tool.invoke")
+        self.ensure()
+        self.assertEqual(identities.grants_for_subject(self.subject), grants)
+        identities.revoke_grant(grants[0].grant_id, revoked_at=self.clock.now(),
+                                expected_revision=identities.revision)
+        self.ensure()
+        new = NS(scope=replace(self.scope, conversation_id="new-conversation"),
+                 actor=self.context.actor, role_binding=self.context.role_binding)
+        self.ensure(new)
+        self.assertEqual(len(identities.grants_for_subject(self.subject)), 1)
+
+    def test_expired_or_future_invocation_grants_are_not_refreshed(self):
+        self.install_image()
+        identities = PersistentIdentityDirectory(self.runtime)
+        for label, starts, expires in (("expired", NOW - timedelta(hours=2), NOW - timedelta(hours=1)),
+                                       ("future", NOW + timedelta(hours=1), None)):
+            with self.subTest(label=label):
+                scope = replace(self.scope, native_scope_id=label, session_id=label)
+                identities.issue_grant(grant_id=label, subject=self.subject, scope=scope,
+                    capability="extension.tool.invoke", tier=AuthorizationTier.STANDARD,
+                    valid_from=starts, expires_at=expires, expected_revision=identities.revision)
+                context = NS(scope=scope, actor=self.context.actor, role_binding=self.context.role_binding)
+                before = identities.grants_for_subject(self.subject)
+                self.ensure(context)
+                self.ensure(NS(scope=replace(scope, conversation_id="new-conversation"),
+                               actor=context.actor, role_binding=context.role_binding))
+                self.assertEqual(identities.grants_for_subject(self.subject), before)
+
+    def test_later_explicit_grant_restores_defaults_for_new_conversations(self):
+        self.install_image()
+        self.ensure()
+        identities = PersistentIdentityDirectory(self.runtime)
+        grant = identities.grants_for_subject(self.subject)[0]
+        self.clock.advance(timedelta(minutes=1))
+        identities.revoke_grant(grant.grant_id, revoked_at=self.clock.now(),
+                                expected_revision=identities.revision)
+        self.clock.advance(timedelta(minutes=1))
+        identities.issue_grant(grant_id="explicit-reenable", subject=self.subject,
+            scope=replace(self.scope, conversation_id="reenabled-conversation"),
+            capability="extension.tool.invoke", tier=AuthorizationTier.STANDARD,
+            valid_from=self.clock.now(), expected_revision=identities.revision)
+        new = NS(scope=replace(self.scope, conversation_id="next-conversation"),
+                 actor=self.context.actor, role_binding=self.context.role_binding)
+        self.ensure(new)
+        grants = identities.grants_for_subject(self.subject)
+        self.assertTrue(any(grant.scope == new.scope for grant in grants))

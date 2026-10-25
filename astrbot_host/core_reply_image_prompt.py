@@ -47,7 +47,7 @@ def core_image_tools(session, offered):
     present = [item.spec.action for item in offered if item.spec.action in IMAGE_ACTIONS]
     if not present:
         filtered = []
-        diagnostics = getattr(getattr(session.application, "tools", None), "catalog_with_diagnostics", None)
+        diagnostics = getattr(getattr(session.application, "tools", None), "catalog_for_with_diagnostics", None)
         if callable(diagnostics):
             try:
                 _available, filtered = diagnostics(session.context)

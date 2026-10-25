@@ -5,7 +5,9 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from astrbot_host.model_route_material import build_summary, scope_umo
+from astrbot_host.model_route_material import build_summary, image_route_snapshot, route_snapshot, scope_umo
+from companion_v2.foundation.outcome import Outcome
+from companion_v2.foundation.refs import ScopeKind, ScopeRef, SubjectKind, SubjectRef
 
 
 class Meta(dict):
@@ -90,6 +92,113 @@ class ModelRouteMaterialTests(unittest.TestCase):
         scope.native_scope_id = "1097283005"
         self.assertEqual(scope_umo(SimpleNamespace(scope=scope)), "aiocqhttp:GroupMessage:1097283005")
         self.assertEqual(scope_umo(SimpleNamespace()), "")
+
+    def test_route_snapshot_reads_window_configuration_without_management_status(self):
+        snapshot = route_snapshot(RouteApplication(), route_context())
+        self.assertEqual(snapshot["tasks"][0]["fields"]["provider"]["value"], "chat")
+        self.assertEqual(snapshot["providers"][0]["model"], "chat-model")
+
+    def test_visual_route_uses_registered_screen_task_and_native_image_model(self):
+        summary = build_summary(RouteApplication(), RouteHost(), None, route_context(), NOW,
+                                native_tool_port=NativePort())
+        self.assertEqual(summary["视觉理解"]["model"], "chat-model")
+        self.assertEqual(summary["生图"]["model"], "gpt-image-1")
+
+    def test_image_route_is_unavailable_without_an_enabled_endpoint(self):
+        self.assertEqual(image_route_snapshot(None)["state"], "unavailable")
+
+    def test_local_image_route_does_not_invent_a_model_name(self):
+        summary = image_route_snapshot(LocalNativePort())
+        self.assertEqual(summary, {"provider": "sd_webui"})
+
+
+def route_context():
+    scope = ScopeRef("install", "qq", ScopeKind.PRIVATE, "friend",
+                     bot_id="bot", account_id="account", conversation_id="conversation",
+                     session_id="session")
+    role = SubjectRef("install", SubjectKind.BOT, "role")
+    return SimpleNamespace(scope=scope,
+                           role_binding=SimpleNamespace(role=role), actor=object())
+
+
+class RouteProvider:
+    def __init__(self, identifier, model):
+        self.binding = SimpleNamespace(provider=identifier)
+        self.model = model
+        self.capabilities = ("text", "image")
+
+
+class RouteProfile:
+    def __init__(self, kind, provider="chat"):
+        self.kind = kind
+        self.group = "model." + kind
+        self.default_provider = provider
+
+
+class RouteRouter:
+    def __init__(self):
+        self.profiles = {
+            "conversation.reply": RouteProfile("conversation.reply"),
+            "screen.interpretation": RouteProfile("screen.interpretation"),
+        }
+        self.providers = {"chat": RouteProvider("chat", "chat-model")}
+
+    def provider_default(self, context, profile, snapshot=None):
+        return None
+
+    def apply_provider_default(self, profile, snapshot, provider_id):
+        return snapshot
+
+
+class RouteConfiguration:
+    def read(self, actor, *, target, group_id, observed_at):
+        return Outcome.success(SimpleNamespace(fields={
+            group_id + ".provider": SimpleNamespace(value="chat"),
+        }))
+
+
+class RouteApplication:
+    def __init__(self):
+        self.router = RouteRouter()
+        self.configuration = RouteConfiguration()
+        self.now = lambda: NOW
+
+
+class RouteHost:
+    def get_using_provider(self, umo=None):
+        return SimpleNamespace(meta=lambda: SimpleNamespace(id="chat", model="chat-model"))
+
+    def get_using_tts_provider(self, umo=None):
+        return SimpleNamespace(meta=lambda: SimpleNamespace(id="tts", model="voice-model"))
+
+
+class ImageAPI:
+    def output_configuration(self):
+        return {"settings": {
+            "enabled": True,
+            "operation_routes": {"generate": ["online:primary"]},
+            "endpoints": [{"id": "primary", "enabled": True, "base_url": "https://image.example",
+                           "platform": "openai", "model": "gpt-image-1"}],
+        }}
+
+
+class NativePort:
+    def image_extension_api(self):
+        return ImageAPI()
+
+
+class LocalImageAPI:
+    def output_configuration(self):
+        return {"settings": {
+            "enabled": True,
+            "operation_routes": {"generate": ["sd_webui"]},
+            "sd_webui": {"base_url": "http://127.0.0.1:7860"},
+        }}
+
+
+class LocalNativePort:
+    def image_extension_api(self):
+        return LocalImageAPI()
 
 
 if __name__ == "__main__":

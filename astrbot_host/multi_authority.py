@@ -321,7 +321,10 @@ class MultiAuthority:
                     self.personas.set_binding(replace(binding, revision=binding.revision + 1),
                         expected_revision=binding.revision, observed_at=self.now())
             self.write(key, scope.document())
-            return self.context(target.target_id, role.subject_id)
+            context = self.context(target.target_id, role.subject_id)
+            from .image_access import ensure_image_access
+            ensure_image_access(self.runtime, context, observed_at=self.now())
+            return context
 
     def context(self, target_id, role_id):
         target = self.target(target_id)
