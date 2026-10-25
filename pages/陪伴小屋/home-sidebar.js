@@ -275,13 +275,14 @@ window.CompanionHomeSidebar = (() => {
       && (planning.running || ["failed","expired","dead_letter","cancelled","uncertain","blocked","deferred"].includes(dailyResult?.state));
     const planningFailure = planningIncomplete && !planning.running;
     const planningFailureLabel = ({provider_wait_timed_out:"模型等待超时",timeout:"执行超时",
-      model_usage_unknown:"模型调用未完成确认",response_contract_rejected:"模型返回格式不符合日程要求",
-      planning_output_invalid:"模型返回的日程无效",worker_error:"生成失败"})[dailyResult?.code] || "生成未完成";
+      model_usage_unknown:"模型输出不完整（可能达到长度上限）",response_contract_rejected:"模型返回格式不符合日程要求",
+      native_response_parse_failed:"模型返回无法解析",planning_output_invalid:"模型返回的日程无效",worker_error:"生成失败"})[dailyResult?.code]
+      || (dailyResult?.code ? `生成未完成（${dailyResult.code}）` : "生成未完成");
     const nextReview = stamp(planning?.next_review_at);
     const planningNote = planning?.enabled
       ? !planning.calendar_enabled ? "日历写入尚未开启，自动规划暂停"
         : planning.running ? "自动规划正在检查日程"
-          : planningFailure ? `当日规划未完成：${planningFailureLabel}${nextReview != null ? ` · ${moment(nextReview, now, zone)} 重新评估剩余时段` : ""}`
+          : planningFailure ? `当日规划未完成：${planningFailureLabel} · 发送「重新生成日程」可立即重试${nextReview != null ? ` · ${moment(nextReview, now, zone)} 重新评估剩余时段` : ""}`
           : nextCheck != null ? `自动规划已开启 · 调度巡检 ${moment(nextCheck, now, zone)}`
             : "自动规划已开启 · 暂无近期计划"
       : "";

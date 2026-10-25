@@ -57,8 +57,47 @@ def decode(text):
     return {"items": result} if type(result) is list else result
 
 
+def _decode_complete_items(text):
+    """Salvage complete items from a response cut off by the output token limit.
+
+    A model that hits ``finish_reason=length`` may still have emitted one or more
+    complete objects inside ``items``.  The trailing object is incomplete, so it
+    is discarded rather than guessed at.  Only daily/horizon plans use this path;
+    refine and intervention are all-or-nothing contracts.
+    """
+    value = text.strip()
+    if value.startswith("```"):
+        value = value.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    marker = value.find('"items"')
+    start = value.find("[", marker if marker >= 0 else 0)
+    if start < 0:
+        return None
+    decoder = json.JSONDecoder()
+    items, cursor = [], start + 1
+    while cursor < len(value):
+        while cursor < len(value) and value[cursor] in " \t\r\n,":
+            cursor += 1
+        if cursor >= len(value) or value[cursor] == "]":
+            break
+        try:
+            item, cursor = decoder.raw_decode(value, cursor)
+        except ValueError:
+            break
+        if type(item) is not dict:
+            break
+        items.append(item)
+    return {"items": items} if items else None
+
+
 def parse_output(text, job):
-    data = decode(text)
+    try:
+        data = decode(text)
+    except TaskError:
+        if job["mode"] not in ("daily", "horizon"):
+            raise
+        data = _decode_complete_items(text)
+        if data is None:
+            raise
     if job["mode"] == "intervention":
         return parse_intervention(data, job)
     if job["mode"] == "refine":

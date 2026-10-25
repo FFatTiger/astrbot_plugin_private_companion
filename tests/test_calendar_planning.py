@@ -137,6 +137,12 @@ class PlanningOutputTests(unittest.TestCase):
         with self.assertRaises(TaskError):
             parse_output('{"items":[', self.job())
 
+    def test_truncated_json_keeps_complete_items_and_drops_the_tail(self):
+        text = '{"items":[' + json.dumps(output(), ensure_ascii=False) + ',{"title":"半截'
+        items, rejected = parse_output(text, self.job())
+        self.assertEqual([item[0]["title"] for item in items], ["读下一小节"])
+        self.assertEqual(rejected, ())
+
     def test_intervention_only_changes_accepted_role_plan_records(self):
         plan = {"id": "role-plan", "revision": 3, "kind": "role_plan", "state": "accepted",
             "title": "阅读", "schedule": json.loads(encode(Schedule(NOW + timedelta(hours=2), "Asia/Shanghai"))),
