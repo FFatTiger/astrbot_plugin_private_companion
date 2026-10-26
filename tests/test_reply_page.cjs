@@ -881,6 +881,7 @@ test('expression voice tab hosts the shared reply editor with only TTS settings 
     'voice_private_ja_provider_id', 'voice_group_ja_provider_id']) {
     assert.ok(adapter.includes(field), `missing TTS setting ${field}`);
   }
+  assert.match(adapter, /私聊 \/ 群聊语音覆盖/);
 });
 
 test('the TTS provider catalog comes from the read result, not a page-local list', async () => {

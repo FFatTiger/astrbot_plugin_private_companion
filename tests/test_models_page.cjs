@@ -498,16 +498,21 @@ test('switching to the voice tab lazily loads, saves, and plays a synthesized sa
   const get = requests.find(r => r.method === 'GET' && r.route === 'model/voice');
   assert.ok(get, 'voice tab should trigger a GET to model/voice');
   const voice = {languages: [{k: 'zh', n: '中文', bind: ''}, {k: 'ja', n: '日语', bind: ''}, {k: 'en', n: '英语', bind: ''}],
-    providers: [{id: 'tts-live'}], timeout_seconds: 30, voice_enabled: true, edit_token: TOKEN};
+    channels: [{k: 'private', n: '私聊', bindings: {zh: '', ja: '', en: ''}},
+      {k: 'group', n: '群聊', bindings: {zh: '', ja: '', en: ''}}],
+    providers: [{id: 'tts-live', model: 's2.1-pro-free', voice: '高木さん'}], timeout_seconds: 30,
+    voice_enabled: true, edit_token: TOKEN};
   get.resolve(voice);
   await flush();
   assert.match(node.innerHTML, /语音模型/);
   assert.match(node.innerHTML, /按语种配置语音合成/);
   node.change('[data-voice-provider]', {value: 'tts-live'});
+  node.change('[data-voice-channel]', {voiceChannel: 'private', value: 'tts-live'});
   node.click('[data-voice-save]');
   const post = requests.find(r => r.method === 'POST' && r.route === 'model/voice/save');
   assert.ok(post, 'voice save should POST to model/voice/save');
   assert.equal(post.values.changes.voice_ja_provider_id, 'tts-live');
+  assert.equal(post.values.changes.voice_private_ja_provider_id, 'tts-live');
   post.resolve({...voice, languages: voice.languages.map(item => item.k === 'ja' ? {...item, bind: 'tts-live'} : item)});
   await flush();
   assert.match(node.innerHTML, /语音配置已保存/);

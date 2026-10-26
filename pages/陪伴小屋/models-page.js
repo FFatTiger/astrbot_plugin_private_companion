@@ -642,13 +642,21 @@ window.CompanionModelsPage = (() => {
   /* ---------- voice model ---------- */
   const voiceCurrent = v => v.data.languages.find(l => l.k === v.ui.lang) || v.data.languages[0];
   const voiceBinding = (v, lang) => v.draft.bindings[lang.k] ?? "";
+  const voiceChannelBinding = (v, channel, lang) => v.draft.channels?.[channel]?.[lang.k] ?? "";
   const voiceChanges = v => { const changes = {};
     for (const lang of v.data.languages) { const name = `voice_${lang.k}_provider_id`;
       if (voiceBinding(v, lang) !== lang.bind) changes[name] = voiceBinding(v, lang); }
+    for (const channel of v.data.channels || []) for (const lang of v.data.languages) {
+      const name = `voice_${channel.k}_${lang.k}_provider_id`;
+      const current = voiceChannelBinding(v, channel.k, lang), saved = channel.bindings?.[lang.k] ?? "";
+      if (current !== saved) changes[name] = current;
+    }
     if (v.draft.timeout_seconds !== v.data.timeout_seconds) changes.voice_timeout_seconds = v.draft.timeout_seconds;
     return changes; };
   const voiceDirty = v => !!v.draft && Object.keys(voiceChanges(v)).length > 0;
-  const voiceDraft = data => ({bindings: Object.fromEntries(data.languages.map(lang => [lang.k, lang.bind])), timeout_seconds: data.timeout_seconds});
+  const voiceDraft = data => ({bindings: Object.fromEntries(data.languages.map(lang => [lang.k, lang.bind])),
+    channels: Object.fromEntries((data.channels || []).map(channel => [channel.k, {...(channel.bindings || {})}])),
+    timeout_seconds: data.timeout_seconds});
   async function voiceRefresh(s) { const v = s.voice, ticket = version; if (v.loading) return; v.loading = true; v.notice = "正在读取语音配置…"; render();
     try { const data = await api("GET", path + "/voice"); if (!current(ticket, s)) return;
       if (!Array.isArray(data.languages) || !Array.isArray(data.providers) || typeof data.edit_token !== "string") throw failure("invalid_response");
@@ -894,6 +902,10 @@ window.CompanionModelsPage = (() => {
           <select data-voice-provider ${v.busy || v.loading || v.pending ? "disabled" : ""}><option value="">跟随 AstrBot 当前会话的语音服务</option>
             ${v.data.providers.map(p => `<option value="${esc(p.id)}" ${p.id === binding ? "selected" : ""}>${esc(providerLabel(p))}</option>`).join("")}
             ${missing ? `<option value="${esc(binding)}" selected>${esc(binding)} · 未加载</option>` : ""}</select></label></div>
+        ${(v.data.channels || []).map(channel => `<div class="model-vbar"><label class="model-fd"><span class="model-cap">${esc(channel.n)} · ${esc(lang.n)} 覆盖 <em>留空跟随上面的语种绑定</em></span>
+          <select data-voice-channel="${esc(channel.k)}" ${v.busy || v.loading || v.pending ? "disabled" : ""}><option value="">跟随语种绑定</option>
+            ${v.data.providers.map(p => `<option value="${esc(p.id)}" ${voiceChannelBinding(v, channel.k, lang) === p.id ? "selected" : ""}>${esc(providerLabel(p))}</option>`).join("")}
+            ${voiceChannelBinding(v, channel.k, lang) && !v.data.providers.some(p => p.id === voiceChannelBinding(v, channel.k, lang)) ? `<option value="${esc(voiceChannelBinding(v, channel.k, lang))}" selected>${esc(voiceChannelBinding(v, channel.k, lang))} · 未加载</option>` : ""}</select></label></div>`).join("")}
         <div class="model-vfoot"><span class="model-sample">合成样句：${esc(VOICE_SAMPLES[lang.k] || "")}</span>
           <span class="model-res">${v.testing ? '<span class="model-sp"></span>测试中'
             : test ? `<span class="model-resk ${test.status === "ok" ? "ok" : "bad"}">${test.status === "ok" ? "✓" : "！"}</span>${esc(voiceTestLabel(test))}` : ""}</span>
@@ -914,6 +926,9 @@ window.CompanionModelsPage = (() => {
       ${v.notice ? `<div class="model-notice ${v.bad ? "error" : ""}" role="status">${esc(v.notice)}</div>` : ""}</div>`; }
   function voiceInput(s, event) { const v = s.voice; if (v.loading || v.busy) return; const t = event.target;
     if (t.matches("[data-voice-provider]")) { if (!v.draft || v.pending) return; v.draft.bindings[voiceCurrent(v).k] = t.value; clearVoiceTest(v); render(); }
+    if (t.matches("[data-voice-channel]")) { if (!v.draft || v.pending) return;
+      const channel = t.dataset.voiceChannel; if (!v.draft.channels[channel]) v.draft.channels[channel] = {};
+      v.draft.channels[channel][voiceCurrent(v).k] = t.value; clearVoiceTest(v); render(); }
     if (t.matches("[data-voice-timeout]")) { if (!v.draft || v.pending) return; v.draft.timeout_seconds = t.valueAsNumber; if (event.type === "change") render(); }
     if (t.matches("[data-tts-field]")) { const item = ttsSelected(v); if (!item || v.ttsBusy) return;
       const values = ttsValues(v, item), key = t.dataset.ttsField;

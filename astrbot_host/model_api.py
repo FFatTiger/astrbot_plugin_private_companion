@@ -38,7 +38,14 @@ from .fish_audio import MODEL_OPTIONS as FISH_AUDIO_MODEL_OPTIONS
 
 PREFIX = "/astrbot_plugin_private_companion/model"
 VOICE_FIELDS = {"zh": "voice_zh_provider_id", "ja": "voice_ja_provider_id", "en": "voice_en_provider_id"}
-VOICE_CHANGES = frozenset((*VOICE_FIELDS.values(), "voice_timeout_seconds"))
+VOICE_CHANNELS = {"private": "私聊", "group": "群聊"}
+CHANNEL_VOICE_FIELDS = {
+    channel: {lang: f"voice_{channel}_{lang}_provider_id" for lang in VOICE_FIELDS}
+    for channel in VOICE_CHANNELS
+}
+VOICE_CHANGES = frozenset((*VOICE_FIELDS.values(),
+    *(field for fields in CHANNEL_VOICE_FIELDS.values() for field in fields.values()),
+    "voice_timeout_seconds"))
 LANGUAGES = {"zh": "中文", "ja": "日语", "en": "英语"}
 IMAGE_SETTINGS = "model_image_routes.json"
 TTS_PROVIDER_SYSTEM_KEYS = frozenset({"id", "provider", "type", "provider_type", "enable", "hint", "provider_source_id"})
@@ -752,7 +759,11 @@ class ModelWebAPI:
         settings = status["settings"]
         catalog = ReplyWebAPI(self.controller)._tts_catalog()
         return {"languages": [{"k": lang, "n": label, "bind": settings[field]}
-                              for lang, label in LANGUAGES.items() for field in (VOICE_FIELDS[lang],)],
+                               for lang, label in LANGUAGES.items() for field in (VOICE_FIELDS[lang],)],
+                "channels": [{"k": channel, "n": label,
+                              "bindings": {lang: settings[CHANNEL_VOICE_FIELDS[channel][lang]]
+                                           for lang in LANGUAGES}}
+                             for channel, label in VOICE_CHANNELS.items()],
                 "providers": catalog["providers"], "catalog_state": catalog["state"],
                 "timeout_seconds": settings["voice_timeout_seconds"],
                 "voice_enabled": settings["voice_enabled"], "edit_token": status["edit_token"]}
