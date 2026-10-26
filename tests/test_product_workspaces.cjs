@@ -583,6 +583,9 @@ test("identity workspace opens only the selected configured group's reply and me
       account_id: "100", group_id: "300", role_id: "synthetic-role"}}});
   assert.deepEqual(h.navigations, [["manage", "decision", ""], ["manage", "governance", "relationship"]],
     "unknown roles and group routes cannot redirect the workspace");
+  const navigationFailures = h.identity.messages.filter(message => message.kind === "navigate-failed");
+  assert.equal(navigationFailures.length, 2);
+  assert.match(navigationFailures[0].message, /角色映射已经变化.*重新读取群聊目录/);
 });
 
 test("identity workspace can navigate to first connection for group-target setup", async () => {

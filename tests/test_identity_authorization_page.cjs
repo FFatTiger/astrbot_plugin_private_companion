@@ -216,6 +216,7 @@ function harness({ persons, groups = [], group_networks = [], group_access, auth
     },
     card: (name) => cardFor(byId.get("people-grid"), name),
     mappingChanged: () => documentEvents["companion-mappings-change"](),
+    fire: (type, detail = {}) => documentEvents[type]?.({detail}),
   };
   harness.send = async (read) => { await settle(); harness.answer(read); await settle(); };
   return harness;
@@ -587,6 +588,31 @@ test("同一人格跨内部归属合并群关系网成员与互动边", async ()
   assert.match(networkMarkup, /data-member-account="702"/);
   assert.match(flat(detail), /青禾 ↔ 木木.*3 次/);
   assert.match(flat(detail), /青禾 ↔ 小满.*2 次/);
+});
+
+test("已接入群只保留当前角色，历史人格网络不生成重复卡片", async () => {
+  const base = {group_id: "300", display_name: "周末读书群", platform_id: "qq-main",
+    bot_id: "bot-a", account_id: "account-a", configured: true, discovered: true,
+    member_count: 2, msg_count: 12};
+  const current = {...base, role_id: "role-a", persona_ids: ["星缘-群聊", "星缘-私聊"],
+    role_name: "星缘·群聊、星缘·私聊", configured: true, interaction_count: 3, members: [], edges: []};
+  const stale = {...base, role_id: "星缘", persona_ids: [], role_name: "",
+    configured: false, interaction_count: 1, members: [], edges: []};
+  const h = harness({groups: [base], group_networks: [current, stale]});
+  await h.send();
+  const cards = findAll(h.element("groups-list"), "group-card");
+  assert.equal(cards.length, 1, "a configured route must hide the stale historical duplicate");
+  assert.equal(h.element("groups-result-count").textContent, "1 个群");
+  assert.equal(h.element("group-summary-total").textContent, "1");
+  assert.equal(h.element("group-summary-configured").textContent, "1");
+  assert.equal(h.element("group-summary-history").textContent, "0");
+  assert.match(flat(cards[0]), /周末读书群.*已接入.*星缘/);
+  assert.doesNotMatch(flat(cards[0]), /人格分线|星缘·群聊|星缘·私聊/);
+  cards[0].handlers.click();
+  findControl(h.element("group-detail"), "本群回应设置").handlers.click();
+  assert.equal(h.navigations.at(-1).message.target.role_id, "role-a");
+  h.fire("companion-navigate-failed", {message: "这个群的人格或角色映射已经变化，请重新读取群聊目录后再试。"});
+  assert.match(h.element("notice").textContent, /角色映射已经变化.*重新读取群聊目录/);
 });
 
 test("面板为每一项能力画一行，状态取自服务端读回的那一份", async () => {

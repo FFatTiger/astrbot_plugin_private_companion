@@ -23,6 +23,7 @@ from companion_v2.conversation.quotes.models import CapturedQuote, message_numbe
 from companion_v2.conversation.forwards.models import CapturedForward, ForwardIntakePolicy, fits_forwards
 from companion_v2.conversation.media.audio.models import CapturedAudio, MAX_INPUT_AUDIOS, fits_audio_budget
 from companion_v2.conversation.media.video.models import CapturedVideo, MAX_VIDEOS, fits_video_budget
+from astrbot.api.event import AstrMessageEvent
 from .files import file_locator, prepare_file_text, MAX_FILES
 
 
@@ -32,6 +33,11 @@ SUPPORTED_VERSIONS = frozenset(("4.27.2", "4.28.2", "4.29.0", "4.29.1"))
 # eagerly, and a real surface change fails loudly at import instead of being
 # guessed from a version string. An unreviewed host only earns one warning.
 VERIFIED_SERIES = frozenset(("4.27", "4.28", "4.29"))
+# Native routing is verified for the OneBot reverse-WS adapter and the two
+# QQ Official adapter names AstrBot exposes.  Keeping the allow-list here
+# prevents an arbitrary adapter from inheriting route privileges by accident.
+SUPPORTED_PLATFORM_NAMES = frozenset(("aiocqhttp", "qq_official", "qq_official_webhook"))
+OFFICIAL_PLATFORM_NAMES = frozenset(("qq_official", "qq_official_webhook"))
 _REPORTED_UNVERIFIED = set()
 NATIVE_LOOKUP_TIMEOUT_SECONDS = 20
 NATIVE_LOOKUP_SLOW_SECONDS = 2
@@ -147,6 +153,98 @@ def account_number(value):
     return value
 
 
+def route_id(value):
+    """Validate one opaque platform route identifier.
+
+    OneBot uses decimal QQ numbers, while QQ Official uses openids and the
+    configured platform-instance id as its account key.  Route ids are stored
+    in the ``platform:type:session`` origin, so colon, control and whitespace
+    characters remain forbidden even though the value need not be numeric.
+    """
+    value = native_id(value)
+    if len(value) > 128 or ":" in value or any(
+            char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValueError("native route identifiers must be bounded opaque ids without separators")
+    if value.isascii() and value.isdecimal() and (int(value) <= 0 or str(int(value)) != value):
+        raise ValueError("numeric route identifiers must be canonical positive numbers")
+    return value
+
+
+def supported_platform_name(value):
+    return type(value) is str and value in SUPPORTED_PLATFORM_NAMES
+
+
+def official_platform_name(value):
+    return type(value) is str and value in OFFICIAL_PLATFORM_NAMES
+
+
+def event_platform_name(event):
+    return str(getattr(getattr(event, "platform_meta", None), "name", "") or "")
+
+
+def event_platform_id(event):
+    return str(getattr(getattr(event, "platform_meta", None), "id", "") or "")
+
+
+def event_account_id(event):
+    """Return the stable account key for one admitted native event.
+
+    OneBot identifies a login by ``message.self_id``.  QQ Official exposes a
+    synthetic self id on C2C/direct events, so the configured platform
+    instance id is the stable account projection there.
+    """
+    message = getattr(event, "message_obj", None)
+    name = event_platform_name(event)
+    if official_platform_name(name):
+        return route_id(event_platform_id(event))
+    if name == "aiocqhttp":
+        return account_number(getattr(message, "self_id", None))
+    raise ValueError("unsupported native event platform")
+
+
+def event_peer_id(event):
+    sender = getattr(getattr(event, "message_obj", None), "sender", None)
+    return route_id(getattr(sender, "user_id", None))
+
+
+def event_group_id(event):
+    return route_id(getattr(getattr(event, "message_obj", None), "group_id", None))
+
+
+def native_user_subject_id(platform_name, sender_id):
+    sender_id = route_id(sender_id)
+    if platform_name == "aiocqhttp":
+        return "onebot-user:" + sender_id
+    if official_platform_name(platform_name):
+        return "qq-official-user:" + sender_id
+    raise ValueError("unsupported native user platform")
+
+
+def native_client_connected(platform, account_id, client=None):
+    """Whether one configured account currently has a usable native client."""
+    if platform is None:
+        return False
+    try:
+        meta = platform.meta()
+        client = client if client is not None else platform.get_client()
+    except (AttributeError, TypeError, ValueError):
+        return False
+    if client is None or not supported_platform_name(getattr(meta, "name", None)):
+        return False
+    if meta.name == "aiocqhttp":
+        clients = getattr(client, "_wsr_api_clients", None)
+        return isinstance(clients, dict) and bool(clients.get(str(account_id)))
+    if getattr(client, "is_shutting_down", False):
+        return False
+    try:
+        closed = getattr(client, "is_closed", None)
+        if callable(closed) and closed():
+            return False
+    except Exception:
+        return False
+    return True
+
+
 def persona_instruction(persona):
     """Retain the exact prompt and optional host-processed persona examples."""
     if persona is None:
@@ -199,7 +297,7 @@ class HostAccount:
     def __post_init__(self):
         _opaque(self.platform_id, field="platform instance")
         _opaque(self.bot_id, field="logical bot")
-        if ":" in self.platform_id or account_number(self.self_id) != self.self_id:
+        if ":" in self.platform_id or route_id(self.self_id) != self.self_id:
             raise ValueError("account projection requires canonical host IDs")
 
 
@@ -361,10 +459,10 @@ class NativePrivateBridge:
         for account in accounts:
             platform = context.get_platform_inst(account.platform_id)
             if platform is None:
-                raise TaskError("host_platform_unavailable", "the configured OneBot platform has not loaded")
+                raise TaskError("host_platform_unavailable", "the configured native platform has not loaded")
             meta = platform.meta()
-            if meta.name != "aiocqhttp" or meta.id != account.platform_id:
-                raise TaskError("host_platform_changed", "the configured platform no longer matches its OneBot account")
+            if not supported_platform_name(meta.name) or meta.id != account.platform_id:
+                raise TaskError("host_platform_changed", "the configured platform does not match its native account")
             self.platforms[account.platform_id] = (platform, platform.get_client())
         self.ports = NativeInputPorts()
 
@@ -376,12 +474,31 @@ class NativePrivateBridge:
             raise TaskError("host_account_changed", "original host account projection is unavailable")
         return account
 
-    def client(self, scope):
+    def platform(self, scope):
         account = self.account(scope)
         platform, client = self.platforms[account.platform_id]
-        if (self.context.get_platform_inst(account.platform_id) is not platform or platform.get_client() is not client
-                or platform.meta().id != account.platform_id or platform.meta().name != "aiocqhttp"):
+        meta = platform.meta()
+        if (self.context.get_platform_inst(account.platform_id) is not platform
+                or platform.get_client() is not client or meta.id != account.platform_id
+                or not supported_platform_name(meta.name)):
             raise TaskError("host_account_changed", "original platform/client was replaced")
+        return platform
+
+    def platform_name(self, scope_or_account):
+        platform_id = getattr(scope_or_account, "platform_id", None) or getattr(scope_or_account, "platform", None)
+        platform = self.platforms.get(platform_id, (None, None))[0]
+        return str(platform.meta().name) if platform is not None else ""
+
+    def account_connected(self, account, client=None):
+        platform = self.platforms.get(account.platform_id, (None, None))[0]
+        return native_client_connected(platform, account.self_id, client)
+
+    def client(self, scope):
+        platform = self.platform(scope)
+        account = self.account(scope)
+        client = platform.get_client()
+        if not self.account_connected(account, client):
+            raise TaskError("host_account_changed", "original native account is no longer connected")
         return client
 
     @staticmethod
@@ -534,7 +651,7 @@ class NativePrivateBridge:
         renders as a state rather than as a failure.
         """
         account = self.account(scope)
-        sender = account_number(scope.native_scope_id)
+        sender = route_id(scope.native_scope_id)
         umo = self._umo(account.platform_id, sender)
         conversation_manager = self.context.conversation_manager
         conversation_id = await bounded_native_lookup(
@@ -578,7 +695,7 @@ class NativePrivateBridge:
                 if callable(resolver):
                     selected, persona, _, special = await bounded_native_lookup(resolver(
                         umo=umo, conversation_persona_id=conversation_persona_id,
-                        platform_name="aiocqhttp", provider_settings=settings), operation="persona")
+                        platform_name=self.platform_name(account), provider_settings=settings), operation="persona")
                     if special:
                         selected, persona = None, None
                 else:
@@ -613,7 +730,7 @@ class NativePrivateBridge:
 
     async def verify_role(self, scope, binding, instruction=None):
         self.client(scope)
-        sender = account_number(scope.native_scope_id)
+        sender = route_id(scope.native_scope_id)
         if scope.session_id != sender or binding.scope != scope:
             raise TaskError("host_route_changed", "original private session is inconsistent")
         cid, role, prompt = await self._role(self.accounts[(scope.platform, scope.account_id)], sender)
@@ -623,7 +740,7 @@ class NativePrivateBridge:
         return prompt
 
     def _verified_persona_umo(self, scope, binding, account):
-        sender = account_number(scope.native_scope_id)
+        sender = route_id(scope.native_scope_id)
         if scope.session_id != sender or binding.scope != scope:
             raise TaskError("host_route_changed", "original private session is inconsistent")
         return self._umo(account.platform_id, sender)
@@ -657,16 +774,16 @@ class NativePrivateBridge:
             from .quotes import NativeQuoteLocator, image_locator
             from .forwards import NativeForwardLocator, resource_id
             from companion_v2.conversation.quotes.models import event_audios, event_videos
-            if type(event) is not self.event_type:
-                raise TaskError("host_event_unsupported", "this profile accepts native OneBot private events")
+            if not isinstance(event, self.event_type):
+                raise TaskError("host_event_unsupported", "this profile accepts native private events")
             message, meta, session = event.message_obj, event.platform_meta, event.session
             platform_id = meta.id
             if (getattr(message.type, "value", None) != "FriendMessage"
                     or getattr(session.message_type, "value", None) != "FriendMessage" or message.group_id):
                 raise TaskError("host_scene_unsupported", "group and thread adapters are not installed")
-            sender, login = account_number(message.sender.user_id), account_number(message.self_id)
+            sender, login = event_peer_id(event), event_account_id(event)
             account = self.accounts.get((platform_id, login))
-            if (account is None or meta.name != "aiocqhttp" or session.platform_id != platform_id
+            if (account is None or not supported_platform_name(meta.name) or session.platform_id != platform_id
                     or session.platform_name != platform_id or session.session_id != sender
                     or event.unified_msg_origin != self._umo(platform_id, sender)):
                 raise TaskError("host_route_mismatch", "event fields do not identify one registered private route")
@@ -675,18 +792,25 @@ class NativePrivateBridge:
                 raise TaskError("host_media_unsupported", "message components are empty or exceed the intake budget")
             text_parts, locators, quote_locators, forward_locators, audio_locators, video_locators = [], [], [], [], [], []
             file_locators = []
+            onebot = meta.name == "aiocqhttp"
             for position, part in enumerate(parts):
                 kind = getattr(part.type, "value", part.type)
                 if kind == "Plain" and isinstance(part.text, str):
                     text_parts.append(part.text)
+                elif kind == "At":
+                    # QQ Official prepends a synthetic At for C2C events. It is
+                    # routing metadata, not user-visible text.
+                    continue
                 elif kind == "Image" and self.image_type is not None and type(part) is self.image_type:
                     locators.append(image_locator(position, part.file, part.url))
                     text_parts.append("\n[图片 " + str(len(locators)) + "]\n")
                 elif kind == "Reply" and self.reply_type is not None and type(part) is self.reply_type:
-                    quote_locators.append(NativeQuoteLocator(position, message_number(part.id)))
+                    if onebot:
+                        quote_locators.append(NativeQuoteLocator(position, message_number(part.id)))
                     text_parts.append("\n[引用消息]\n")
                 elif kind == "Forward" and self.forward_type is not None and type(part) is self.forward_type:
-                    forward_locators.append(NativeForwardLocator(position, resource_id(part.id)))
+                    if onebot:
+                        forward_locators.append(NativeForwardLocator(position, resource_id(part.id)))
                     text_parts.append("\n[合并转发 " + str(len(forward_locators)) + "]\n")
                 elif kind == "Record" and self.audio_type is not None and type(part) is self.audio_type:
                     value = part.file if type(part.file) is str and part.file.startswith("base64://") else part.url or part.file

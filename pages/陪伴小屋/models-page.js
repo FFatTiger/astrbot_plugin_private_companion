@@ -915,10 +915,14 @@ window.CompanionModelsPage = (() => {
   const layaDraftFrom = data => ({enabled: !!data.enabled, mode: data.mode || "local", endpoint: data.endpoint || "",
     local_model_path: data.local_model_path || "",
     api_key: "", timeout_seconds: Number(data.timeout_seconds) || 20,
+    followup_confidence_threshold: Math.max(0, Math.min(100, Number(data.followup_confidence_threshold) || 0)),
     decision_fields: Object.fromEntries(LAYA_DECISION_FIELDS.map(([key]) => [key, data.decision_fields?.[key] !== false]))});
   const layaChanges = l => { const changes = {};
-    ["enabled", "mode", "endpoint", "timeout_seconds", "local_model_path"].forEach(key => {
-      if (l.draft[key] !== (key === "local_model_path" ? l.data[key] || "" : l.data[key])) changes[key] = l.draft[key]; });
+    ["enabled", "mode", "endpoint", "timeout_seconds", "local_model_path", "followup_confidence_threshold"].forEach(key => {
+      const current = key === "local_model_path" ? l.data[key] || ""
+        : key === "followup_confidence_threshold" ? Math.max(0, Math.min(100, Number(l.data[key]) || 0))
+        : l.data[key];
+      if (l.draft[key] !== current) changes[key] = l.draft[key]; });
     if (LAYA_DECISION_FIELDS.some(([key]) => l.draft.decision_fields[key] !== (l.data.decision_fields?.[key] !== false)))
       changes.decision_fields = l.draft.decision_fields;
     if (l.draft.api_key) changes.api_key = l.draft.api_key;
@@ -996,6 +1000,10 @@ window.CompanionModelsPage = (() => {
     if (type === "bool") return `<label class="model-fd"><span class="model-cap">${label}<em>${hint}</em></span><label class="model-switch"><input type="checkbox" data-laya-field="${key}" ${value ? "checked" : ""} ${disabled ? "disabled" : ""}><i></i></label></label>`;
     return `<label class="model-fd"><span class="model-cap">${label}<em>${hint}</em></span><input type="${type}" data-laya-field="${key}" value="${esc(value)}" ${disabled ? "disabled" : ""}></label>`;
   }
+  function layaPercentField(l, key, label, hint) {
+    const value = l.draft?.[key] ?? 0, disabled = l.loading || l.busy;
+    return `<label class="model-fd"><span class="model-cap">${label}<em>${hint}</em></span><span class="model-unit"><input type="number" min="0" max="100" step="1" data-laya-field="${key}" value="${esc(value)}" ${disabled ? "disabled" : ""}><i>%</i></span></label>`;
+  }
   function layaSelect(l, key, label, hint, options) { const value = l.draft?.[key] || "", disabled = l.loading || l.busy;
     return `<label class="model-fd"><span class="model-cap">${label}<em>${hint}</em></span><select data-laya-field="${key}" ${disabled ? "disabled" : ""}>${options.map(([id, name]) => `<option value="${id}" ${value === id ? "selected" : ""}>${name}</option>`).join("")}</select></label>`; }
   async function layaCopyInstall(s, field) { const command = s.laya.data?.[field || "install_command"] || ""; if (!command) return;
@@ -1004,7 +1012,14 @@ window.CompanionModelsPage = (() => {
   function layaResult(result) { if (!result) return ""; if (result.status === "testing") return '<div class="model-notice">正在等待 Laya…</div>'; if (result.status === "skipped") return `<div class="model-notice">本次未调用 Laya：${esc(result.reason || "程序规则已处理")}</div>`;
     if (result.status !== "ok") return `<div class="model-notice error">${esc(fail(result, "Laya 结果未知。"))}</div>`;
     const decision = result.decision; if (!decision) return "";
-    return `<div class="model-laya-result"><b>决策结果</b><code>${esc(JSON.stringify(decision, null, 2))}</code></div>`; }
+    const meta = [];
+    if (typeof result.action_confidence === "number" && Number.isFinite(result.action_confidence))
+      meta.push(`行动置信度 ${(result.action_confidence * 100).toFixed(1)}%`);
+    if (result.confidence_gate?.status === "below_threshold")
+      meta.push(`低于连续接话阈值 ${result.confidence_gate.threshold_percent}%，已改为旁听`);
+    else if (result.confidence_gate?.status === "confidence_unavailable")
+      meta.push("当前服务未返回行动概率，阈值未强制执行");
+    return `<div class="model-laya-result"><b>决策结果${meta.length ? ` · ${esc(meta.join(" · "))}` : ""}</b><code>${esc(JSON.stringify(decision, null, 2))}</code></div>`; }
   function layaHistoryMarkup(l) { const events = Array.isArray(l.logs) ? l.logs : [];
     if (!events.length) return '<p class="model-laya-history-empty">暂无 Laya 调用记录。</p>';
     const labels = {ok: "成功", skipped: "跳过", failed: "失败"}, sources = {conversation: "实际对话", dashboard_preview: "页面预览", probe: "连接测试"};
@@ -1024,9 +1039,9 @@ window.CompanionModelsPage = (() => {
   function layaPane(s) { const l = s.laya; if (!l.data) return `<div class="model-card"><p class="model-empty">${esc(l.notice || "正在读取 Laya 配置…")}</p></div>`;
     const dirty = layaDirty(l), installed = l.data.package_installed, mode = l.draft?.mode || l.data.mode;
     return `<div class="model-subpane model-laya-pane">
-      <div class="model-card"><div class="model-phead"><div class="model-grow"><span class="model-eb">可选能力 · 语义决策</span><h3>Laya 决策模型</h3><p class="model-note">在回复前判断是否接话、等待、沉默及表达形式。配置全局生效；仅群聊候选进入 Laya 判断，私聊始终走 AstrBot 核心回复，另由回复页的私聊收尾判断在纯道别时安静。模型不输出时间、段数等数值；执行遵循宿主配置和权限。</p></div><button type="button" class="button small" data-laya-refresh ${l.loading || l.busy ? "disabled" : ""}>刷新</button></div>
+      <div class="model-card"><div class="model-phead"><div class="model-grow"><span class="model-eb">可选能力 · 语义决策</span><h3>Laya 决策模型</h3><p class="model-note">在回复前判断是否接话、等待、沉默及表达形式。配置全局生效；仅群聊候选进入 Laya 判断，私聊始终走 AstrBot 核心回复，另由回复页的私聊收尾判断在纯道别时安静。模型不输出时间、段数等数值；行动概率只用于下方可选的连续接话阈值，执行仍遵循宿主配置和权限。</p></div><button type="button" class="button small" data-laya-refresh ${l.loading || l.busy ? "disabled" : ""}>刷新</button></div>
         <div class="model-kpis">${kpi(!l.data.enabled ? "未启用" : mode === "local" && l.data.local_runtime_state === "warming" ? "正在预热" : "已启用", "运行状态", l.data.enabled ? "g" : "a")}${kpi(mode === "remote" ? "远程模式" : installed ? `已安装 ${l.data.package_version || ""}` : "待安装", "Python 包")}${kpi(mode === "remote" ? "远程管理" : l.data.model_cache_ready ? "已缓存" : "首次调用下载", "模型权重")}${kpi(mode === "local" ? "本地 Python" : "远程 HTTP", "接入方式")}</div>
-        <div class="model-laya-fields">${layaField(l, "enabled", "启用 Laya", "关闭时调用会跳过", "bool")}${layaSelect(l, "mode", "接入方式", "选择 AstrBot 本地 Python 或官方服务接口", [["local", "本地 Python 包"], ["remote", "远程 HTTP 服务"]])}${mode === "remote" ? layaField(l, "endpoint", "SystemOne 服务地址", "可填服务根地址、/v1 或完整 /v1/systemone") : ""}${mode === "remote" ? layaField(l, "api_key", "API Key", l.data.api_key_set ? "已配置；留空保留现有密钥" : "可选，按远程服务配置", "password") : ""}${layaField(l, "timeout_seconds", "调用超时（秒）", "用于本地推理或远程连接，不参与语义判断", "number")}</div>
+        <div class="model-laya-fields">${layaField(l, "enabled", "启用 Laya", "关闭时调用会跳过", "bool")}${layaSelect(l, "mode", "接入方式", "选择 AstrBot 本地 Python 或官方服务接口", [["local", "本地 Python 包"], ["remote", "远程 HTTP 服务"]])}${mode === "remote" ? layaField(l, "endpoint", "SystemOne 服务地址", "可填服务根地址、/v1 或完整 /v1/systemone") : ""}${mode === "remote" ? layaField(l, "api_key", "API Key", l.data.api_key_set ? "已配置；留空保留现有密钥" : "可选，按远程服务配置", "password") : ""}${layaField(l, "timeout_seconds", "调用超时（秒）", "用于本地推理或远程连接，不参与语义判断", "number")}${layaPercentField(l, "followup_confidence_threshold", "连续接话置信阈值", "0 关闭；仅约束非点名续接。Laya 行动概率低于此值时改为旁听，建议从 40–55% 起按日志校准")}</div>
         ${mode === "local" ? `<div class="model-laya-fields">${layaField(l, "local_model_path", "本地检查点目录", "可选择微调模型；留空使用官方多语言模型。所有会话共用此选择。")}</div>` : ""}
         <section class="model-laya-decisions" aria-label="决策分类配置"><div><strong>决策分类</strong><span>仅启用的分类会发送给 Laya；关闭的分类沿用宿主配置。</span></div><div class="model-laya-decision-grid">${LAYA_DECISION_FIELDS.map(([key, label, hint]) => `<label class="model-laya-option"><span><strong>${label}</strong><small>${hint}</small></span><span class="model-switch"><input type="checkbox" data-laya-decision="${key}" ${l.draft.decision_fields[key] ? "checked" : ""} ${l.loading || l.busy ? "disabled" : ""}><i></i></span></label>`).join("")}</div></section>
         <div class="model-editor-actions"><button type="button" class="button primary" data-laya-save ${!dirty || l.busy || l.loading || l.stale ? "disabled" : ""}>保存 Laya 配置</button><button type="button" class="button" data-laya-test ${l.busy || l.loading ? "disabled" : ""}>${mode === "local" && installed && !l.data.model_cache_ready ? "下载并验证模型" : "测试 Laya 调用"}</button></div>
@@ -1045,7 +1060,10 @@ window.CompanionModelsPage = (() => {
     if (t.matches("[data-laya-preview]")) { l.previewText = t.value; return; }
     if (t.matches("[data-laya-decision]") && l.draft) { l.draft.decision_fields[t.dataset.layaDecision] = t.checked; if (event.type === "change") { l.bad = false; render(); } return; }
     const key = t.dataset.layaField; if (!key || !l.draft || l.loading || l.busy) return;
-    l.draft[key] = t.type === "checkbox" ? t.checked : t.type === "number" ? t.valueAsNumber : t.value;
+    const value = t.type === "checkbox" ? t.checked : t.type === "number" ? t.valueAsNumber : t.value;
+    l.draft[key] = key === "followup_confidence_threshold"
+      ? Math.max(0, Math.min(100, Number.isFinite(Number(value)) ? Math.round(Number(value)) : 0))
+      : value;
     if (event.type === "change") { l.bad = false; render(); } }
   function layaClick(s, event) { const t = event.target;
     if (t.closest("[data-laya-refresh]")) { layaRefresh(s); return; }
@@ -1220,6 +1238,7 @@ window.CompanionModelsPage = (() => {
     if (i.configText["legacy.options"] !== baseText["legacy.options"])
       value.legacy_options = parse("legacy.options");
     for (const endpoint of value.endpoints || []) {
+      endpoint.name = String(endpoint.name || "").trim();
       const key = `headers.${endpoint.id}`;
       if (i.configText[key] !== baseText[key] && i.configText[key]?.trim()) {
         const parsed = parse(key);
@@ -1244,6 +1263,8 @@ window.CompanionModelsPage = (() => {
     finally { i.configSaving = false; if (current(ticket, s)) render(); }
   }
   const imageCurrentOperation = i => IMAGE_VIEWS[i.view || "generate"].operation;
+  const imageEndpointLabel = (item, fallback = "未命名图片模型") =>
+    String(item?.name || "").trim() || String(item?.model || "").trim() || fallback;
   function imageRouteAvailable(config, route, operation) {
     if (route.startsWith("online:")) {
       const endpoint = config.endpoints.find(item => item.id === route.slice(7));
@@ -1303,8 +1324,8 @@ window.CompanionModelsPage = (() => {
       const testDisabled = disabled || imageConfigDirty(i) || !config.enabled || !item.enabled ||
         ["bailian", "modelscope", "gemini"].includes(imageEffectivePlatform(item));
       const connectionFields = imageEndpointConnectionFields(i, item, base, disabled);
-      const modelFields = `${imageConfigField("模型 ID", `${base}.model`, item.model, "text", 'maxlength="240" placeholder="服务商提供的模型 ID"', "")}${imageConfigField("尺寸标签", `${base}.size_label`, item.size_label || `${item.width}x${item.height}`, "text", 'maxlength="64" placeholder="如 1024x1024、1K、auto"', "服务商接受标签时保留原值；宽高用于通用协议")}${imageConfigField("宽度", `${base}.width`, item.width, "number", 'min="64" max="8192" step="64"', "像素")}${imageConfigField("高度", `${base}.height`, item.height, "number", 'min="64" max="8192" step="64"', "像素")}${item.platform === "minimax" ? "" : `<label class="model-img-field"><span>图片质量</span><select data-img-config-field="${base}.quality"${disabled ? " disabled" : ""}>${[["auto", "自动"], ["low", "低"], ["medium", "中"], ["high", "高"], ["standard", "标准"], ["hd", "高清"]].map(([value, label]) => `<option value="${value}"${item.quality === value ? " selected" : ""}>${label}</option>`).join("")}</select></label>${imageConfigField("最多参考图", `${base}.max_reference_images`, item.max_reference_images, "number", 'min="0" max="8" step="1"', "设为 0 时此模型仅用于文生图")}`}${imageConfigField("端点名称", `${base}.name`, item.name, "text", 'maxlength="240"', "")}<label class="model-img-field model-img-inline"><span>启用模型</span><input type="checkbox" data-img-config-field="${base}.enabled"${item.enabled ? " checked" : ""}${disabled ? " disabled" : ""}></label>`;
-      return `<article class="model-img-route"><header><span class="model-img-priority">${index + 1}</span><div class="model-img-route-title"><strong>${esc(item.name || item.model || "未命名图片模型")}</strong><small>${esc(item.model || "未设置模型 ID")} · ${esc(IMAGE_PLATFORMS[item.platform] || item.platform || "自动识别")}</small></div><span class="model-img-route-support">${esc(imageRouteAvailable(config, ref, imageCurrentOperation(i)))}</span>${controls}</header>
+      const modelFields = `${imageConfigField("模型 ID", `${base}.model`, item.model, "text", 'maxlength="240" placeholder="服务商提供的模型 ID"', "")}${imageConfigField("尺寸标签", `${base}.size_label`, item.size_label || `${item.width}x${item.height}`, "text", 'maxlength="64" placeholder="如 1024x1024、1K、auto"', "服务商接受标签时保留原值；宽高用于通用协议")}${imageConfigField("宽度", `${base}.width`, item.width, "number", 'min="64" max="8192" step="64"', "像素")}${imageConfigField("高度", `${base}.height`, item.height, "number", 'min="64" max="8192" step="64"', "像素")}${item.platform === "minimax" ? "" : `<label class="model-img-field"><span>图片质量</span><select data-img-config-field="${base}.quality"${disabled ? " disabled" : ""}>${[["auto", "自动"], ["low", "低"], ["medium", "中"], ["high", "高"], ["standard", "标准"], ["hd", "高清"]].map(([value, label]) => `<option value="${value}"${item.quality === value ? " selected" : ""}>${label}</option>`).join("")}</select></label>${imageConfigField("最多参考图", `${base}.max_reference_images`, item.max_reference_images, "number", 'min="0" max="8" step="1"', "设为 0 时此模型仅用于文生图")}`}<label class="model-img-field model-img-inline"><span>启用模型</span><input type="checkbox" data-img-config-field="${base}.enabled"${item.enabled ? " checked" : ""}${disabled ? " disabled" : ""}></label>`;
+      return `<article class="model-img-route"><header><span class="model-img-priority">${index + 1}</span><div class="model-img-route-title"><span class="model-img-route-name-wrap" title="点击修改模型显示名称；留空时显示模型 ID"><input type="text" class="model-img-route-name" data-img-config-field="${base}.name" value="${esc(item.name || "")}" maxlength="240" placeholder="${esc(imageEndpointLabel(item, "自定义名称"))}" aria-label="自定义模型名称"${disabled ? " disabled" : ""}><i data-lucide="pencil" aria-hidden="true"></i></span><small>${esc(item.model || "未设置模型 ID")} · ${esc(IMAGE_PLATFORMS[item.platform] || item.platform || "自动识别")}</small></div><span class="model-img-route-support">${esc(imageRouteAvailable(config, ref, imageCurrentOperation(i)))}</span>${controls}</header>
         <details class="model-img-route-details"${expanded ? " open" : ""}><summary data-img-route-expand="${esc(ref)}">连接与生图参数</summary>
         <div class="model-img-endpoint-test"><button type="button" class="button small" data-img-endpoint-test="${esc(item.id)}"${testDisabled ? " disabled" : ""}>${testing ? "生成中…" : "生成测试图"}</button><span role="status" data-state="${esc(test?.status || "")}">${esc(testLabel)}</span></div>
         <fieldset class="model-schema-group"><legend>连接</legend><div class="model-img-route-grid">${connectionFields}</div></fieldset>
@@ -1330,7 +1351,7 @@ window.CompanionModelsPage = (() => {
     if (i.configLoading) return '<div class="model-img-loading" role="status">正在读取文生图与改图配置…</div>';
     if (!config) return `<div class="model-img-loading" role="status">${esc(i.configNotice || "尚未读取生图模型配置。")}<button type="button" class="button small" data-img-config-refresh>读取模型配置</button></div>`;
     const operation = imageCurrentOperation(i), routes = config.operation_routes[operation] || [], current = new Set(routes);
-    const choices = [...config.endpoints.filter(item => !current.has(`online:${item.id}`)).map(item => [`online:${item.id}`, `${item.name || item.model || "图片模型"} · ${item.model || item.id}`]),
+    const choices = [...config.endpoints.filter(item => !current.has(`online:${item.id}`)).map(item => [`online:${item.id}`, `${imageEndpointLabel(item, "图片模型")} · ${item.model || item.id}`]),
       ...Object.entries(IMAGE_LOCAL_LABELS).filter(([key]) => !current.has(key)).map(([key, label]) => [key, label])];
     const dirty = imageConfigDirty(i), locked = i.configSaving || i.configLoading || !!i.endpointTesting;
     const legacyOptions = config.legacy_options || {}, selectedWorkflows = legacyOptions.image_companion_selected_workflows || {};
@@ -1510,7 +1531,7 @@ window.CompanionModelsPage = (() => {
       const max = i.config.limits?.max_endpoints || 24;
       if (i.configDraft.endpoints.length >= max) return;
       const id = `image-${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-      i.configDraft.endpoints.push({id, name: imageCurrentOperation(i) === "generate" ? "文生图模型" : "改图模型", enabled: false,
+      i.configDraft.endpoints.push({id, name: "", enabled: false,
         platform: "openai", model: "", width: 1024, height: 1024, base_url: "", api_key_set: false, timeout_seconds: 180});
       i.expandedImageRoutes ||= {};
       i.expandedImageRoutes["online:" + id] = true;
@@ -2050,7 +2071,7 @@ window.CompanionModelsPage = (() => {
      another role or a closed page must not trigger a warning on every route. */
   function imageChangedFields(i) {
     const changed = [], same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-    const labels = {enabled:'启用开关', backend:'后端模式', base_url:'API 地址', model:'模型 ID', name:'端点名称',
+    const labels = {enabled:'启用开关', backend:'后端模式', base_url:'API 地址', model:'模型 ID', name:'自定义名称',
       platform:'协议', timeout_seconds:'超时秒数', api_key:'API Key', clear_api_key:'清除已保存密钥',
       custom_headers:'自定义请求头', clear_custom_headers:'清除已保存请求头', quality:'图片质量',
       size_label:'尺寸标签', width:'宽度', height:'高度', max_reference_images:'最多参考图',
@@ -2072,7 +2093,7 @@ window.CompanionModelsPage = (() => {
     compare(base, draft, '生图模型');
     for (const id of new Set([...before.map(item => item.id), ...after.map(item => item.id)])) {
       const old = before.find(item => item.id === id), value = after.find(item => item.id === id);
-      const label = `生图模型 · ${value?.name || old?.name || '图片模型'}`;
+      const label = `生图模型 · ${imageEndpointLabel(value || old, '图片模型')}`;
       if (!old || !value) changed.push(`${label}（${value ? '新增' : '删除'}）`);
       else compare(old, value, label);
     }
@@ -2083,7 +2104,7 @@ window.CompanionModelsPage = (() => {
       if (same(i.configTextBase?.[name], i.configText?.[name])) continue;
       const endpoint = name.startsWith('headers.') && [...after, ...before].find(item => item.id === name.slice(8));
       if (endpoint && !after.some(item => item.id === endpoint.id)) continue;
-      changed.push(`生图模型 · ${endpoint ? `${endpoint.name || '图片模型'} · 自定义请求头` : textLabels[name] || name}`);
+      changed.push(`生图模型 · ${endpoint ? `${imageEndpointLabel(endpoint, '图片模型')} · 自定义请求头` : textLabels[name] || name}`);
     }
     return [...new Set(changed)];
   }
@@ -2110,7 +2131,7 @@ window.CompanionModelsPage = (() => {
     if (s.image && imageConfigDirty(s.image)) changed.push(...imageChangedFields(s.image));
     if (s.laya && layaDirty(s.laya)) {
       const labels = {enabled:'启用决策', mode:'运行方式', endpoint:'服务地址', local_model_path:'本地模型路径',
-        api_key:'API Key', timeout_seconds:'请求超时'};
+        api_key:'API Key', timeout_seconds:'请求超时', followup_confidence_threshold:'连续接话置信阈值'};
       for (const name of Object.keys(layaChanges(s.laya))) {
         if (name === 'decision_fields') changed.push(...LAYA_DECISION_FIELDS.filter(([key]) =>
           s.laya.draft.decision_fields[key] !== (s.laya.data.decision_fields?.[key] !== false)).map(([, label]) => `Laya · ${label}`));

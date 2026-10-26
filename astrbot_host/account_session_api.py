@@ -9,7 +9,7 @@ import logging
 from astrbot.api.web import request
 from astrbot.core import sp
 
-from companion_v2.adapters.astrbot.native import account_number
+from companion_v2.adapters.astrbot.native import route_id
 from companion_v2.execution.models import TaskError, digest
 from .multi_settings import MultiHostSettings
 from .native import remember_session_settings
@@ -215,8 +215,8 @@ class AccountSessionWebAPI:
                                 "the native group session is not associated with one connected Bot account yet")
             if not account_id.strip() or not bot_id.strip():
                 raise TaskError("account_config_invalid", "group target identity fields must be nonempty text")
-            account_id = account_number(account_id)
-            group_id = account_number(group_id)
+            account_id = route_id(account_id)
+            group_id = route_id(group_id)
             current = self._view()
             route = (platform_id, account_id, bot_id, group_id)
             group_rows = deepcopy(current["groups"])
@@ -317,7 +317,7 @@ class AccountSessionWebAPI:
                 for row in rows:
                     key = account_key(row)
                     peer = row.get(peer_field)
-                    peer = "*" if peer == "*" else account_number(peer)
+                    peer = "*" if peer == "*" else route_id(peer)
                     if kind == "group" and peer == "*":
                         previous = existing.get((key[0], key[1], peer))
                         if "groups" not in body and previous is not None and key in selected:

@@ -44,7 +44,8 @@
     file_understanding_format_groups: "可读取文件格式", file_understanding_max_size_mb: "文件大小上限（MB）",
     file_understanding_max_chars: "文件正文长度上限", file_understanding_timeout_seconds: "文件读取等待时间（秒）",
     file_understanding_prompt: "文件阅读提示词补充",
-    image_understanding_private_enabled: "私聊图片理解", video_understanding_private_enabled: "私聊视频理解",
+    image_understanding_private_enabled: "私聊图片理解", astrbot_animated_image_understanding_enabled: "AstrBot 原生动图理解优化",
+    video_understanding_private_enabled: "私聊视频理解",
     file_understanding_private_enabled: "私聊文件理解",
   };
   const replyChoices = {
@@ -81,8 +82,9 @@
       "voice_delivery_mode", "voice_position", "voice_language", "voice_foreign_text_mode", "voice_provider_id",
       "voice_zh_provider_id", "voice_ja_provider_id", "voice_en_provider_id", "voice_probability",
       "voice_cooldown_seconds", "voice_max_speech_chars", "voice_timeout_seconds", "voice_trigger_keywords", "voice_extra_prompt"]},
-    {title: "图片理解", fields: ["image_understanding_private_enabled", "enable_private_image_self_recognition",
-      "private_image_self_recognition_hint", "enable_private_image_vision_cache", "private_image_vision_cache_max_items",
+    {title: "图片理解", fields: ["image_understanding_private_enabled", "astrbot_animated_image_understanding_enabled",
+      "enable_private_image_self_recognition", "private_image_self_recognition_hint",
+      "enable_private_image_vision_cache", "private_image_vision_cache_max_items",
       "private_image_vision_custom_prompt", "private_image_vision_max_chars", "private_image_vision_wait_seconds",
       "private_image_provider_failure_cooldown_seconds"]},
     {title: "视频理解", fields: ["video_understanding_private_enabled", "video_understanding_enabled",
@@ -1043,6 +1045,7 @@
       "part_gap_max_ms", "part_gap_log_base", "prompt", "split_words", "match_width_variants", "rule_regex",
       "content_cleanup_enabled", "content_replacement_enabled", "voice_enabled", "reply_quote_enabled",
       "enable_private_image_self_recognition", "image_understanding_private_enabled",
+      "astrbot_animated_image_understanding_enabled",
       "video_understanding_private_enabled", "video_understanding_enabled",
       "file_understanding_private_enabled", "file_understanding_enabled",
     ]);

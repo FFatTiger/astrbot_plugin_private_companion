@@ -1,18 +1,56 @@
+from types import SimpleNamespace as NS
 import unittest
 
 from companion_v2.conversation.media.output_settings import (
-    DEFAULTS, apply_prompts, configuration_fields, is_rule_image_request, parse_scene_presets, prompt_instruction,
+    DEFAULTS, apply_prompts, configuration_fields, image_request_denial, is_rule_image_request,
+    parse_scene_presets, prompt_instruction,
 )
 from companion_v2.execution.models import TaskError
+from companion_v2.foundation.refs import ScopeKind, SubjectKind
 
 
 class ImageOutputSettingsTests(unittest.TestCase):
     def test_image_output_settings_keep_gallery_attachment_cap_separate_from_image_quota(self):
         self.assertEqual(DEFAULTS["proactive_probability"], 0.35)
         self.assertEqual(DEFAULTS["proactive_max_daily"], 1)
+        self.assertIs(DEFAULTS["group_enabled"], True)
+        self.assertEqual(DEFAULTS["request_permission"], "everyone")
         field_ids = {field.field_id for field in configuration_fields()}
         self.assertNotIn("conversation.image_output.rule_max_daily", field_ids)
         self.assertIn("conversation.image_output.proactive_max_daily", field_ids)
+        self.assertIn("conversation.image_output.group_enabled", field_ids)
+        self.assertIn("conversation.image_output.request_permission", field_ids)
+
+    def test_group_switch_and_request_permission_are_enforced_before_generation(self):
+        class Runtime:
+            def __init__(self, tier=None):
+                self.tier = tier
+
+            def read_one(self, _sql, _params):
+                return {"tier": self.tier} if self.tier else None
+
+        standard = NS(subject=NS(kind=SubjectKind.HUMAN, subject_id="standard"))
+        core = NS(subject=NS(kind=SubjectKind.HUMAN, subject_id="core"))
+        private = NS(scope=NS(kind=ScopeKind.PRIVATE), actor=standard)
+        group = NS(scope=NS(kind=ScopeKind.GROUP), actor=standard)
+        core_private = NS(scope=NS(kind=ScopeKind.PRIVATE), actor=core)
+        core_group = NS(scope=NS(kind=ScopeKind.GROUP), actor=core)
+
+        group_off = {**DEFAULTS, "group_enabled": False}
+        self.assertEqual(image_request_denial(Runtime(), group, group_off)[0],
+                         "group_image_requests_disabled")
+        self.assertIsNone(image_request_denial(Runtime(), private, group_off))
+
+        core_only = {**DEFAULTS, "request_permission": "core_only"}
+        self.assertEqual(image_request_denial(Runtime(), private, core_only)[0],
+                         "image_requests_core_only")
+        self.assertEqual(image_request_denial(Runtime(), group, core_only)[0],
+                         "image_requests_core_only")
+        self.assertIsNone(image_request_denial(Runtime("core"), core_private, core_only))
+        self.assertIsNone(image_request_denial(Runtime("core"), core_group, core_only))
+        self.assertEqual(image_request_denial(
+            Runtime(), private, {**DEFAULTS, "trigger_mode": "off"})[0],
+            "image_requests_disabled")
 
     def test_scene_marker_injects_the_selected_role_preset(self):
         values = dict(DEFAULTS)

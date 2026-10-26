@@ -706,6 +706,9 @@ test('image page separates generation and editing model queues and saves paramet
     'the model editor stays inside one framed section');
   assert.match(node.innerHTML, /data-img-view="generate"/);
   assert.match(node.innerHTML, /data-img-view="edit"/);
+  assert.match(node.innerHTML, /class="model-img-route-name" data-img-config-field="endpoints\.0\.name" value="主用模型"/);
+  assert.match(node.innerHTML, /aria-label="自定义模型名称"/);
+  assert.doesNotMatch(node.innerHTML, /端点名称/);
   assert.match(node.innerHTML, /data-img-config-field="endpoints\.0\.model"/);
   assert.match(node.innerHTML, /data-img-config-field="endpoints\.0\.quality"/);
   assert.match(node.innerHTML, /data-img-config-field="endpoints\.0\.max_reference_images"/);
@@ -739,6 +742,7 @@ test('image page separates generation and editing model queues and saves paramet
   assert.match(node.innerHTML, /image\.mask_edit/);
   assert.match(node.innerHTML, /改图模型与优先级/);
   node.click('[data-img-route-move]', {imgRouteMove: 'up', imgRouteIndex: '1'});
+  node.input('[data-img-config-field]', {imgConfigField: 'endpoints.0.name', value: '  主力生图  '});
   node.change('[data-img-config-field]', {imgConfigField: 'endpoints.0.model', value: 'image-v3'});
   node.change('[data-img-config-field]', {imgConfigField: 'endpoints.0.quality', value: 'hd'});
   node.change('[data-img-config-field]', {imgConfigField: 'endpoints.0.max_reference_images', value: 4});
@@ -750,7 +754,8 @@ test('image page separates generation and editing model queues and saves paramet
   assert.equal(page.isDirty(), true);
   const unsavedFields = Array.from(page.changedFields());
   assert.ok(unsavedFields.includes('生图模型 · 调用顺序 · 改图'));
-  assert.ok(unsavedFields.includes('生图模型 · 主用模型 · 模型 ID'));
+  assert.ok(unsavedFields.includes('生图模型 · 主力生图 · 模型 ID'));
+  assert.ok(unsavedFields.includes('生图模型 · 主力生图 · 自定义名称'));
   assert.ok(unsavedFields.includes('生图模型 · SD WebUI · 生图参数 · 文生图 · 采样步数'));
   assert.doesNotMatch(unsavedFields.join('\n'), /image-v3|127\.0\.0\.1|Euler/,
     'the leave prompt lists field labels without exposing configuration values');
@@ -759,6 +764,7 @@ test('image page separates generation and editing model queues and saves paramet
   assert.ok(configSave, 'saving model configuration uses the native image configuration API');
   assert.deepEqual(JSON.parse(JSON.stringify(configSave.values.changes.operation_routes.edit)),
     ['online:primary', 'online:secondary'], 'editing priority is independent and reorderable');
+  assert.equal(configSave.values.changes.endpoints[0].name, '主力生图');
   assert.equal(configSave.values.changes.endpoints[0].model, 'image-v3');
   assert.equal(configSave.values.changes.endpoints[0].quality, 'hd');
   assert.equal(configSave.values.changes.endpoints[0].max_reference_images, 4);
@@ -1292,7 +1298,8 @@ test('Laya page exposes official local install, first-run download, and SystemOn
   const statusRequest = requests.find(item => item.method === 'GET' && item.route === 'model/laya');
   assert.ok(statusRequest);
   statusRequest.resolve({enabled: false, mode: 'local', endpoint: '', default_model: 'multilingual',
-    api_key_set: false, timeout_seconds: 20, package_installed: true, package_version: '0.4.0',
+    api_key_set: false, timeout_seconds: 20, followup_confidence_threshold: 0,
+    package_installed: true, package_version: '0.4.0',
     decision_fields: {turn_state: true, action: true, reply_intent: true, reply_style: true,
       reply_form: true, segment_mode: true, tool_need: true},
     model_cache_ready: false, model_cache_path: 'C:/cache/huggingface/hub',
@@ -1322,6 +1329,8 @@ test('Laya page exposes official local install, first-run download, and SystemOn
   assert.doesNotMatch(node.innerHTML, /GGUF|OpenAI 兼容|chat\/completions/);
   assert.match(node.innerHTML, /判断回复形式/);
   assert.match(node.innerHTML, /判断分段倾向/);
+  assert.match(node.innerHTML, /连续接话置信阈值/);
+  assert.match(node.innerHTML, /0 关闭；仅约束非点名续接/);
   assert.match(node.innerHTML, /Laya 调用日志/);
   assert.match(node.innerHTML, /模型输入 · state 与分类问题/);
   assert.match(node.innerHTML, /模型原始响应/);
@@ -1332,14 +1341,17 @@ test('Laya page exposes official local install, first-run download, and SystemOn
   assert.match(node.innerHTML, /当时启用：判断是否说完 · 判断回复意图/);
 
   node.change('[data-laya-decision]', {layaDecision: 'tool_need', checked: false});
+  node.change('[data-laya-field]', {layaField: 'followup_confidence_threshold', value: 55});
   node.change('[data-laya-field]', {layaField: 'local_model_path', value: 'C:/models/laya-finetuned'});
-  assert.deepEqual(Array.from(page.changedFields()).sort(), ['Laya · 判断能力需求', 'Laya · 本地模型路径'].sort());
+  assert.deepEqual(Array.from(page.changedFields()).sort(),
+    ['Laya · 判断能力需求', 'Laya · 连续接话置信阈值', 'Laya · 本地模型路径'].sort());
   node.click('[data-laya-save]');
   const saveRequest = requests.find(item => item.method === 'POST' && item.route === 'model/laya/save');
   assert.equal(saveRequest.values.changes.decision_fields.tool_need, false);
   assert.equal(saveRequest.values.changes.local_model_path, 'C:/models/laya-finetuned');
+  assert.equal(saveRequest.values.changes.followup_confidence_threshold, 55);
   saveRequest.resolve({enabled: false, mode: 'local', endpoint: '', default_model: 'multilingual',
-    local_model_path: 'C:/models/laya-finetuned',
+    local_model_path: 'C:/models/laya-finetuned', followup_confidence_threshold: 55,
     api_key_set: false, timeout_seconds: 20, decision_fields: {...saveRequest.values.changes.decision_fields},
     package_installed: true, package_version: '0.4.0', model_cache_ready: false,
     model_cache_path: 'C:/cache/huggingface/hub', python_executable: 'C:/AstrBot/python.exe',

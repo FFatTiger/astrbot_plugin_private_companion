@@ -15,6 +15,7 @@ from dataclasses import asdict, dataclass, replace
 from companion_v2.adapters.astrbot.memory_owner import memory_owner_provider
 from companion_v2.adapters.astrbot.memory_push import memory_push_provider
 from companion_v2.adapters.astrbot.onebot import OneBotPrivateSender
+from companion_v2.adapters.astrbot.platform_sender import AstrBotPlatformSender
 from companion_v2.configuration.models import ConfigLayer, ConfigTarget
 from companion_v2.configuration.registry import FieldRegistry
 from companion_v2.conversation.delivery import DeliveryReceipt, LocalSender
@@ -56,7 +57,7 @@ from companion_v2.storage.repositories import OperationRepository
 
 from .application import AstrBotCompanionHost
 from .tools import CompositeAstrBotToolPort
-from .native import HostAccount, HostPersona, NativePrivateBridge, account_number, check_version, persona_instruction
+from .native import HostAccount, HostPersona, NativePrivateBridge, check_version, persona_instruction, route_id
 from .provider import AstrBotTextProvider, UsageTariff, provider_fingerprint
 from .provider_catalog import TextProviderSettings, assemble_providers, loaded_routing
 from .staging_config import DELIVERY_CAPABILITY, DELIVERY_GRANT_ID
@@ -166,8 +167,8 @@ class StagingProfile:
                 or self.target.audience.recipients != (self.target.actor.subject,)
                 or self.persona.bot_id != scope.bot_id or self.persona.role != self.target.role_binding.role):
             raise ValueError("staging requires one consistent private target, host, account and persona")
-        account_number(scope.account_id)
-        account_number(scope.native_scope_id)
+        route_id(scope.account_id)
+        route_id(scope.native_scope_id)
         if self.delivery_mode == "preview":
             object.__setattr__(self, "delivery_mode", "onebot_private")
         elif self.delivery_mode != "onebot_private":
@@ -305,7 +306,10 @@ class AstrBotStagingSession:
         if self._uses_local_sender:
             sender = LocalSender(self.sender_binding, self._preview, supports_images=True)
         else:
-            sender = OneBotPrivateSender(self.bridge, binding=self.sender_binding, version=native_types.version,
+            sender_type = (OneBotPrivateSender
+                           if self.bridge.platform_name(target.scope) == "aiocqhttp"
+                           else AstrBotPlatformSender)
+            sender = sender_type(self.bridge, binding=self.sender_binding, version=native_types.version,
                 reverse_api_type=native_types.reverse_api, authorize=self.require_delivery_authorization,
                 now=now, voice=voice,
                 voice_delivery=VoiceReplyDelivery(runtime, now) if voice is not None else None,

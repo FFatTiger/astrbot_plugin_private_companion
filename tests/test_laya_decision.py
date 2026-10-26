@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import json
 import sys
 import types
@@ -8,7 +9,7 @@ import types
 import pytest
 
 from companion_v2.decision.client import LayaClientError
-from astrbot_host.laya_client import LayaDecisionClient, _LOCAL_ROUTERS
+from astrbot_host.laya_client import LayaDecisionClient, _LOCAL_ROUTERS, _decision_from_result
 from companion_v2.decision.contract import DecisionContractError, deterministic_skip_reason, parse_decision
 from companion_v2.decision.prompt import DECISION_QUESTIONS, build_state
 from companion_v2.decision.service import LayaDecisionService
@@ -44,6 +45,83 @@ def test_laya_contract_is_exact_and_numeric_free():
         parse_decision({**document, "reason_codes": [2]})
     with pytest.raises(DecisionContractError):
         parse_decision({**document, "reply_form": "none"})
+
+
+def test_action_confidence_is_transport_metadata_only():
+    payload = laya_result()
+    payload["answers"]["action"].update({"answer_confidence": 0.6234,
+        "probabilities": {"reply": 0.6234, "wait": 0.2, "silent": 0.1,
+                          "interject": 0.04, "clarify": 0.0366}})
+    decision = _decision_from_result(payload)
+    assert decision.action_confidence == 0.6234
+    assert decision.document() == decision_document()
+
+    payload["answers"]["action"] = {
+        "type": "choice", "choice": "reply",
+        "probabilities": {"reply": 0.58, "wait": 0.42},
+    }
+    assert _decision_from_result(payload).action_confidence == 0.58
+
+    # `confidence` on a choice answer is normalized entropy, not answer
+    # probability. It must not be used as a threshold score.
+    payload["answers"]["action"] = {"type": "choice", "choice": "reply", "confidence": 0.99}
+    assert _decision_from_result(payload).action_confidence is None
+
+
+def test_followup_confidence_threshold_is_validated_and_persisted(tmp_path):
+    store = LayaSettingsStore(tmp_path, "target", "role")
+    assert store.read()["followup_confidence_threshold"] == 0
+
+    with pytest.raises(LayaSettingsError) as error:
+        store.update(store.raw()["revision"], {"followup_confidence_threshold": 101})
+    assert error.value.code == "laya_config_invalid"
+
+    status = store.update(store.read()["revision"], {"followup_confidence_threshold": 55})
+    assert status["followup_confidence_threshold"] == 55
+    assert store.raw()["followup_confidence_threshold"] == 55
+
+
+def test_followup_confidence_gate_suppresses_only_weak_automatic_continuations(tmp_path):
+    class FixedClient:
+        last_trace = {"request": {"model": "multilingual", "sent": True},
+                      "response": None, "processing": {}}
+
+        def __init__(self, decision):
+            self.decision = decision
+
+        async def decide(self, _facts, *, enabled_fields=None):
+            return self.decision
+
+    store = LayaSettingsStore(tmp_path, "target", "role")
+    store.update(store.raw()["revision"], {"enabled": True,
+                                           "followup_confidence_threshold": 55})
+    service = LayaDecisionService(store)
+    base = parse_decision(decision_document())
+    facts = {"message_kind": "text", "scope_kind": "group", "user_text": "还想再聊一句",
+             "candidate_reason": "reply_follow_up"}
+
+    def decide(decision, observed=facts):
+        service._client = lambda _values: FixedClient(decision)
+        return asyncio.run(service.decide(observed))
+
+    weak = decide(replace(base, action_confidence=0.40))
+    assert weak["decision"]["action"] == "silent"
+    assert weak["reason"] == "laya_followup_confidence_below_threshold"
+    assert weak["confidence_gate"]["status"] == "below_threshold"
+    assert weak["confidence_gate"]["original_action"] == "reply"
+
+    strong = decide(replace(base, action_confidence=0.56))
+    assert strong["decision"]["action"] == "reply"
+    assert strong["confidence_gate"]["status"] == "passed"
+
+    mentioned = decide(replace(base, action_confidence=0.10),
+                       {**facts, "candidate_reason": "mention"})
+    assert mentioned["decision"]["action"] == "reply"
+    assert "confidence_gate" not in mentioned
+
+    unavailable = decide(base)
+    assert unavailable["decision"]["action"] == "reply"
+    assert unavailable["confidence_gate"]["status"] == "confidence_unavailable"
 
 
 def test_laya_questions_use_official_choice_types_without_numeric_controls():

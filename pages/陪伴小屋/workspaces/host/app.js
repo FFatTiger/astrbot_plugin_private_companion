@@ -172,8 +172,8 @@
     const text = String(value ?? "").trim();
     return text || fallback;
   };
-  const platformLabel = value => ({qq:"QQ · OneBot",default:"QQ · OneBot",aiocqhttp:"QQ · OneBot",onebot:"QQ · OneBot"})[value] || "当前平台";
-  const nativeId = value => /^\d+$/.test(String(value || "")) ? String(value) : "";
+  const platformLabel = value => ({qq:"QQ · OneBot",default:"QQ · OneBot",aiocqhttp:"QQ · OneBot",onebot:"QQ · OneBot",qq_official:"QQ 官方机器人",qq_official_webhook:"QQ 官方机器人（Webhook）"})[value] || "当前平台";
+  const nativeId = value => String(value ?? "").trim();
   const topologyScope = (target) => {
     const kind = target?.scope_kind === "group" || target?.group_id ? "群" : "私聊";
     const id = nativeId(target.group_id || target.participant_id);

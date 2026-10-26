@@ -6,7 +6,8 @@ import logging
 from zoneinfo import ZoneInfo
 
 from companion_v2.conversation.media.generated import IMAGE_ACTIONS
-from companion_v2.conversation.media.output_settings import effective_settings, is_rule_image_request, prompt_instruction
+from companion_v2.conversation.media.output_settings import (effective_settings, image_request_denial,
+                                                             is_rule_image_request, prompt_instruction)
 from companion_v2.references.prompts import IMAGE_REFERENCE_INSTRUCTION
 
 from .native_extensions.request_context import set_system_instruction
@@ -71,12 +72,13 @@ def core_image_tools(session, offered):
         return offered, None
     try:
         values = effective_settings(session.application.runtime, session.context)
+        denial = image_request_denial(session.application.runtime, session.context, values)
     except Exception as error:
         logger.warning("[CompanionV2] 核心生图偏好暂不可用 error_type=%s", type(error).__name__)
         return tuple(item for item in offered if item.spec.action not in IMAGE_ACTIONS), None
-    if not values["allow_user_requests"] or values["trigger_mode"] == "off":
-        logger.info("[CompanionV2][image] stage=policy allow=%s mode=%s actions=%s kept=0",
-                    values["allow_user_requests"], values["trigger_mode"], present)
+    if denial is not None:
+        logger.info("[CompanionV2][image] stage=policy denial=%s actions=%s kept=0",
+                    denial[0], present)
         return tuple(item for item in offered if item.spec.action not in IMAGE_ACTIONS), None
     logger.info("[CompanionV2][image] stage=keep mode=%s actions=%s", values["trigger_mode"], present)
     return offered, values

@@ -125,13 +125,15 @@ class PersonaNormalizationTests(unittest.TestCase):
         self.assertEqual(persona_label("晚星"), "晚星")
 
     def test_role_display_name_removes_only_channel_suffixes_with_optional_spaces(self):
-        for value in ("星缘-私聊", "星缘 - 私聊", "星缘_群聊", "星缘 _ 群聊"):
+        for value in ("星缘-私聊", "星缘 - 私聊", "星缘_群聊", "星缘 _ 群聊",
+                      "星缘·私聊", "星缘 · 群聊", "星缘－群聊"):
             with self.subTest(value=value):
                 self.assertEqual(role_display_name(value), "星缘")
         self.assertEqual(role_display_name("深夜-来信"), "深夜-来信")
 
     def test_generated_role_display_name_uses_normalized_persona_labels(self):
         self.assertEqual(role_display_name("role-account-persona", ["星缘 - 私聊"]), "星缘")
+        self.assertEqual(role_display_name("role-account-persona", ["星缘·私聊", "星缘·群聊"]), "星缘")
 
 
 if __name__ == "__main__":

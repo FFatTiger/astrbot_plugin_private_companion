@@ -10,7 +10,8 @@ import traceback
 from uuid import uuid4
 
 from companion_v2.adapters.astrbot.native import (
-    HostPersona, NativePrivateBridge, account_number, bounded_native_lookup, persona_instruction,
+    HostPersona, NativePrivateBridge, bounded_native_lookup, event_account_id, event_peer_id,
+    native_client_connected, persona_instruction, supported_platform_name,
 )
 from companion_v2.adapters.astrbot.group import group_event_route
 from companion_v2.adapters.astrbot.provider import provider_fingerprint
@@ -125,10 +126,9 @@ class AstrBotMultiController:
             if platform is None:
                 return "host_platform_unavailable"
             meta = platform.meta()
-            if meta.name != "aiocqhttp" or meta.id != account.platform_id:
+            if not supported_platform_name(meta.name) or meta.id != account.platform_id:
                 return "host_platform_changed"
-            client = platform.get_client()
-            if not getattr(client, "_wsr_api_clients", {}).get(account.self_id):
+            if not native_client_connected(platform, account.self_id):
                 return "host_account_unavailable"
         return None
 
@@ -424,7 +424,7 @@ class AstrBotMultiController:
             platform = self.context.get_platform_inst(account.platform_id)
             client = bridge.platforms[account.platform_id][1]
             if (platform is None or platform.get_client() is not client
-                    or not getattr(client, "_wsr_api_clients", {}).get(account.self_id)):
+                    or not bridge.account_connected(account, client)):
                 raise TaskError("host_account_unavailable", "a configured account is not connected")
         for target in (settings.all_targets if include_conversations else ()):
             account = bridge.accounts[(target.platform_id, target.account_id)]
@@ -537,7 +537,12 @@ class AstrBotMultiController:
         except BaseException:
             runtime.close()
             raise
-        return runtime, MultiAuthority(runtime, settings, now=self.now), last_restore
+        return runtime, MultiAuthority(runtime, settings, now=self.now,
+            platform_name=self._configured_platform_name), last_restore
+
+    def _configured_platform_name(self, platform_id):
+        platform = self.context.get_platform_inst(platform_id)
+        return str(platform.meta().name) if platform is not None else ""
 
     async def _open_async(self):
         if self.runtime is None:
@@ -732,7 +737,8 @@ class AstrBotMultiController:
                         settings.installation_id, plugin_root=self.data_root)
                 try:
                     if self.runtime is not None:
-                        authority = MultiAuthority(self.runtime, settings, now=self.now)
+                        authority = MultiAuthority(self.runtime, settings, now=self.now,
+                            platform_name=self._configured_platform_name)
                         with self.runtime.transaction():
                             authority.initialize(manifest, reviewed=True,
                                                  allow_legacy_staging=adopting_legacy_profile)
@@ -886,7 +892,7 @@ class AstrBotMultiController:
         return task, model
 
     def target_for_event(self, event):
-        if type(event) is not self.native_types.event or self.settings is None:
+        if not isinstance(event, self.native_types.event) or self.settings is None:
             return None
         try:
             message, session, meta = event.message_obj, event.session, event.platform_meta
@@ -895,14 +901,15 @@ class AstrBotMultiController:
                 target = self.settings.group_target(route.platform_id, route.account_id, route.group_id)
                 platform = self.context.get_platform_inst(meta.id)
                 if (target is None or platform is None or platform.get_client() is not event.bot
-                        or not event.bot._wsr_api_clients.get(route.account_id)):
+                        or not native_client_connected(platform, route.account_id, event.bot)):
                     return None
                 return target
-            sender, login = account_number(message.sender.user_id), account_number(message.self_id)
+            sender, login = event_peer_id(event), event_account_id(event)
             if (message.group_id or getattr(message.type, "value", None) != "FriendMessage"
                     or getattr(session.message_type, "value", None) != "FriendMessage"
-                    or meta.name != "aiocqhttp" or session.platform_id != meta.id or session.platform_name != meta.id
-                    or session.session_id != sender or event.unified_msg_origin != f"{meta.id}:FriendMessage:{sender}"):
+                    or not supported_platform_name(meta.name) or session.platform_id != meta.id
+                    or session.platform_name != meta.id or session.session_id != sender
+                    or event.unified_msg_origin != f"{meta.id}:FriendMessage:{sender}"):
                 return None
             target = self.settings.private_target(meta.id, login, sender)
             platform = self.context.get_platform_inst(meta.id)

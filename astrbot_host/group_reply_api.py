@@ -3,7 +3,6 @@
 import json
 
 from astrbot.api.web import request
-from companion_v2.adapters.astrbot.native import account_number
 from companion_v2.configuration.contract import contract_of, layers_of, provenance_of
 from companion_v2.configuration.models import ConfigLayer, ConfigTarget, ConfigurationError
 from companion_v2.conversation.participation import CONFIG_GROUP as PARTICIPATION_GROUP
@@ -14,7 +13,7 @@ from companion_v2.expression.style_management import ExpressionStyleManagement
 from companion_v2.foundation.outcome import Outcome
 from companion_v2.foundation.refs import OperationRef, ScopeKind, ScopeRef, VersionRef
 
-from .group_settings import GroupTarget
+from .group_settings import GroupTarget, group_session_matches
 from .management_identity import dashboard_operator
 from .web_api import outcome_response
 
@@ -61,9 +60,7 @@ class GroupReplyWebAPI:
                 len(query.getlist(key)) != 1 for key in query.keys()):
             raise ValueError("unexpected group reply query")
         session_id = query.get("session_id", group_id)
-        parts = session_id.split("_") if type(session_id) is str else ()
-        if (len(parts) not in (1, 2) or parts[-1] != group_id
-                or any(account_number(part) != part for part in parts)):
+        if not group_session_matches(session_id, group_id):
             raise TaskError("group_reply_session_invalid", "select this group's shared or per-member native session")
         return session_id
 

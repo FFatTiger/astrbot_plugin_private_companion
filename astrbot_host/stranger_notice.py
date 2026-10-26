@@ -64,7 +64,7 @@ def stranger_route(controller, event):
         return None
     if (platform.meta().name != "aiocqhttp" or meta.name != "aiocqhttp"
             or not getattr(controller, "native_types", None)
-            or type(event) is not controller.native_types.event):
+            or not isinstance(event, controller.native_types.event)):
         return None
     settings = controller.settings
     if hasattr(settings, "accounts"):

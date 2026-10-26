@@ -7,7 +7,7 @@ from datetime import timedelta
 import re
 from typing import Any
 
-from companion_v2.adapters.astrbot.native import account_number
+from companion_v2.adapters.astrbot.native import route_id
 from companion_v2.adapters.astrbot.provider import UsageTariff
 from companion_v2.adapters.astrbot.provider_catalog import TextProviderSettings
 from companion_v2.conversation.flow import ConversationPolicy
@@ -204,8 +204,8 @@ class HostSettings:
         for value in (self.platform_id, self.account_id, self.participant_id, self.provider_id):
             if not value:
                 raise HostControlError("staging_settings_incomplete", "complete the staging target and model settings first")
-        account_number(self.account_id)
-        account_number(self.participant_id)
+        route_id(self.account_id)
+        route_id(self.participant_id)
 
     def with_identity(self, identity: dict[str, str]) -> "HostSettings":
         """The same settings carrying a conversation target derived at binding time.

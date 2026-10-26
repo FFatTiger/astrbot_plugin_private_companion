@@ -12,6 +12,11 @@ from companion_v2.adapters.astrbot.native import (
     account_number,
     bounded_native_lookup,
     configured_default_persona_id,
+    event_account_id,
+    event_peer_id,
+    native_client_connected,
+    route_id,
+    supported_platform_name,
 )
 from companion_v2.execution.models import TaskError, digest
 from .identity_derivation import derive_bot_id, derive_role_id, role_display_name
@@ -29,13 +34,21 @@ def session_route(umo):
         return None
     platform, kind, session = parts
     try:
-        ids = session.split("_")
-        if kind == "FriendMessage" and len(ids) == 1:
-            return platform, "private", account_number(session)
-        if kind == "GroupMessage" and len(ids) in (1, 2):
-            for value in ids:
-                account_number(value)
-            return platform, "group", ids[-1]
+        if kind == "FriendMessage":
+            return platform, "private", route_id(session)
+        if kind == "GroupMessage":
+            # Legacy OneBot per-member group sessions are ``sender_group``.
+            # QQ Official group sessions are opaque group openids and must be
+            # kept whole even when they happen to contain an underscore.
+            ids = session.split("_")
+            if len(ids) in (1, 2):
+                try:
+                    for value in ids:
+                        account_number(value)
+                    return platform, "group", ids[-1]
+                except ValueError:
+                    pass
+            return platform, "group", route_id(session)
     except ValueError:
         pass
     return None
@@ -127,14 +140,16 @@ class SessionTopology:
         for platform in platforms:
             try:
                 meta = platform.meta()
+                if not supported_platform_name(meta.name):
+                    continue
                 if meta.name == "aiocqhttp":
-                    clients = platform.get_client()._wsr_api_clients
+                    clients = getattr(platform.get_client(), "_wsr_api_clients", {})
                     for raw_id in clients:
                         remember(meta.id, account_number(raw_id))
                 else:
-                    # QQ Official and other adapters do not expose a OneBot
-                    # self-id. Their stable account key is the platform instance
-                    # id, which is also what event_identity falls back to.
+                    # QQ Official and the webhook adapter do not expose a
+                    # OneBot self-id. Their stable account key is the platform
+                    # instance id, also used by event_identity.
                     remember(meta.id, meta.id)
             except (AttributeError, ValueError, TypeError):
                 continue
@@ -285,7 +300,7 @@ class SessionTopology:
 
     async def observe(self, event):
         controller = self.controller
-        if controller._terminated or type(event) is not controller.native_types.event:
+        if controller._terminated or not isinstance(event, controller.native_types.event):
             return
         route = session_route(event.unified_msg_origin)
         if route is None:
@@ -293,15 +308,16 @@ class SessionTopology:
         platform_id, kind, peer = route
         platform = controller.context.get_platform_inst(platform_id)
         message, session, meta = event.message_obj, event.session, event.platform_meta
-        login = account_number(message.self_id)
-        if (platform is None or meta.name != "aiocqhttp" or platform.get_client() is not event.bot
-                or not event.bot._wsr_api_clients.get(login)):
+        login = event_account_id(event)
+        if (platform is None or not supported_platform_name(meta.name)
+                or platform.get_client() is not event.bot
+                or not native_client_connected(platform, login, event.bot)):
             return
         if kind == "group":
             native = group_event_route(event)
             if (native.platform_id, native.account_id, native.group_id) != (platform_id, login, peer):
                 return
-        elif (message.group_id or account_number(message.sender.user_id) != peer
+        elif (message.group_id or event_peer_id(event) != peer
               or getattr(message.type, "value", None) != "FriendMessage"
               or getattr(session.message_type, "value", None) != "FriendMessage"
               or session.session_id != peer or session.platform_id != platform_id

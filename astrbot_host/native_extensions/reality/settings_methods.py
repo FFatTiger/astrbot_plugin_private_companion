@@ -185,12 +185,13 @@ class RealitySettingsMethods:
                     raise TaskError('native_mihome_unavailable', self.mihome_unavailable_reason())
                 mihome_payload = dict(payload)
                 mihome_payload['action'] = action.removeprefix('mihome_')
-                result = await handler(mihome_payload)
-                if not isinstance(result, dict) or result.get('ok') is not True:
-                    raise ValueError(str(result.get('message') or '米家操作未完成') if isinstance(result, dict) else '米家操作未完成')
-                mihome_page_snapshot = result.get('data') if isinstance(result.get('data'), dict) else {}
-                if isinstance(result.get('result'), dict):
-                    mihome_page_snapshot['mihome_action_result'] = result['result']
+                page_result = await handler(mihome_payload)
+                if not isinstance(page_result, dict) or page_result.get('ok') is not True:
+                    raise ValueError(str(page_result.get('message') or '米家操作未完成') if isinstance(page_result, dict) else '米家操作未完成')
+                mihome_page_snapshot = page_result.get('data') if isinstance(page_result.get('data'), dict) else {}
+                action_result = page_result.get('result') if isinstance(page_result.get('result'), dict) else {}
+                mihome_page_snapshot['mihome_action_result'] = action_result
+                result = action_result
             elif action in {'scan_camera', 'scan_cameras'}:
                 result = self._reality_touch_scan_camera_devices()
             elif action == 'scan_audio':

@@ -26,6 +26,9 @@ DEFAULTS = {
     "endpoint": "",
     "api_key": "",
     "timeout_seconds": 20,
+    # 0 disables the host-side gate. Values are percentages because the model
+    # page exposes a familiar 0-100 control; Laya reports a 0-1 probability.
+    "followup_confidence_threshold": 0,
     "decision_fields": DEFAULT_DECISION_FIELDS,
 }
 ALLOWED_CHANGES = frozenset(DEFAULTS)
@@ -172,6 +175,9 @@ class LayaSettingsStore:
                 raise LayaSettingsError("laya_config_invalid", f"{key} 配置无效")
         if type(values["timeout_seconds"]) is not int or isinstance(values["timeout_seconds"], bool) or not 1 <= values["timeout_seconds"] <= 120:
             raise LayaSettingsError("laya_config_invalid", "timeout_seconds 超出范围")
+        threshold = values["followup_confidence_threshold"]
+        if type(threshold) is not int or not 0 <= threshold <= 100:
+            raise LayaSettingsError("laya_config_invalid", "followup_confidence_threshold 超出范围")
         fields = values["decision_fields"]
         if type(fields) is not dict or set(fields) != set(DEFAULT_DECISION_FIELDS) or any(
                 type(value) is not bool for value in fields.values()):
@@ -192,6 +198,7 @@ class LayaSettingsStore:
             "default_model": "multilingual",
             "api_key_set": bool(values["api_key"]),
             "timeout_seconds": values["timeout_seconds"],
+            "followup_confidence_threshold": values["followup_confidence_threshold"],
             "decision_fields": dict(values["decision_fields"]),
             "package_installed": installed,
             "package_version": version,

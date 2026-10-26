@@ -103,7 +103,7 @@ class RealityMiHomeExtensionAPI:
         web_api = self._plugin.mihome_web_api
         if web_api is None:
             raise ValueError(self._plugin.mihome_unavailable_reason())
-        handlers = {'start_login': lambda: web_api.extension_start_login(), 'login_status': lambda: web_api.extension_login_status((payload or {}).get('qr_revision', '')), 'sync_devices': web_api.extension_sync_devices, 'logout': web_api.extension_logout, 'save_mappings': lambda: web_api.extension_save_mappings((payload or {}).get('mappings', [])), 'control_power': lambda: web_api.extension_control_power(str((payload or {}).get('alias') or ''), bool((payload or {}).get('is_on')))}
+        handlers = {'start_login': lambda: web_api.extension_start_login(), 'login_status': lambda: web_api.extension_login_status((payload or {}).get('qr_revision', '')), 'sync_devices': web_api.extension_sync_devices, 'logout': web_api.extension_logout, 'save_mappings': lambda: web_api.extension_save_mappings((payload or {}).get('mappings', [])), 'device_status': lambda: web_api.extension_read_device_status(str((payload or {}).get('alias') or '')), 'control_power': lambda: web_api.extension_control_power(str((payload or {}).get('alias') or ''), bool((payload or {}).get('is_on')))}
         handler = handlers.get(action)
         if handler is None:
             raise ValueError('不支持的米家页面操作')

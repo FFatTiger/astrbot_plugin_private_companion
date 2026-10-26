@@ -2,7 +2,7 @@
 
 from dataclasses import asdict, dataclass, field
 
-from companion_v2.adapters.astrbot.native import HostAccount, account_number
+from companion_v2.adapters.astrbot.native import HostAccount, route_id
 from companion_v2.adapters.astrbot.staging_config import ALLOWED_CAPABILITIES, REQUIRED_CAPABILITIES
 from companion_v2.execution.models import digest
 from companion_v2.conversation.forwards.models import ForwardIntakePolicy
@@ -152,14 +152,14 @@ class MultiHostSettings:
                 if type(row) is not dict or set(row) != {"platform_id", "account_id", "bot_id"}:
                     raise ValueError()
                 account = HostAccount(_text(row["platform_id"], required=True),
-                    account_number(_text(row["account_id"], required=True)),
+                    route_id(_text(row["account_id"], required=True)),
                     _text(row["bot_id"], required=True))
                 route = account.platform_id, account.self_id
                 if route in account_by_route:
                     raise ValueError()
                 account_by_route[route] = account
             for target in (*targets, *groups):
-                account = HostAccount(target.platform_id, account_number(target.account_id), target.bot_id)
+                account = HostAccount(target.platform_id, route_id(target.account_id), target.bot_id)
                 route = account.platform_id, account.self_id
                 previous = account_by_route.setdefault(route, account)
                 if previous != account:
@@ -173,9 +173,9 @@ class MultiHostSettings:
         routes, ids, roles = set(), set(), {}
         try:
             for target in targets:
-                HostAccount(target.platform_id, account_number(target.account_id), target.bot_id)
+                HostAccount(target.platform_id, route_id(target.account_id), target.bot_id)
                 if target.participant_id != "*":
-                    account_number(target.participant_id)
+                    route_id(target.participant_id)
                 if not PROFILE_PATTERN.fullmatch(target.target_id) or target.target_id in ids or target.route_key in routes:
                     raise ValueError()
                 ids.add(target.target_id)

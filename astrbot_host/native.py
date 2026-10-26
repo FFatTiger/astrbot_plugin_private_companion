@@ -13,6 +13,7 @@ from typing import Any
 from aiocqhttp.api_impl import WebSocketReverseApi
 from astrbot import __version__ as ASTRBOT_VERSION
 from astrbot.core import sp
+from astrbot.api.event import AstrMessageEvent
 from astrbot.core.agent.tool import FunctionTool, ToolSet
 from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import AiocqhttpMessageEvent
 from astrbot.core.provider.sources.openai_source import ProviderOpenAIOfficial
@@ -23,7 +24,8 @@ from sqlmodel import select
 
 from companion_v2.adapters.astrbot.native import (
     NATIVE_LOOKUP_SLOW_SECONDS, HostPersona, NativePrivateBridge, account_number, bounded_native_lookup,
-    configured_default_persona_id, persona_instruction, report_slow_native_lookup,
+    configured_default_persona_id, native_client_connected, persona_instruction, report_slow_native_lookup,
+    supported_platform_name,
 )
 from companion_v2.adapters.astrbot.provider import provider_fingerprint
 from companion_v2.adapters.astrbot.provider_catalog import TextProviderSettings, assemble_providers
@@ -260,7 +262,7 @@ def remember_session_settings(umo, services):
 def installed_native_types() -> NativeAdapterTypes:
     return NativeAdapterTypes(
         ASTRBOT_VERSION,
-        AiocqhttpMessageEvent,
+        AstrMessageEvent,
         ProviderOpenAIOfficial,
         FunctionTool,
         ToolSet,
@@ -360,21 +362,25 @@ class NativeProbeService:
     def discover(self, settings: HostSettings) -> dict[str, Any]:
         platform = self.context.get_platform_inst(settings.platform_id)
         if platform is None:
-            raise HostControlError("staging_platform_unavailable", "the configured OneBot platform is unavailable")
+            raise HostControlError("staging_platform_unavailable", "the configured native platform is unavailable")
         metadata = platform.meta()
-        if metadata.name != "aiocqhttp" or metadata.id != settings.platform_id:
-            raise HostControlError("staging_platform_unsupported", "the configured platform is not the selected OneBot instance")
+        if not supported_platform_name(metadata.name) or metadata.id != settings.platform_id:
+            raise HostControlError("staging_platform_unsupported", "the configured platform is not a supported selected instance")
         client = platform.get_client()
-        clients = getattr(client, "_wsr_api_clients", {})
-        if not isinstance(clients, dict):
-            clients = {}
-        connected_accounts = []
-        for value in clients:
-            try:
-                connected_accounts.append(account_number(value))
-            except (TypeError, ValueError):
-                continue
-        connected_accounts = sorted(set(connected_accounts), key=int)
+        if metadata.name == "aiocqhttp":
+            clients = getattr(client, "_wsr_api_clients", {})
+            if not isinstance(clients, dict):
+                clients = {}
+            connected_accounts = []
+            for value in clients:
+                try:
+                    connected_accounts.append(account_number(value))
+                except (TypeError, ValueError):
+                    continue
+            connected_accounts = sorted(set(connected_accounts), key=int)
+        else:
+            connected_accounts = ([settings.account_id]
+                                  if native_client_connected(platform, settings.account_id, client) else [])
 
         provider = self.context.get_provider_by_id(settings.provider_id) if settings.provider_id else None
         if provider is None and not settings.provider_id:
@@ -416,9 +422,8 @@ class NativeProbeService:
         assert platform is not None
         metadata = platform.meta()
         client = platform.get_client()
-        clients = getattr(client, "_wsr_api_clients", {})
-        if not clients.get(settings.account_id):
-            raise HostControlError("staging_account_unavailable", "the configured OneBot account is not connected")
+        if not native_client_connected(platform, settings.account_id, client):
+            raise HostControlError("staging_account_unavailable", "the configured native account is not connected")
 
         umo = f"{settings.platform_id}:FriendMessage:{settings.participant_id}"
         manager = self.context.conversation_manager

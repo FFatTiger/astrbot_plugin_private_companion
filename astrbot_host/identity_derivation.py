@@ -41,7 +41,7 @@ LEGACY_ROLE_ID = "staging-role"
 
 _ACCOUNT = re.compile(r"[0-9A-Za-z_-]+")
 _SAFE = re.compile(r"[^0-9a-z]+")
-_ROLE_CHANNEL_SUFFIX = re.compile(r"\s*[-_]\s*(?:私聊|群聊)\s*$")
+_ROLE_CHANNEL_SUFFIX = re.compile(r"\s*[-_·－]\s*(?:私聊|群聊)\s*$")
 
 
 def _account(value: object, field: str) -> str:

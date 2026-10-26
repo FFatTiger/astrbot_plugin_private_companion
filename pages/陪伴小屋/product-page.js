@@ -645,7 +645,7 @@ window.CompanionProduct = (() => {
   }
   const nativeId = value => /^\d+$/.test(String(value || "")) ? String(value) : "";
   const subjectLabel = item => item?.display_name || nativeId(item?.group_id || item?.participant_id) || "当前聊天对象";
-  const platformLabel = item => ({qq:"QQ · OneBot",default:"QQ · OneBot",aiocqhttp:"QQ · OneBot",onebot:"QQ · OneBot"})[item?.platform_id] || "当前平台";
+  const platformLabel = item => ({qq:"QQ · OneBot",default:"QQ · OneBot",aiocqhttp:"QQ · OneBot",onebot:"QQ · OneBot",qq_official:"QQ 官方机器人",qq_official_webhook:"QQ 官方机器人（Webhook）"})[item?.platform_id] || "当前平台";
   const accountLabel = item => {
     const id = nativeId(item.account_id);
     return item.account_name ? item.account_name + (id ? `（${id}）` : "") : id ? `QQ ${id}` : "当前账号";
@@ -1013,17 +1013,29 @@ window.CompanionProduct = (() => {
       valid();
       const target=message.target;
       if(["group-reply","group-memory"].includes(target?.tab)){
+        const navigationFailure=text=>send({kind:"navigate-failed",tab:target.tab,message:text});
         const destination=catalog?.targets.find(item=>item.scope_kind==="group"
           &&item.platform_id===target.platform_id&&item.bot_id===target.bot_id
           &&item.account_id===target.account_id&&item.group_id===target.group_id);
         const role=destination?.roles.find(item=>item.role_id===target.role_id);
         const api=target.tab==="group-reply"?role?.reply_api:role?.group_memory_api;
-        if(typeof api!=="string")return;
-        await choose(destination.target_id,target.role_id,true);
-        if(selected.target_id===destination.target_id&&selected.role_id===target.role_id
-          &&typeof window.navigate==="function")window.navigate("manage",
-            target.tab==="group-reply"?"decision":"governance",
+        if(typeof api!=="string"){
+          navigationFailure("这个群的人格或角色映射已经变化，请重新读取群聊目录后再试。");
+          return;
+        }
+        try{
+          await choose(destination.target_id,role.role_id,true);
+        }catch{
+          navigationFailure("打开本群配置时未能切换角色，请重新读取群聊目录后重试。");
+          return;
+        }
+        if(selected.target_id===destination.target_id&&selected.role_id===role.role_id
+          &&typeof window.navigate==="function"){
+          window.navigate("manage",target.tab==="group-reply"?"decision":"governance",
             target.tab==="group-reply"?"":"relationship");
+        }else{
+          navigationFailure("未能进入该群的配置页，请重新读取群聊目录后重试。");
+        }
         return;
       }
       const routes={

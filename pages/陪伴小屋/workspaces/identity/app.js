@@ -180,6 +180,11 @@
   const groupName = (group) => group.display_name || group.group_name || `群 ${groupKey(group)}`;
   const groupLabel = (group) => group.display_name || group.group_name
     ? `${groupName(group)}（${groupKey(group)}）` : groupName(group);
+  const groupRoleLabel = (group) => {
+    const values = String(group?.role_name || "").split(/[、,，]/).map(value =>
+      value.replace(/\s*[-_·－]\s*(?:私聊|群聊)\s*$/u, "").trim()).filter(Boolean);
+    return [...new Set(values)].join("、") || (group?.role_id ? "人格分线" : "角色待映射");
+  };
   const groupListStatus = (group) => group.configured ? "已自动接入"
     : group.discovered ? groupTargetRouteReady(group) ? "AstrBot 已发现，待角色映射" : "AstrBot 已发现，账号待确认"
       : "历史往来";
@@ -361,8 +366,13 @@
       const groupNetworks = networks.get(groupBaseKey(group)) || [];
       const people = peopleByBase.get(groupBaseKey(group)) || [];
       if (groupNetworks.length) {
+        /* A current route wins over stale historical routes for the same physical group.
+           Otherwise an old role key from a previous profile produces a second card for a
+           group that is already configured, and its reply/archive buttons cannot resolve. */
+        const activeNetworks = groupNetworks.filter(network => network.configured === true);
+        const visibleNetworks = activeNetworks.length ? activeNetworks : groupNetworks;
         const byPersona = new Map();
-        for (const network of groupNetworks) {
+        for (const network of visibleNetworks) {
           const key = personaIdsOf(network).length ? JSON.stringify(["persona", personaIdsOf(network)])
             : JSON.stringify(["role", network.role_id || ""]);
           const entries = byPersona.get(key) || [];
@@ -373,6 +383,8 @@
           const network = mergeGroupNetworks(entries);
           expanded.push({...group, role_id: network.role_id, role_ids: network.role_ids,
             persona_ids: network.persona_ids, role_name: network.role_name, network,
+            configured: network.configured === true,
+            discovered: Boolean(network.discovered || group.discovered),
             member_count: number(network.member_count), people});
         }
       } else {
@@ -913,7 +925,7 @@
       const nameLine = node("span", undefined, "group-name-line");
       nameLine.append(node("strong", groupName(group)), badge(groupStatusLabel(group), group.configured ? "group" : group.discovered ? "pending" : "history"));
       info.append(nameLine,
-        node("small", `群号 ${id} · ${groupListStatus(group)}${group.account_name || group.account_id ? ` · ${accountLabel(group)}` : ""}${group.role_id ? ` · ${group.role_name || "人格分线"}` : ""}`));
+        node("small", `群号 ${id} · ${groupListStatus(group)}${group.account_name || group.account_id ? ` · ${accountLabel(group)}` : ""}${group.role_id ? ` · ${groupRoleLabel(group)}` : ""}`));
       const stats = node("span", undefined, "group-stats");
       const rosterCount = group.network?.member_count ?? group.member_count;
       const unconfiguredSession = group.discovered && !group.configured;
@@ -951,11 +963,11 @@
     const head = node("header", undefined, "group-detail-head group-detail-hero");
     const title = node("div");
     title.append(node("span", "GROUP SPACE", "eyebrow"), node("h3", groupName(group)), node("small", `群号 ${id}`),
-      node("small", `${groupDetailStatus(group)}${group.role_id ? ` · ${group.role_name || "人格分线"}` : ""}`, "detail-subtitle"));
+      node("small", `${groupDetailStatus(group)}${group.role_id ? ` · ${groupRoleLabel(group)}` : ""}`, "detail-subtitle"));
     const routeFacts = node("div", undefined, "group-route-facts");
     routeFacts.append(node("span", group.platform_id || group.platform || "平台待确认"),
       node("span", group.account_name || group.account_id || "账号待确认"),
-      node("span", group.role_name || (group.role_id ? "人格分线" : "角色待映射")));
+      node("span", groupRoleLabel(group)));
     const stateBadge = badge(groupStatusLabel(group), group.configured ? "group" : group.discovered ? "pending" : "history");
     const statusStack = node("div", undefined, "group-detail-status-stack");
     statusStack.append(stateBadge, routeFacts);
@@ -1522,6 +1534,9 @@
   });
   $("refresh").addEventListener("click", () => { notice(""); load(); });
   document.addEventListener("companion-mappings-change", () => { if (bridge) void load(); });
+  document.addEventListener("companion-navigate-failed", (event) => {
+    notice(event.detail?.message || "目标入口暂时不可用，请重新读取群聊目录后再试。", true);
+  });
   (async function start() {
     window.lucide?.createIcons();
     readDirectoryPreferences();

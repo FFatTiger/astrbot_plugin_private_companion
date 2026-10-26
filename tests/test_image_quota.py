@@ -32,6 +32,21 @@ class ImageQuotaTests(MessageFixture):
         owner.write(target, QUOTA_FIELDS, changes={GROUP + "." + scope + "_max_daily": value}, reset=(),
                     expected_revision=owner.read(target, QUOTA_FIELDS).revision, observed_at=NOW)
 
+    def set_output(self, **changes):
+        target = ConfigTarget(self.context.scope.installation_id, ConfigLayer.ROLE,
+                              self.context.role_binding.role, bot_id=self.context.scope.bot_id)
+        fields = output_configuration_fields()
+        owner = ImageOutputConfigurationOwner(self.runtime)
+        owner.write(target, fields,
+                    changes={IMAGE_OUTPUT_GROUP + "." + name: value for name, value in changes.items()},
+                    reset=(), expected_revision=owner.read(target, fields).revision, observed_at=NOW)
+
+    def group_context(self, actor=None):
+        group_scope = replace(SCOPE, kind=ScopeKind.GROUP, native_scope_id="group-native",
+                              conversation_id="group-conversation", session_id="group-session")
+        return SimpleNamespace(scope=group_scope, actor=actor or self.context.actor,
+                               role_binding=self.context.role_binding)
+
     def attempt(self, identifier, *, context=None, kind="conversation.reply", at=NOW, action="image.generate",
                 native=False, result_state="succeeded"):
         context = context or self.context
@@ -201,6 +216,32 @@ class ImageQuotaTests(MessageFixture):
         self.assertEqual(caught.exception.code, "image_quota_exhausted")
         self.set_limit("private_owner", 1, context=core_context)
         self.messages.image_quota.admit(self.parent("quota-reply", context=core_context), NOW)
+
+    def test_group_image_switch_blocks_group_requests_without_affecting_private(self):
+        self.set_output(group_enabled=False)
+        gate = self.messages.image_quota
+        group_parent = SimpleNamespace(spec=SimpleNamespace(kind="conversation.reply",
+                                                            context=self.group_context()))
+        with self.assertRaises(TaskError) as caught:
+            gate.admit(group_parent, NOW)
+        self.assertEqual(caught.exception.code, "group_image_requests_disabled")
+        gate.admit(self.parent(), NOW)
+
+    def test_core_only_image_permission_blocks_standard_requesters_and_allows_core(self):
+        self.set_output(request_permission="core_only")
+        gate = self.messages.image_quota
+        with self.assertRaises(TaskError) as caught:
+            gate.admit(self.parent(), NOW)
+        self.assertEqual(caught.exception.code, "image_requests_core_only")
+        core_context = self.context_for(self.core)
+        gate.admit(self.parent("quota-core-image-permission", context=core_context), NOW)
+
+    def test_request_policy_does_not_block_proactive_image_generation(self):
+        core_context = self.context_for(self.core)
+        self.set_output(group_enabled=False, request_permission="core_only")
+        gate = self.messages.image_quota
+        gate.admit(self.parent("quota-proactive-policy", context=core_context,
+                               kind="proactive.compose"), NOW)
 
     def test_group_scope_counts_separately_from_private(self):
         gate = self.messages.image_quota

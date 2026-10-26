@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import re
 from collections.abc import Mapping
 from inspect import isawaitable
+from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
+from companion_v2.conversation.media.understanding import ASTRBOT_ANIMATED_IMAGE_INSTRUCTION
 from companion_v2.conversation.voice_reply import VoiceReplyPolicy
 from companion_v2.conversation.private_reply_context import INSTRUCTION as PRIVATE_REPLY_INSTRUCTION
 
@@ -31,6 +36,121 @@ _MODALITY_LABELS = {
 
 def _single_line(value, limit=120):
     return " ".join(value.split())[:limit] if isinstance(value, str) else ""
+
+
+def _gif_header(value):
+    return isinstance(value, bytes) and value[:6] in (b"GIF87a", b"GIF89a")
+
+
+def _local_media_path(value):
+    if not isinstance(value, str) or not value:
+        return None
+    if value.startswith(("base64://", "data:", "http://", "https://")):
+        return None
+    try:
+        if value.startswith("file://"):
+            parsed = urlparse(value)
+            if parsed.netloc not in ("", "localhost"):
+                return None
+            path = Path(url2pathname(parsed.path))
+        else:
+            path = Path(value)
+        return path if path.is_file() else None
+    except (OSError, ValueError):
+        return None
+
+
+def _animated_gif_file(path):
+    try:
+        with path.open("rb") as file:
+            if not _gif_header(file.read(6)):
+                return False
+    except (OSError, ValueError):
+        return False
+    try:
+        from PIL import Image as PILImage
+
+        with PILImage.open(path) as image:
+            return image.format == "GIF" and getattr(image, "n_frames", 1) > 1
+    except Exception:
+        # The header already proves GIF; without a decoder, prefer the safer
+        # contact-sheet interpretation instead of silently dropping guidance.
+        return True
+
+
+def _animated_gif_ref(value):
+    if not isinstance(value, str) or not value.strip():
+        return False
+    value = value.strip()
+    if value.startswith("base64://"):
+        # A GIF header is six bytes; eight base64 characters are enough to
+        # recognize the format without copying a potentially large payload.
+        encoded = value[len("base64://"):][:8]
+        try:
+            return _gif_header(base64.b64decode(encoded, validate=False))
+        except (ValueError, TypeError):
+            return False
+    local = _local_media_path(value)
+    if local is not None:
+        return _animated_gif_file(local)
+    if value.lower().startswith("data:image/gif"):
+        return True
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return False
+    if parsed.scheme in ("http", "https"):
+        return parsed.path.lower().endswith(".gif")
+    return False
+
+
+def has_animated_gif_image(event):
+    """Detect a localized, base64, or URL GIF in the current native message."""
+    getter = getattr(event, "get_messages", None)
+    try:
+        messages = getter() if callable(getter) else (
+            getattr(getattr(event, "message_obj", None), "message", ()) or ())
+    except Exception:
+        messages = ()
+    try:
+        from astrbot.core.message.components import Image, Reply
+    except Exception:
+        return False
+
+    seen = set()
+
+    def visit(component):
+        identifier = id(component)
+        if identifier in seen:
+            return False
+        seen.add(identifier)
+        if isinstance(component, Image):
+            return any(_animated_gif_ref(getattr(component, name, None))
+                       for name in ("path", "file", "url"))
+        if isinstance(component, Reply):
+            chain = getattr(component, "chain", None)
+            return isinstance(chain, (list, tuple)) and any(visit(item) for item in chain)
+        return False
+
+    try:
+        return any(visit(component) for component in messages)
+    except Exception:
+        return False
+
+
+def _request_has_image(request):
+    if getattr(request, "image_urls", None):
+        return True
+    try:
+        for part in getattr(request, "extra_user_content_parts", ()) or ():
+            if isinstance(part, Mapping):
+                if part.get("type") == "image_url":
+                    return True
+            elif getattr(part, "type", None) == "image_url":
+                return True
+    except Exception:
+        return False
+    return False
 
 
 def _asks_recalled_messages(text):
@@ -428,6 +548,13 @@ async def inject_core_reply_perception_context(event, request, *, native_context
         if isinstance(decoded, Mapping):
             details["conversation"] = decoded
 
+    if (prepared.get("astrbot_animated_image_understanding_enabled") is True
+            and _request_has_image(request) and has_animated_gif_image(event)):
+        details["astrbot_animated_image_understanding"] = {
+            "state": "animated_gif_detected",
+            "instruction": ASTRBOT_ANIMATED_IMAGE_INSTRUCTION,
+        }
+
     options = prepared.get("perception_options")
     if (type(options) is tuple and len(options) == 3
             and all(type(value) is bool for value in options)):
@@ -483,4 +610,5 @@ async def inject_core_reply_perception_context(event, request, *, native_context
         isinstance(turn_context, str) and turn_context.strip())
     state["_perception_material_injected"] = bool(
         details.get("conversation") or details.get("expression_guidance")
-        or details.get("image_reference_material") or details.get("private_reply_context"))
+        or details.get("image_reference_material") or details.get("private_reply_context")
+        or details.get("astrbot_animated_image_understanding"))

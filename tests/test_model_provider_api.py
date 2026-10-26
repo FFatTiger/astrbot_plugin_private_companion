@@ -570,6 +570,14 @@ class ProviderRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(preferred, {"model": "gpt-image-2.5", "name": "备用在线 API",
                                      "route": "online:secondary", "enabled": True})
 
+        fake.configuration["endpoints"][1]["name"] = "   "
+        preferred = model_api.ModelWebAPI(self.controller)._preferred_image_projection(registry)
+        self.assertEqual(preferred["name"], "gpt-image-2.5")
+
+        fake.configuration["endpoints"][1]["name"] = "  夜间线路  "
+        preferred = model_api.ModelWebAPI(self.controller)._preferred_image_projection(registry)
+        self.assertEqual(preferred["name"], "夜间线路")
+
     async def test_image_status_distinguishes_unsupported_routes_from_stale_declarations(self):
         (await self.controller.initialize_profile()).unwrap()
         actions = ("image.generate", "image.edit", "image.mask_edit")

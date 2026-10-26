@@ -926,9 +926,10 @@ class ModelWebAPI:
                 if not isinstance(model, str) or not model.strip():
                     continue
                 name = endpoint.get("name")
+                name = name.strip() if isinstance(name, str) else ""
                 candidate = {
                     "model": model,
-                    "name": name if isinstance(name, str) else "",
+                    "name": name or model,
                     "route": route,
                     "enabled": settings.get("enabled") is True and endpoint.get("enabled") is True,
                 }

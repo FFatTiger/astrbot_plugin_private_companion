@@ -18,6 +18,7 @@ from astrbot_host.core_reply_tools import native_tool_name
 from astrbot_host.native_extensions.host_events import prepare_native_host_request
 from companion_v2.conversation.media.output_settings import DEFAULTS
 from companion_v2.execution.models import TaskError
+from companion_v2.foundation.refs import ScopeKind, SubjectKind
 
 
 class CoreReplyImagePromptTests(unittest.IsolatedAsyncioTestCase):
@@ -70,6 +71,33 @@ class CoreReplyImagePromptTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(values)
         settings.assert_not_called()
         self.references.prompt_material.assert_not_called()
+
+    def test_group_switch_and_core_only_permission_hide_image_tools_at_request_time(self):
+        group_context = NS(scope=NS(kind=ScopeKind.GROUP, platform="qq-main"),
+                           actor=NS(subject=NS(kind=SubjectKind.HUMAN, subject_id="standard")))
+        session = NS(application=self.application, context=group_context,
+                     prepared=self.prepared, state=self.state)
+
+        group_off = {**DEFAULTS, "group_enabled": False}
+        with patch("astrbot_host.core_reply_image_prompt.effective_settings", return_value=group_off):
+            offered, preferences = core_image_tools(session, self.offered)
+        self.assertEqual([item.spec.action for item in offered], ["memory.query"])
+        self.assertIsNone(preferences)
+
+        self.application.runtime = Mock()
+        self.application.runtime.read_one.return_value = None
+        core_only = {**DEFAULTS, "request_permission": "core_only"}
+        with patch("astrbot_host.core_reply_image_prompt.effective_settings", return_value=core_only):
+            offered, preferences = core_image_tools(session, self.offered)
+        self.assertEqual([item.spec.action for item in offered], ["memory.query"])
+        self.assertIsNone(preferences)
+
+        self.application.runtime.read_one.return_value = {"tier": "core"}
+        with patch("astrbot_host.core_reply_image_prompt.effective_settings", return_value=core_only):
+            offered, preferences = core_image_tools(session, self.offered)
+        self.assertEqual([item.spec.action for item in offered],
+                         ["memory.query", "image.generate", "image.edit"])
+        self.assertEqual(preferences, core_only)
 
     def test_rules_mode_keeps_image_tools_and_only_hints_matching_turns(self):
         values = {**DEFAULTS, "trigger_mode": "rules"}

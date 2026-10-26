@@ -3643,13 +3643,17 @@ function renderModelsPage(){return `<div class="models-management-page"><section
 function renderMobileConnection(){
   return `<div class="mobile-connection-page">
     <section class="mobile-connection-guide" aria-labelledby="mobileConnectionGuideTitle">
-      <h2 id="mobileConnectionGuideTitle">手机陪伴终端怎么连</h2>
-      <ol>
-        <li>打开下面的「启用移动端网关」，填好监听地址与端口；同一局域网填本机内网地址。</li>
-        <li>设置「移动端配对令牌」，并把「绑定的 AstrBot 用户 ID」填成要接收消息的那个用户。</li>
-        <li>手机端填同一组地址与令牌完成配对；位置、屏幕共享与身体数据再按各自开关上报。</li>
-      </ol>
-      <p>令牌只在保存时写入，页面不回显；换令牌后手机端需要重新配对。</p>
+      <details open>
+        <summary><span><h2 id="mobileConnectionGuideTitle">手机陪伴终端怎么连</h2><small>三步完成配对；展开设置分区后再逐项调整</small></span><i data-lucide="chevron-down" aria-hidden="true"></i></summary>
+        <div class="mobile-connection-guide-body">
+          <ol>
+            <li>在「网关与访问」中填写监听地址与端口；同一局域网填本机内网地址。</li>
+            <li>在「配对与身份」中设置配对令牌，并把「绑定的 AstrBot 用户 ID」填成要接收消息的用户。</li>
+            <li>手机端填同一组地址与令牌完成配对；位置、屏幕共享与身体数据再按各自分区开启。</li>
+          </ol>
+          <p>令牌只在保存时写入，页面不回显；换令牌后手机端需要重新配对。</p>
+        </div>
+      </details>
     </section>
     <section id="mobileConnectionWorkspace" class="mobile-connection-settings" aria-label="手机连接设置">${consoleLoading('正在读取手机连接设置…')}</section>
   </div>`;

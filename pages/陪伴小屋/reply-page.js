@@ -105,6 +105,7 @@ window.CompanionReplyPage = (() => {
       enable_private_image_self_recognition: "启用当前窗口图片转述增强",
       image_understanding_private_enabled: "图片理解 · 私聊",
       image_understanding_group_enabled: "图片理解 · 群聊",
+      astrbot_animated_image_understanding_enabled: "AstrBot 原生动图理解优化",
       enable_private_image_vision_cache: "复用重复图片转述",
       private_image_vision_cache_max_items: "缓存条目上限",
       private_image_self_recognition_hint: "角色自我识别线索",
@@ -244,6 +245,7 @@ window.CompanionReplyPage = (() => {
       enable_private_image_self_recognition: "在当前选中的私聊或群聊窗口启用图片转述增强。回复模型与识图模型一致时，增强提示会直接交给主模型；原图仍是主要依据。",
       image_understanding_private_enabled: "角色级权限，适用于该角色绑定的所有私聊窗口。关闭后不做额外视觉转述或历史图片摘要；本轮原图仍由主回复模型处理。",
       image_understanding_group_enabled: "角色级权限，适用于该角色绑定的所有群聊窗口。关闭后不做额外视觉转述或历史图片摘要；本轮原图仍由主回复模型处理。",
+      astrbot_animated_image_understanding_enabled: "开启后，本轮识别到 GIF 时向主模型注入宫格拼图说明：把 3×3 抽帧按从左到右、从上到下理解成同一段动画的连续帧，不数成九张图或九次动作。该提示仅在本轮含动图时加入，不改变原图或额外识图权限。",
       enable_private_image_vision_cache: "相同图片与提示词会复用当前运行进程中的描述，缓存不会写入长期记忆；设为关闭后每轮重新识图。",
       private_image_vision_cache_max_items: "运行期最多保留的描述数量；设为 0 时不保留条目。",
       private_image_self_recognition_hint: "最多 1200 字，填写角色的头像、昵称、签名、水印或二创别名等线索；角色外貌优先使用已登记的人格资料。只把线索作为可能匹配，不确认画中人或发送者身份，也不要填写用户资料。",
@@ -320,6 +322,8 @@ window.CompanionReplyPage = (() => {
                 "file_understanding_private_enabled", "file_understanding_group_enabled"]},
       {id: "context_image", title: "上下文图片描述", help: "",
        fields: ["enable_context_image_captioning", "context_image_caption_max_items"]},
+      {id: "native_image", title: "AstrBot 原生动图理解", help: "",
+       fields: ["astrbot_animated_image_understanding_enabled"]},
       {id: "image_narration", title: "图片视觉转述", help: "",
        fields: ["enable_private_image_self_recognition", "enable_private_image_vision_cache",
                 "private_image_vision_cache_max_items", "private_image_self_recognition_hint",
@@ -408,11 +412,11 @@ window.CompanionReplyPage = (() => {
   };
   const decisionSectionViews = Object.fromEntries(Object.entries(decisionViewSections)
     .flatMap(([view, sections]) => sections.map(section => [section, view])));
-  const perceptionSectionIds = new Set(["media_permissions", "context_image", "image_narration",
+  const perceptionSectionIds = new Set(["media_permissions", "context_image", "native_image", "image_narration",
     "video_narration", "file_understanding", "forwards"]);
   const perceptionModuleSections = {
     overview: ["media_permissions"],
-    image: ["context_image", "image_narration"],
+    image: ["context_image", "native_image", "image_narration"],
     video: ["video_narration"],
     file: ["file_understanding"],
     forwards: ["forwards"],
@@ -1084,8 +1088,8 @@ window.CompanionReplyPage = (() => {
   function selectSection(id, {scroll = true} = {}) {
     if (!root) return false;
     if (root.dataset?.replyView === "perception") {
-      const module = {media_permissions: "overview", context_image: "image", image_narration: "image",
-        video_narration: "video", file_understanding: "file", forwards: "forwards"}[id];
+      const module = {media_permissions: "overview", context_image: "image", native_image: "image",
+        image_narration: "image", video_narration: "video", file_understanding: "file", forwards: "forwards"}[id];
       if (module) return setPerceptionModule(module);
     }
     if (root.dataset?.replyView === "decision" && decisionSectionViews[id]) {

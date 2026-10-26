@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from companion_v2.adapters.astrbot.native import native_id
+from companion_v2.adapters.astrbot.native import event_account_id, event_peer_id, native_id, supported_platform_name
 from companion_v2.adapters.astrbot.staging_bootstrap import AstrBotStagingBootstrap
 from companion_v2.adapters.astrbot.staging_config import StagingConfiguration, StagingConfigurationError
 from companion_v2.capabilities import CapabilityManagementService
@@ -845,17 +845,17 @@ class AstrBotStagingController:
             return False
         scope = configuration.scope
         if (
-            type(event) is not self.native_types.event
+            not isinstance(event, self.native_types.event)
             or getattr(event, "unified_msg_origin", None)
             != f"{scope.platform}:FriendMessage:{scope.native_scope_id}"
             or session.application.state != "running"
         ):
             return False
         try:
-            message = event.message_obj
             return (
-                native_id(message.self_id) == scope.account_id
-                and native_id(message.sender.user_id) == scope.native_scope_id
+                supported_platform_name(getattr(event.platform_meta, "name", None))
+                and event_account_id(event) == scope.account_id
+                and event_peer_id(event) == scope.native_scope_id
                 and event.platform_meta.id == scope.platform
                 and event.bot is session.bridge.client(scope)
             )

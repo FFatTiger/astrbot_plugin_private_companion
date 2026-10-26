@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 import json
 import logging
@@ -10,10 +11,13 @@ from time import perf_counter
 from uuid import uuid4
 
 from .client import LayaClientError, LayaDecisionClient
+from .contract import LayaDecision
 from .store import LayaSettingsStore
 
 
 logger = logging.getLogger(__name__)
+_FOLLOWUP_REASONS = frozenset({"active_follow_up", "reply_follow_up"})
+_FOLLOWUP_REPLY_ACTIONS = frozenset({"reply", "interject", "clarify"})
 _SAFE_SKIP_REASONS = frozenset({"facts_invalid", "robot_message_reference", "explicit_event_rule"})
 _SAFE_FAILURE_REASONS = {
     "laya_package_missing": "当前 AstrBot Python 环境未安装 Laya。",
@@ -74,6 +78,30 @@ def _intervention_trace(client):
         "response": {"format": response.get("format")} if response else None,
         "processing": processing,
     }
+
+
+def _apply_followup_confidence_gate(decision: LayaDecision, facts: dict, threshold: int):
+    """Suppress weak automatic continuations using Laya's calibrated action score.
+
+    The threshold is deliberately scoped to the two follow-up candidates. A
+    direct mention or an ordinary interjection is not blocked by this setting;
+    those paths keep their existing explicit switches. A missing confidence
+    fails open because an older server must not silently stop normal replies.
+    """
+    reason = facts.get("candidate_reason") if type(facts) is dict else None
+    if threshold <= 0 or reason not in _FOLLOWUP_REASONS or decision.action not in _FOLLOWUP_REPLY_ACTIONS:
+        return decision, None
+    gate = {"candidate_reason": reason, "threshold_percent": threshold,
+            "original_action": decision.action}
+    if decision.action_confidence is None:
+        return decision, {**gate, "status": "confidence_unavailable"}
+    confidence = decision.action_confidence
+    gate.update({"action_confidence": round(confidence, 4),
+                 "action_probability_percent": round(confidence * 100, 2)})
+    if confidence * 100 >= threshold:
+        return decision, {**gate, "status": "passed"}
+    return replace(decision, action="silent"), {**gate, "status": "below_threshold",
+                                                "effective_action": "silent"}
 
 
 class LayaDecisionService:
@@ -182,11 +210,25 @@ class LayaDecisionService:
                          reason_code=type(error).__name__, reason=_safe_log_reason(type(error).__name__, str(error)),
                          trace=getattr(client, "last_trace", None))
             raise
-        decision = result.document()
+        decision, confidence_gate = _apply_followup_confidence_gate(
+            result, facts, values["followup_confidence_threshold"])
+        decision_document = decision.document()
         elapsed_ms = round((perf_counter() - started) * 1000)
-        self._record(values, "ok", elapsed_ms, decision=decision, trace=getattr(client, "last_trace", None))
-        return {"status": "ok", "decision": decision, "mode": values["mode"],
-                "elapsed_ms": elapsed_ms, "enabled_fields": dict(values["decision_fields"])}
+        trace = getattr(client, "last_trace", None)
+        if confidence_gate is not None and isinstance(trace, dict):
+            trace = {**trace, "processing": dict(trace.get("processing") or {})}
+            trace["processing"]["confidence_gate"] = confidence_gate
+            trace["processing"]["model_decision"] = result.document()
+            trace["processing"]["effective_decision"] = decision_document
+        self._record(values, "ok", elapsed_ms, decision=decision_document, trace=trace)
+        response = {"status": "ok", "decision": decision_document, "mode": values["mode"],
+                    "elapsed_ms": elapsed_ms, "enabled_fields": dict(values["decision_fields"]),
+                    "action_confidence": result.action_confidence}
+        if confidence_gate is not None:
+            response["confidence_gate"] = confidence_gate
+        if confidence_gate is not None and confidence_gate["status"] == "below_threshold":
+            response["reason"] = "laya_followup_confidence_below_threshold"
+        return response
 
     async def classify_intervention(self, facts: dict) -> dict:
         """Use one bounded Laya question after the host has checked permission."""

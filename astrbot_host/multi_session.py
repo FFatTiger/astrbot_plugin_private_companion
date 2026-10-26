@@ -12,11 +12,14 @@ from companion_v2.adapters.astrbot.application import AstrBotCompanionHost
 from companion_v2.adapters.astrbot.memory_owner import memory_owner_provider
 from companion_v2.adapters.astrbot.memory_push import memory_push_provider
 from companion_v2.adapters.astrbot.native import (
-    NativeConversationInput, NativePrivateBridge, account_number, bounded_native_lookup, native_id,
+    NativeConversationInput, NativePrivateBridge, bounded_native_lookup, event_account_id,
+    event_peer_id, native_client_connected, native_id, native_user_subject_id,
+    supported_platform_name,
 )
 from companion_v2.adapters.astrbot.group import NativeGroupBridge
 from companion_v2.adapters.astrbot.onebot import OneBotPrivateSender
 from companion_v2.adapters.astrbot.onebot_group import OneBotGroupSender
+from companion_v2.adapters.astrbot.platform_sender import AstrBotPlatformSender
 from companion_v2.adapters.astrbot.presence import OneBotPresencePort
 from companion_v2.adapters.astrbot.provider import AstrBotTextProvider
 from companion_v2.adapters.astrbot.provider_catalog import TextProviderSettings, assemble_providers, loaded_routing
@@ -128,7 +131,7 @@ class MultiPrivateBridge(NativePrivateBridge):
     async def capture_core_reply(self, event):
         """Authenticate a private route for AstrBot's reply path without reading attachments."""
         try:
-            if type(event) is not self.event_type:
+            if not isinstance(event, self.event_type):
                 raise TaskError("host_event_unsupported", "core reply requires a verified native event")
             message, session, meta = event.message_obj, event.session, event.platform_meta
             platform_id = meta.id
@@ -136,10 +139,10 @@ class MultiPrivateBridge(NativePrivateBridge):
                     or getattr(getattr(session, "message_type", None), "value", None) != "FriendMessage"
                     or getattr(message, "group_id", None)):
                 raise TaskError("host_scene_unsupported", "core private reply requires a native private route")
-            sender, login = account_number(message.sender.user_id), account_number(message.self_id)
+            sender, login = event_peer_id(event), event_account_id(event)
             account = self.accounts.get((platform_id, login))
             target = self.settings.private_target(platform_id, login, sender)
-            if (meta.name != "aiocqhttp" or session.platform_id != platform_id
+            if (not supported_platform_name(meta.name) or session.platform_id != platform_id
                     or session.platform_name != platform_id or session.session_id != sender
                     or event.unified_msg_origin != self._umo(platform_id, sender)
                     or account is None or target is None or target.bot_id != account.bot_id):
@@ -147,7 +150,7 @@ class MultiPrivateBridge(NativePrivateBridge):
             event_client = event.bot
             platform = self.context.get_platform_inst(platform_id)
             if (platform is None or platform.get_client() is not event_client
-                    or not event_client._wsr_api_clients.get(login)):
+                    or not native_client_connected(platform, login, event_client)):
                 raise TaskError("host_client_mismatch", "private event did not originate from the connected account client")
 
             event_id = native_id(message.message_id)
@@ -159,8 +162,7 @@ class MultiPrivateBridge(NativePrivateBridge):
             conversation_id, role, instruction = await self._role(account, sender)
             scope = ScopeRef(self.installation_id, platform_id, ScopeKind.PRIVATE, sender,
                              account.bot_id, login, conversation_id, sender)
-            if (event_client is not self.client(scope)
-                    or not event_client._wsr_api_clients.get(login)):
+            if event_client is not self.client(scope):
                 raise TaskError("host_client_mismatch", "private host account changed during persona lookup")
             recipients = AudienceRef(scope, (actor.subject,))
             text = "".join(part.text for part in getattr(message, "message", ())
@@ -179,15 +181,16 @@ class MultiPrivateBridge(NativePrivateBridge):
         if getattr(getattr(event.message_obj, "type", None), "value", None) == "GroupMessage":
             return await self.groups.capture(event, allow_text_fallback=True)
         message, session, meta = event.message_obj, event.session, event.platform_meta
-        if (type(event) is not self.event_type
+        if (not isinstance(event, self.event_type)
                 or getattr(getattr(message, "type", None), "value", None) != "FriendMessage"
                 or getattr(getattr(session, "message_type", None), "value", None) != "FriendMessage"
                 or getattr(message, "group_id", None)):
             return await super().capture(event)
         try:
-            sender, login = account_number(message.sender.user_id), account_number(message.self_id)
-            if (meta.name != "aiocqhttp" or session.platform_id != meta.id or session.platform_name != meta.id
-                    or session.session_id != sender or event.unified_msg_origin != f"{meta.id}:FriendMessage:{sender}"):
+            sender, login = event_peer_id(event), event_account_id(event)
+            if (not supported_platform_name(meta.name) or session.platform_id != meta.id
+                    or session.platform_name != meta.id or session.session_id != sender
+                    or event.unified_msg_origin != f"{meta.id}:FriendMessage:{sender}"):
                 return await super().capture(event)
             target = self.settings.private_target(meta.id, login, sender)
             if target is None:
@@ -195,7 +198,8 @@ class MultiPrivateBridge(NativePrivateBridge):
             account = self.accounts.get((meta.id, login))
             platform = self.context.get_platform_inst(meta.id)
             if (account is None or account.bot_id != target.bot_id or platform is None
-                    or platform.get_client() is not event.bot or not event.bot._wsr_api_clients.get(login)):
+                    or platform.get_client() is not event.bot
+                    or not native_client_connected(platform, login, event.bot)):
                 raise TaskError("host_client_mismatch", "private event did not originate from its registered Bot account")
             self.authority.ensure_actor(target)
         except (ValueError, AttributeError, TypeError):
@@ -852,6 +856,7 @@ class MultiHostSession:
                 segmentation_settings, presentation_settings = None, None
                 captured_voice_policy, voice_settings_available = None, False
                 captured_outbound_settings = None
+                astrbot_animated_image_understanding_enabled = False
                 if not group_admission or group_admission.get("reason") != "repeat":
                     try:
                         from companion_v2.conversation.segmentation import SegmentationPolicy
@@ -864,6 +869,8 @@ class MultiHostSession:
                         snapshot = self.application.reply_settings.snapshot(context.actor, context, self.now())
                         presentation_settings = {name: snapshot.values[GROUP + "." + name]
                                                  for name in OUTPUT_TEXT_FIELDS}
+                        astrbot_animated_image_understanding_enabled = (
+                            snapshot.values.get(GROUP + ".astrbot_animated_image_understanding_enabled") is True)
                         names = {field.name for field in fields(SegmentationPolicy)} | {
                             "streaming", "part_gap_mode", "part_gap_ms", "part_gap_min_ms",
                             "part_gap_max_ms", "part_gap_log_base"}
@@ -1001,6 +1008,7 @@ class MultiHostSession:
                     "segmentation_settings": segmentation_settings,
                     "presentation_settings": presentation_settings,
                     "outbound_settings": captured_outbound_settings,
+                    "astrbot_animated_image_understanding_enabled": astrbot_animated_image_understanding_enabled,
                     "voice_reply_policy": voice_policy,
                     "configured_voice_reply_policy": configured_voice_policy,
                     "voice_provider_instruction": voice_direction,
@@ -1164,7 +1172,11 @@ class MultiHostSession:
     async def send(self, envelope):
         # 正式版：不再有"预览/草稿"这一档，也不再需要投递授权——一律真发。
         group = envelope.context.scope.kind is ScopeKind.GROUP
-        sender_type = OneBotGroupSender if group else OneBotPrivateSender
+        platform_name = self.bridge.platform_name(envelope.context.scope)
+        if platform_name == "aiocqhttp":
+            sender_type = OneBotGroupSender if group else OneBotPrivateSender
+        else:
+            sender_type = AstrBotPlatformSender
         sender = sender_type(self.bridge, binding=self.sender_binding, version=self.types.version,
             reverse_api_type=self.types.reverse_api,
             authorize=lambda: self.authorize_group(envelope) if group else self.authorize(envelope.context), now=self.now,

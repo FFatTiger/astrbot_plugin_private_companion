@@ -55,6 +55,7 @@ window.CompanionUnderstandingPage = (() => {
       ["视觉转述缓存上限", number("private_image_vision_cache_max_items", "条"), status("enable_private_image_vision_cache")],
       ["识图失败冷却", number("private_image_provider_failure_cooldown_seconds", "秒"), ""],
       ["上下文描述条数", number("context_image_caption_max_items", "张"), status("enable_context_image_captioning")],
+      ["AstrBot 原生动图优化", status("astrbot_animated_image_understanding_enabled"), ""],
     ];
     if (tab === "video") return [
       ["视频理解状态", status("video_understanding_enabled"), ""],

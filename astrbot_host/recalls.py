@@ -45,7 +45,7 @@ class NativeNoticeRoute:
 def authenticate_notice_route(controller, event, kind, *, expected_post="notice"):
     session = controller.session
     if (session is None or controller._terminated or session.application.state != "running"
-            or type(event) is not controller.native_types.event or not has_post_type(event, expected_post)):
+            or not isinstance(event, controller.native_types.event) or not has_post_type(event, expected_post)):
         return None
     message, meta, native_session = event.message_obj, event.platform_meta, event.session
     raw = message.raw_message

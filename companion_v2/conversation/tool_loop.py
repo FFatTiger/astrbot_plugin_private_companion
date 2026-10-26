@@ -241,9 +241,23 @@ class LocalRoleTools:
                     external_filter_reasons.update({item["action"]: item["reason"] for item in filtered})
             else:
                 external = ()
+            allowed_external_actions = GROUP_EXTERNAL_ACTIONS
+            image_actions = {tool.action for tool in external} & GROUP_IMAGE_ACTIONS
+            if image_actions:
+                from .media.output_settings import effective_settings, image_request_denial
+                try:
+                    denial = image_request_denial(self.runtime, context,
+                                                  effective_settings(self.runtime, context))
+                except Exception:
+                    denial = ("image_policy_unavailable",
+                              "image request policy could not be read for this conversation")
+                if denial is not None:
+                    allowed_external_actions = GROUP_EXTERNAL_ACTIONS - GROUP_IMAGE_ACTIONS
+                    if external_filter_reasons is not None:
+                        external_filter_reasons.update({action: denial[0] for action in image_actions})
             return semantic + self.acquaintance.catalog_for(context) + self.group_participation.catalog_for(context) \
                 + self.group_memory.catalog_for(context) + tuple(
-                tool for tool in external if tool.action in GROUP_EXTERNAL_ACTIONS)
+                tool for tool in external if tool.action in allowed_external_actions)
         # 唯一决定「模型这一轮看到哪些工具」的地方，所以记忆让位的门也设在这里：
         # 让位时 ``memory.*`` 既不进 filtered、也不进 catalog_for 的结果，模型那边
         # 一套记忆工具都没有。只让位注入而留着工具，模型就会把新记忆写进第二个库，

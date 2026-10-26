@@ -119,6 +119,21 @@ class NativeImageRoutingTests(unittest.TestCase):
         self.assertEqual(route.config["quality"], "hd")
         self.assertEqual(route.config["max_reference_images"], 4)
 
+    def test_online_endpoint_custom_name_is_trimmed_and_blank_is_supported(self):
+        current = self.api.output_configuration()
+        endpoint = self.endpoint("primary", "image-v1")
+        endpoint["name"] = "  主力生图  "
+        saved = self.api.save_output_configuration(current["revision"], {
+            "enabled": True, "backend": "online_api", "endpoints": [endpoint],
+        })
+        self.assertEqual(saved["settings"]["endpoints"][0]["name"], "主力生图")
+
+        endpoint["name"] = "   "
+        saved = self.api.save_output_configuration(saved["revision"], {
+            "enabled": True, "backend": "online_api", "endpoints": [endpoint],
+        })
+        self.assertEqual(saved["settings"]["endpoints"][0]["name"], "")
+
     def test_legacy_image_options_network_and_header_values_survive_save_and_read(self):
         current = self.api.output_configuration()
         endpoint = self.endpoint("primary", "image-v1")

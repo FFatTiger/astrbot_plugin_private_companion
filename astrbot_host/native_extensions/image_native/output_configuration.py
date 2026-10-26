@@ -289,7 +289,8 @@ def save_configuration(plugin, revision, changes):
             raise NativeImageError("invalid_configuration")
         connection = _connection({key:value for key,value in item.items() if key in
             {"base_url", "api_key", "api_key_set", "clear_api_key", "timeout_seconds"}}, previous.get(identifier, {}))
-        normalized.append({**item, "size_label": item.get("size_label", f"{item.get('width')}x{item.get('height')}"),
+        normalized.append({**item, "name": item["name"].strip(),
+                           "size_label": item.get("size_label", f"{item.get('width')}x{item.get('height')}"),
                            **connection, "custom_headers": headers, "ratio": ratio, "quality": quality,
                            "max_reference_images": max_reference_images})
         normalized[-1].pop("api_key_set", None)

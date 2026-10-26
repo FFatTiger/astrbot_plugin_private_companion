@@ -14,6 +14,7 @@ from companion_v2.identity_policy.grants import PERSON_PERMISSION_GRANT_PREFIX
 from companion_v2.relationships.private_access import (DEFAULT_FOR_CAPABILITY, REVOCABLE_ABSENCE_CODES,
                                                         REVOCABLE_CAPABILITIES)
 from companion_v2.storage.codec import scope_values
+from companion_v2.adapters.astrbot.native import native_user_subject_id
 from .group_settings import GroupTarget
 
 
@@ -27,8 +28,9 @@ DELIVERY = "message.delivery"
 
 
 class MultiAuthority:
-    def __init__(self, runtime, settings, *, now):
+    def __init__(self, runtime, settings, *, now, platform_name=None):
         self.runtime, self.settings, self.now = runtime, settings, now
+        self.platform_name = platform_name
         self.identities, self.personas = PersistentIdentityDirectory(runtime), PersonaDirectory(runtime)
         # 私聊权限默认值的读取器；由会话在应用装配好之后挂上。没挂上时保持旧行为
         # （配置能力表里有的就签发），不让"没挂"变成"新用户全都没权限"。
@@ -127,7 +129,14 @@ class MultiAuthority:
 
     def subject(self, target, participant_id=None):
         participant = participant_id if participant_id is not None else target.participant_id
-        return SubjectRef(self.runtime.installation_id, SubjectKind.HUMAN, "onebot-user:" + participant)
+        name = self.platform_name(target.platform_id) if callable(self.platform_name) else ""
+        try:
+            subject_id = native_user_subject_id(name, participant)
+        except ValueError:
+            # Older externally constructed authorities retained the OneBot
+            # projection; keep that fallback for compatibility.
+            subject_id = "onebot-user:" + participant
+        return SubjectRef(self.runtime.installation_id, SubjectKind.HUMAN, subject_id)
 
     def identity_id(self, target, participant_id=None):
         return "host-multi-person:" + digest(self.principal(target, participant_id))

@@ -7,6 +7,7 @@ from companion_v2.configuration.models import ConfigLayer, ConfigTarget
 from companion_v2.configuration.owners import SparseConfigurationOwner
 from companion_v2.configuration.registry import FieldDefinition, ValueKind
 from companion_v2.execution.models import TaskError
+from companion_v2.foundation.refs import ScopeKind
 
 GROUP = OWNER = "conversation.image_output"
 LAYERS = (ConfigLayer.INSTALLATION, ConfigLayer.ROLE)
@@ -15,6 +16,7 @@ CHOICES = {
     "prompt_format": {"traditional", "natural", "nai"},
     "style": {"realistic", "anime", "custom"},
     "negative_mode": {"safe_default", "merge", "replace"},
+    "request_permission": {"core_only", "everyone"},
 }
 DEFAULT_SCENE_PRESETS = (
     {"id": "home-night", "name": "睡前居家", "prompt": "cozy bedroom, warm bedside light, relaxed home clothing"},
@@ -78,6 +80,7 @@ def is_rule_image_request(value, *, has_images=False):
 DEFAULTS = {
     # 默认走规则引导：明确的图片请求会追加直接调用提示，工具目录保持稳定。
     "allow_user_requests": True, "trigger_mode": "rules",
+    "group_enabled": True, "request_permission": "everyone",
     "proactive_probability": 0.35, "proactive_max_daily": 1,
     "prompt_format": "traditional", "style": "realistic", "style_prompt": "",
     "negative_mode": "safe_default", "negative_prompt": "",
@@ -123,6 +126,49 @@ def effective_settings(runtime, context):
     snapshot = ImageOutputConfigurationOwner(runtime).read(target, configuration_fields())
     values = {key.rsplit(".", 1)[-1]: item.value for key, item in snapshot.fields.items()}
     return {**DEFAULTS, **values}
+
+
+def _is_core_actor(runtime, actor):
+    """Check the installation tier for an authenticated actor.
+
+    The image-output group is readable by standard users, but the optional
+    ``core_only`` request policy must use the same durable tier lookup as the
+    other permission gates.  An unavailable runtime or unknown subject is not
+    core, so the policy fails closed instead of treating a lookup error as
+    consent.
+    """
+    subject = getattr(actor, "subject", None)
+    kind = getattr(subject, "kind", None)
+    subject_id = getattr(subject, "subject_id", None)
+    kind_value = getattr(kind, "value", kind)
+    if runtime is None or not kind_value or not subject_id:
+        return False
+    row = runtime.read_one(
+        "SELECT tier FROM subject_access_tiers WHERE subject_kind = ? AND subject_id = ?",
+        (kind_value, subject_id))
+    return row is not None and row["tier"] == "core"
+
+
+def image_request_denial(runtime, context, values):
+    """Return a stable error code and reason when a user image request is denied.
+
+    Proactive generation is intentionally checked by the caller before this
+    helper: the policy below governs requests made in a conversation, not the
+    role's own proactive image workflow.
+    """
+    if not values.get("allow_user_requests") or values.get("trigger_mode") == "off":
+        return ("image_requests_disabled",
+                "image requests are disabled for this role")
+    scope = getattr(context, "scope", None)
+    if (getattr(scope, "kind", None) is ScopeKind.GROUP
+            and values.get("group_enabled", True) is False):
+        return ("group_image_requests_disabled",
+                "image requests are disabled in group chats for this role")
+    if values.get("request_permission", "everyone") == "core_only":
+        if not _is_core_actor(runtime, getattr(context, "actor", None)):
+            return ("image_requests_core_only",
+                    "only the installation core administrator may request image generation")
+    return None
 
 
 def parse_scene_presets(value):

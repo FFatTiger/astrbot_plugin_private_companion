@@ -64,10 +64,12 @@ class ImageQuotaGate:
         self._admit(context, self._classify_context(context), at)
 
     def _admit(self, context, scope, at):
-        from .output_settings import effective_settings
+        from .output_settings import effective_settings, image_request_denial
         settings = effective_settings(self.runtime, context)
-        if scope != "proactive" and (not settings["allow_user_requests"] or settings["trigger_mode"] == "off"):
-            raise TaskError("image_requests_disabled", "image requests are disabled for this role")
+        if scope != "proactive":
+            denial = image_request_denial(self.runtime, context, settings)
+            if denial is not None:
+                raise TaskError(*denial)
         limit = self._limit(context, scope)
         if limit < 0:
             return

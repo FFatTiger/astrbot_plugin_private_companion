@@ -8,6 +8,26 @@ window.CompanionNativeExtensionPanel = (() => {
     game:"管理聊天内游戏、网页房间与棋类引擎。",
     live:"连接 VTube Studio、直播间、OBS 和字幕，调整角色的表演。",
   };
+  /* mobile config groups */
+  const MOBILE_SETTING_GROUPS = [
+    {id:"gateway", title:"网关与访问", summary:"监听地址、端口、外部地址", keys:["enabled","host","port","public_base_url"]},
+    {id:"pairing", title:"配对与身份", summary:"配对令牌、绑定用户与会话有效期", keys:["pairing_token","allowed_user_id","session_ttl_hours"]},
+    {id:"location", title:"位置与地图", summary:"位置有效期、高德逆地理编码与请求参数", keys:["location_ttl_seconds","amap_reverse_geocode_enabled","amap_api_key","amap_cache_ttl_seconds","amap_request_timeout_seconds"]},
+    {id:"activity", title:"身体数据与活动摘要", summary:"健康数据、前台活动上报与缓存时效", keys:["telemetry_enabled","telemetry_ttl_seconds","activity_enabled","activity_ttl_seconds"]},
+    {id:"rooms", title:"房间与屏幕", summary:"统一房间代理与屏幕共享状态", keys:["proxy_rooms","screen_upload_enabled"]},
+  ];
+  function mobileSettingGroups(field) {
+    const entries = Object.entries(field?.items || {});
+    const used = new Set();
+    const groups = MOBILE_SETTING_GROUPS.map(group => {
+      const fields = entries.filter(([key]) => group.keys.includes(key));
+      fields.forEach(([key]) => used.add(key));
+      return {...group, fields};
+    }).filter(group => group.fields.length);
+    const rest = entries.filter(([key]) => !used.has(key));
+    if (rest.length) groups.push({id:"more", title:"更多设置", summary:"其他手机连接选项", fields:rest});
+    return groups;
+  }
   const sessions = new Map(), operations = new Map();
   const escape = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const clone = value => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
@@ -93,16 +113,24 @@ window.CompanionNativeExtensionPanel = (() => {
       this.root = root; this.name = name; this.options = options;
       this.alive = true; this.ticket = 0; this.busy = false; this.dirty = false;
       this.mobileTokenNotice = "";
+      this.mobileOpen = new Set(["gateway"]);
       this.group = ""; this.query = ""; this.record = null; this.fields = [];
       /* 只挂一组时（手机连接页复用现实触及的 mobile 分组），不显示分组栏，
          否则同一份设置会出现两条导航。 */
       this.onlyGroup = typeof options?.onlyGroup === "string" ? options.onlyGroup : "";
       this.click = event => this.onClick(event);
       this.input = event => this.onInput(event);
+      this.toggle = event => {
+        const section = event.target.closest?.("[data-mobile-config-section]");
+        if (!section) return;
+        if (section.open) this.mobileOpen.add(section.dataset.mobileConfigSection);
+        else this.mobileOpen.delete(section.dataset.mobileConfigSection);
+      };
       this.submit = event => { event.preventDefault(); this.save(); };
       root.addEventListener("click", this.click);
       root.addEventListener("input", this.input);
       root.addEventListener("change", this.input);
+      root.addEventListener("toggle", this.toggle, true);
       root.addEventListener("submit", this.submit);
       this.load();
     }
@@ -114,6 +142,7 @@ window.CompanionNativeExtensionPanel = (() => {
       this.root.removeEventListener("click", this.click);
       this.root.removeEventListener("input", this.input);
       this.root.removeEventListener("change", this.input);
+      this.root.removeEventListener("toggle", this.toggle, true);
       this.root.removeEventListener("submit", this.submit);
     }
     async load() {
@@ -174,13 +203,18 @@ window.CompanionNativeExtensionPanel = (() => {
       if (this.onlyGroup) this.groups = this.groups.filter(group => group.id === this.onlyGroup);
       if (!this.groups.some(group => group.id === this.group)) this.group = this.groups[0]?.id || "";
       const controls = this.groups.map(group => {
-        const content = group.fields.map(([key, field]) => field.type === "object"
-          ? Object.entries(field.items || {}).map(([child, descriptor]) => this.field(child, descriptor, this.draft[key]?.[child], [key, child], group.id)).join("")
-          : this.field(key, field, this.draft[key], [key], group.id)).join("");
+        const content = group.fields.map(([key, field]) => {
+          if (field.type === "object" && this.onlyGroup === "mobile" && group.id === "mobile") {
+            return this.mobileConfiguration(key, field, this.draft[key], group.id);
+          }
+          return field.type === "object"
+            ? Object.entries(field.items || {}).map(([child, descriptor]) => this.field(child, descriptor, this.draft[key]?.[child], [key, child], group.id)).join("")
+            : this.field(key, field, this.draft[key], [key], group.id);
+        }).join("");
         return `<section class="native-extension-group" data-native-group-panel="${escape(group.id)}" ${group.id !== this.group ? "hidden" : ""}><h3>${escape(group.title)}</h3>${group.hint ? `<p class="native-extension-hint">${escape(group.hint)}</p>` : ""}${content}</section>`;
       }).join("");
       const mobile = this.onlyGroup === "mobile" ? this.mobileConnectionCard() : "";
-      this.root.innerHTML = `<div class="native-extension-panel">${mobile}<header class="native-extension-head"><div><span class="native-extension-kicker">V2 内置能力</span><h3>${escape(names[this.name])}</h3><p>${escape(descriptions[this.name])}</p></div><div data-native-runtime></div></header><div class="native-extension-lifecycle" data-native-lifecycle></div>${["reality", "live"].includes(this.name) ? '<div data-native-management></div>' : ""}<form data-native-form><label class="native-extension-search"><span class="sr-only">查找设置项</span><input type="search" placeholder="查找设置项" aria-label="查找${escape(names[this.name])}设置项" data-native-search value="${escape(this.query)}"></label><div class="native-extension-workspace${this.onlyGroup ? " is-single" : ""}">${this.onlyGroup ? "" : `<nav class="native-extension-nav" aria-label="${escape(names[this.name])}设置分组">${this.groups.map(group => `<button type="button" data-native-group="${escape(group.id)}" aria-pressed="${group.id === this.group}">${escape(group.title)}</button>`).join("")}</nav>`}<div class="native-extension-settings">${controls}<p class="native-extension-no-results" hidden>没有匹配的设置项，换个关键词试试。</p></div></div><footer class="native-extension-savebar"><p role="status" aria-live="polite" data-native-notice></p><div><button class="button small" type="button" data-native-reload>重新读取</button><button class="button small primary" type="submit" data-native-save ${this.dirty ? "" : "disabled"}>保存并应用</button></div></footer></form></div>`;
+      this.root.innerHTML = `<div class="native-extension-panel">${mobile}<header class="native-extension-head"><div><span class="native-extension-kicker">V2 内置能力</span><h3>${escape(names[this.name])}</h3><p>${escape(descriptions[this.name])}</p></div><div data-native-runtime></div></header><div class="native-extension-lifecycle" data-native-lifecycle></div>${["reality", "live"].includes(this.name) ? '<div data-native-management></div>' : ""}<form data-native-form><label class="native-extension-search"><span class="sr-only">查找设置项</span><input type="search" placeholder="${this.onlyGroup ? "查找手机连接设置项" : "查找设置项"}" aria-label="${this.onlyGroup ? "查找手机连接设置项" : "查找" + escape(names[this.name]) + "设置项"}" data-native-search value="${escape(this.query)}"></label><div class="native-extension-workspace${this.onlyGroup ? " is-single" : ""}">${this.onlyGroup ? "" : `<nav class="native-extension-nav" aria-label="${escape(names[this.name])}设置分组">${this.groups.map(group => `<button type="button" data-native-group="${escape(group.id)}" aria-pressed="${group.id === this.group}">${escape(group.title)}</button>`).join("")}</nav>`}<div class="native-extension-settings">${controls}<p class="native-extension-no-results" hidden>没有匹配的设置项，换个关键词试试。</p></div></div><footer class="native-extension-savebar"><p role="status" aria-live="polite" data-native-notice></p><div><button class="button small" type="button" data-native-reload>重新读取</button><button class="button small primary" type="submit" data-native-save ${this.dirty ? "" : "disabled"}>保存并应用</button></div></footer></form></div>`;
       const managementRoot = this.root.querySelector("[data-native-management]");
       this.management = managementRoot ? window.CompanionNativeExtensionManagement?.mount(managementRoot, {
         extensionId:this.name, record:this.record, instance:this.instance,
@@ -192,6 +226,18 @@ window.CompanionNativeExtensionPanel = (() => {
         onUseHotkey:hotkey => this.useHotkey(hotkey),
       }) : null;
       this.filter(); this.setBusy(this.busy);
+    }
+    mobileConfiguration(key, field, value, parent) {
+      const groups = mobileSettingGroups(field);
+      return `<div class="mobile-config-sections">${groups.map(group => {
+        const open = this.mobileOpen.has(group.id);
+        const body = group.fields.map(([child, descriptor]) =>
+          this.field(child, descriptor, value?.[child], [key, child], parent)).join("");
+        return `<details class="mobile-config-section" data-mobile-config-section="${escape(group.id)}" ${open ? "open" : ""}>`
+          + `<summary><span><strong>${escape(group.title)}</strong><small>${escape(group.summary)}</small></span>`
+          + `<i class="mobile-config-chevron" data-lucide="chevron-down" aria-hidden="true"></i></summary>`
+          + `<div class="mobile-config-section-body">${body}</div></details>`;
+      }).join("")}</div>`;
     }
     mobileConnectionCard() {
       const mobile = this.record?.settings?.mobile || {};
@@ -212,7 +258,22 @@ window.CompanionNativeExtensionPanel = (() => {
         ? `<button class="button small" type="button" data-mobile-token-action="rotate">轮换配对令牌</button>`
         : `<button class="button small primary" type="button" data-mobile-token-action="generate">生成并启用网关</button>`;
       const healthAddress = address === "请填写电脑内网或组网地址" ? "填写电脑内网 IP 后访问 /health" : `${address}/health`;
-      return `<section class="mobile-gateway-card" aria-labelledby="mobileGatewayTitle"><div><span class="native-extension-kicker">手机陪伴终端</span><h3 id="mobileGatewayTitle">原生连接准备</h3><p>Android 会先检查健康地址，再用配对令牌换取本机加密会话。</p></div><div class="mobile-gateway-status"><span class="native-extension-status ${state[1]}">${escape(state[0])}</span><dl><div><dt>连接地址</dt><dd>${escape(address)}</dd></div><div><dt>健康检查</dt><dd>${escape(healthAddress)}</dd></div><div><dt>监听端口</dt><dd>${escape(String(bound))}</dd></div><div><dt>绑定用户</dt><dd>${escape(String(statusMobile.allowed_user_id || "未明确绑定，需恰好一个 V2 私聊用户"))}</dd></div></dl></div><div class="mobile-gateway-actions">${action}</div>${token}<p class="native-extension-hint" data-mobile-token-result role="status" aria-live="polite">${escape(notice)}</p></section>`;
+      return `<section class="mobile-gateway-card" aria-labelledby="mobileGatewayTitle">
+        <header class="mobile-gateway-head">
+          <div><span class="native-extension-kicker">手机陪伴终端</span><h3 id="mobileGatewayTitle">连接概览</h3><p>Android 会先检查健康地址，再用配对令牌换取本机加密会话。</p></div>
+          <span class="native-extension-status ${state[1]}">${escape(state[0])}</span>
+        </header>
+        <div class="mobile-gateway-status" aria-label="手机网关状态">
+          <dl class="mobile-gateway-facts">
+            <div><dt>连接地址</dt><dd>${escape(address)}</dd></div>
+            <div><dt>健康检查</dt><dd>${escape(healthAddress)}</dd></div>
+            <div><dt>监听端口</dt><dd>${escape(String(bound))}</dd></div>
+            <div><dt>绑定用户</dt><dd>${escape(String(statusMobile.allowed_user_id || "未明确绑定，需恰好一个 V2 私聊用户"))}</dd></div>
+          </dl>
+        </div>
+        <div class="mobile-gateway-actionbar"><div class="mobile-gateway-actions">${action}</div><p class="native-extension-hint" data-mobile-token-result role="status" aria-live="polite">${escape(notice)}</p></div>
+        ${token}
+      </section>`;
     }
     receiveManagement(record) {
       if (!validRecord(record)) return;
@@ -471,11 +532,23 @@ window.CompanionNativeExtensionPanel = (() => {
       for (const panel of this.root.querySelectorAll("[data-native-group-panel]")) {
         const group = this.groups.find(item => item.id === panel.dataset.nativeGroupPanel);
         const groupMatch = group.title.toLocaleLowerCase().includes(query);
+        const sections = [...panel.querySelectorAll("[data-mobile-config-section]")];
         let count = 0;
         for (const row of panel.querySelectorAll("[data-native-field-label]")) {
-          const match = !query || groupMatch || row.textContent.toLocaleLowerCase().includes(query);
+          const section = row.closest("[data-mobile-config-section]");
+          const sectionMatch = Boolean(query && section
+            && section.querySelector("summary")?.textContent.toLocaleLowerCase().includes(query));
+          const match = !query || groupMatch || sectionMatch
+            || row.textContent.toLocaleLowerCase().includes(query);
           row.hidden = !match;
-          if (match) count++;
+          if (match) {
+            count++;
+            if (query && section) section.open = true;
+          }
+        }
+        for (const section of sections) {
+          const visible = [...section.querySelectorAll("[data-native-field-label]")].some(row => !row.hidden);
+          section.hidden = Boolean(query) && !visible;
         }
         if (count || !query) matched.push(group.id);
       }

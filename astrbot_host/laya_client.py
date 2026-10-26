@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import json
 import logging
+import math
 from pathlib import Path
 import threading
 from time import perf_counter
@@ -296,9 +297,32 @@ def _decision_from_result(document: dict, enabled_fields=None) -> LayaDecision:
         choices[name] = choice
     choices["reason_codes"] = []
     try:
-        return parse_decision(choices)
+        decision = parse_decision(choices)
     except DecisionContractError as error:
         raise LayaClientError("laya_contract_invalid", str(error)) from error
+    # Laya's calibrated action probability is transport metadata, not a new
+    # decision field. Prefer `answer_confidence`; the strict SystemOne wire
+    # contract may retain only the full `probabilities` map for choice answers.
+    return replace(decision, action_confidence=_action_answer_confidence(answers.get("action")))
+
+
+def _action_answer_confidence(answer) -> float | None:
+    if type(answer) is not dict:
+        return None
+
+    def probability(value):
+        if (type(value) not in (int, float) or isinstance(value, bool)
+                or not math.isfinite(value) or not 0.0 <= value <= 1.0):
+            return None
+        return float(value)
+
+    calibrated = probability(answer.get("answer_confidence"))
+    if calibrated is not None:
+        return calibrated
+    probabilities, choice = answer.get("probabilities"), answer.get("choice")
+    if type(probabilities) is dict and type(choice) is str:
+        return probability(probabilities.get(choice))
+    return None
 
 
 def _safe_error_text(raw: bytes, secret: str) -> str:
@@ -398,6 +422,7 @@ class LayaDecisionClient:
             ],
             "contract_decision": contract_decision,
             "effective_decision": decision.document(),
+            "action_confidence": decision.action_confidence,
             "transformations": transformations,
         }
         if local_runtime is not None:
