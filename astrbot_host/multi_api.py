@@ -75,7 +75,16 @@ class TargetControllerView:
         session = controller.session or controller.last_session
         if session is None or controller.runtime is None:
             return None
-        context = controller.authority.context(self.target_id, self.role_id)
+        try:
+            context = controller.authority.context(self.target_id, self.role_id)
+        except TaskError:
+            # A role shared by several windows only has its context registered
+            # on the primary route; page reads for an alias should use that same
+            # role context instead of failing with a generic "unreadable" note.
+            link = controller.settings.window_link_for_target(self.target_id)
+            if link is None:
+                raise
+            context = controller.authority.context(link.primary_target_id, self.role_id)
         return SimpleNamespace(application=session.application, profile=SimpleNamespace(target=context))
 
     @property

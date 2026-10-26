@@ -55,6 +55,10 @@ window.CompanionWorkbench = (() => {
     core_access_required: "当前账号没有管理权限。",
     staging_not_initialized: "角色数据尚未加载，请重新读取。",
     staging_host_terminated: "插件已停止，请重新进入插件。",
+    host_context_unavailable: "这个角色还没有可读取的私聊上下文；请先在该窗口收到一条消息，或在「账号与会话」中启用它。",
+    host_target_mismatch: "当前窗口与角色映射不一致，请刷新「账号与会话」后重试。",
+    host_binding_changed: "当前角色绑定已变化，请重新读取角色状态。",
+    host_persona_changed: "角色人格已变化，请重新读取角色状态。",
     bridge_timeout: "连接超时，请核对连接后重试。",
     invalid_response: "返回数据不完整，请刷新核对。",
     /* 表达学习分区（expression-page.js）走这个内核渲染，它的域内码放在这里，

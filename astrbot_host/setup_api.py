@@ -396,6 +396,9 @@ class SetupWebAPI:
             # a persona that is shared by several Bot accounts reports the same
             # canonical role id that the role editor and runtime use.
             inventory_settings = getattr(self.controller, "settings", None)
+            if inventory_settings is not None and not hasattr(inventory_settings, "targets"):
+                # Single-target HostSettings has no shared account inventory.
+                inventory_settings = None
             directory = await self.controller.session_topology.inventory_report(settings=inventory_settings)
             targets = directory["targets"]
             # The setup page runs before the first runtime profile exists, so

@@ -251,6 +251,40 @@
       .map(account => [bindingAccountKey(account), {platform_id: account.platform_id,
         account_id: account.account_id, bot_id: account.bot_id}])).values()];
   }
+  function mergeSharedRolePersonas(snapshot) {
+    const personas = new Map(snapshot.personas.map(persona => [persona.key, persona]));
+    const canonicalByKey = new Map();
+    const groups = new Map();
+    for (const persona of personas.values()) {
+      if (!persona.roleId || !persona.personaId) continue;
+      const key = JSON.stringify([persona.roleKey, persona.personaId]);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(persona);
+    }
+    for (const group of groups.values()) {
+      if (group.length < 2) continue;
+      group.sort((left, right) => left.key.localeCompare(right.key));
+      const canonical = group[0];
+      for (const duplicate of group.slice(1)) {
+        canonical.accountKeys = new Set([...canonical.accountKeys, ...duplicate.accountKeys]);
+        canonical.sessionKeys = new Set([...canonical.sessionKeys, ...duplicate.sessionKeys]);
+        canonicalByKey.set(duplicate.key, canonical.key);
+        personas.delete(duplicate.key);
+      }
+    }
+    if (canonicalByKey.size) {
+      const remap = keys => [...new Set([...keys].map(key => canonicalByKey.get(key) || key))];
+      snapshot.roles.forEach(role => { role.personaKeys = new Set(remap(role.personaKeys)); });
+      snapshot.accounts.forEach(account => { account.personaKeys = new Set(remap(account.personaKeys)); });
+      snapshot.sessions.forEach(session => { session.personaKeys = remap(session.personaKeys); });
+      personas.forEach(persona => {
+        persona.accountKeys = new Set(remap(persona.accountKeys));
+        persona.sessionKeys = new Set(remap(persona.sessionKeys));
+      });
+    }
+    return {...snapshot, personas: [...personas.values()]};
+  }
+
   function makeTopologySnapshot() {
     const discovered = bindingConfig?.discovered || {};
     const inventory = Array.isArray(discovered.targets)
@@ -353,9 +387,11 @@
         if (session) session.roleKey = role.key;
       }
     }
-    sessions.sort((left, right) => Number(topologyPinnedSessions.has(right.pinKey))
+    const snapshot = mergeSharedRolePersonas({accounts: [...accounts.values()], roles: [...roles.values()],
+      personas: [...personas.values()], sessions});
+    snapshot.sessions.sort((left, right) => Number(topologyPinnedSessions.has(right.pinKey))
       - Number(topologyPinnedSessions.has(left.pinKey)));
-    return {accounts: [...accounts.values()], roles: [...roles.values()], personas: [...personas.values()], sessions};
+    return snapshot;
   }
 
   function topologyItems(data) {
