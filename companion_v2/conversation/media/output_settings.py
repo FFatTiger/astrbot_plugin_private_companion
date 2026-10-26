@@ -23,9 +23,8 @@ DEFAULT_SCENE_PRESETS = (
 )
 SCENE_MARKER = re.compile(r"\[场景预设[:：]([^\]\r\n]{1,40})\]")
 
-# The "rules" trigger is deliberately conservative: it only decides whether
-# image tools are exposed for this turn. The model still decides whether the
-# user is really asking for an image and composes the request.
+# The "rules" trigger adds a direct-call hint to clear image requests while
+# keeping the enabled image tools stable in the request's tool catalog.
 _IMAGE_RULE_VERBS = r"(?:画|绘制|生成|做|出|来|拍|发|给|整|搞|修|改|换|去掉|去除|添加|加上|调整|重画|再画)"
 _IMAGE_RULE_NOUNS = r"(?:图|图片|照片|相片|自拍|头像|壁纸|插画|立绘|写真|画面|全身照|穿搭照|合照)"
 _IMAGE_RULE_PATTERN = re.compile(
@@ -48,7 +47,8 @@ _IMAGE_RULE_DIRECT = re.compile(
     re.IGNORECASE,
 )
 _IMAGE_RULE_FOLLOWUP = re.compile(
-    r"(?:再来一张|再画|继续画|重画|重新生成|换个(?:姿势|背景|风格|衣服)|换一套衣服|"
+    r"(?:再来一张|再画|继续画|重画|重新生成|再试试|再试一下|重试|"
+    r"换个(?:姿势|背景|风格|衣服)|换一套衣服|"
     r"刚才那张|上一张|改成|修一下|去掉|加上|"
     r"(?:^|[，。！？!?；;\s])(?:继续|接着|再来|还要|想看|看看|当然|好啊|好呀|可以)"
     r"(?:$|[，。！？!?；;\s]))",
@@ -57,11 +57,11 @@ _IMAGE_RULE_FOLLOWUP = re.compile(
 
 
 def is_rule_image_request(value, *, has_images=False):
-    """Return whether a rule-mode turn should expose image tools.
+    """Return whether a rule-mode turn should get the direct-call hint.
 
     This is a coarse, bounded prefilter, not a model substitute. False
-    positives leave the final decision with the model; false negatives only
-    affect users who explicitly selected the faster rule mode.
+    positives leave the final decision with the model; false negatives omit
+    the hint but do not remove the enabled image tools.
     """
 
     text = " ".join(str(value or "").split())
@@ -76,10 +76,8 @@ def is_rule_image_request(value, *, has_images=False):
 
 
 DEFAULTS = {
-    # 默认走规则预筛：明确的「来张自拍 / 画一张 / 把这张改一下」直接命中，
-    # 命中后工具里会带「直接调用，不要只回一段描述」的约束；没命中就不把
-    # 生图工具塞给模型，省掉它对每句话都权衡一次的开销。
-    "allow_user_requests": True, "trigger_mode": "rules", "rule_max_daily": 3,
+    # 默认走规则引导：明确的图片请求会追加直接调用提示，工具目录保持稳定。
+    "allow_user_requests": True, "trigger_mode": "rules",
     "proactive_probability": 0.35, "proactive_max_daily": 1,
     "prompt_format": "traditional", "style": "realistic", "style_prompt": "",
     "negative_mode": "safe_default", "negative_prompt": "",
@@ -163,6 +161,7 @@ def prompt_instruction(values):
         "结合最近对话理解“看看”“当然”“继续”“再来一张”，不要求对方重复整句。"
         "需求清楚时可自然接话并执行；确实缺少影响画面的关键信息时再问一句。"
         "玩笑、讨论摄影或泛泛问近况仍按普通聊天理解，已完成的请求不因后续应声重复生图。"
+        "上一轮图片工具明确失败且本轮用户要求重试时，重新调用工具；unknown 表示结果未确认，不能换调用编号重放同一操作。"
         "角色本人出镜时，按当前人设与已知对话展开外观、穿搭、动作和场景；"
         "近期明确换装或换景优先，缺少的细节可自然创作，不把生成画面说成现实观测。"
         "自拍画面在 prompt 中写明 selfie，以便应用角色的自拍提示词。"

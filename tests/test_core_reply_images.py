@@ -194,7 +194,8 @@ class CoreReplyImagesTests(NativeImageFixture, HostFixture, unittest.IsolatedAsy
         platform.send_by_session.assert_awaited_once()
         target, message = platform.send_by_session.call_args.args
         self.assertEqual(str(target), event.unified_msg_origin)
-        self.assertEqual(message.get_plain_text(), "头发还有一点乱呢。")
+        self.assertEqual(message.get_plain_text(), "")
+        self.assertEqual([type(part) for part in message.chain], [Image])
         self.assertEqual(len([part for part in message.chain if isinstance(part, Image)]), 1)
         self.assert_no_reply_work(event)
 

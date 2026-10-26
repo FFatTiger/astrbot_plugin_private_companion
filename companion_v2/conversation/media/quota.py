@@ -1,10 +1,8 @@
-"""Daily per-scope image generation limits, counted from dispatched invocations.
+"""Daily per-scope image generation limits, counted from confirmed results.
 
-Mirrors V1's four photo generation scopes: attempts are counted per requester
-for the local day of the conversation timezone, and a call is admitted only
-when its scope limit is -1 (unlimited) or the used count is below the limit.
-Counts derive from legacy invocations and native operation tasks, so an attempt
-is counted when its invocation is persisted and unknown results never re-count.
+Image operations are counted per requester for the local day of the
+conversation timezone. Failed and unknown results do not consume an allowance;
+only a confirmed successful image operation does.
 """
 
 from datetime import timezone
@@ -71,10 +69,6 @@ class ImageQuotaGate:
         if scope != "proactive" and (not settings["allow_user_requests"] or settings["trigger_mode"] == "off"):
             raise TaskError("image_requests_disabled", "image requests are disabled for this role")
         limit = self._limit(context, scope)
-        extra = settings["proactive_max_daily"] if scope == "proactive" else (
-            settings["rule_max_daily"] if settings["trigger_mode"] == "rules" else -1)
-        if extra >= 0:
-            limit = extra if limit < 0 else min(limit, extra)
         if limit < 0:
             return
         if self._used(context, scope, at) >= limit:
@@ -130,7 +124,8 @@ class ImageQuotaGate:
             predicates.append("COALESCE(s.tier, 'standard') " + ("= 'core'" if scope == "private_owner" else "!= 'core'"))
         row = self.runtime.read_one(f"""SELECT COUNT(*) FROM extension_tool_invocations i
             JOIN execution_tasks p ON p.task_id = i.parent_task_id {join}
-            WHERE i.action IN ('image.generate', 'image.edit', 'image.mask_edit') AND i.created_at >= ?
+            WHERE i.action IN ('image.generate', 'image.edit', 'image.mask_edit')
+            AND i.state = 'succeeded' AND i.created_at >= ?
             AND {' AND '.join(predicates)}""", tuple(parameters))
         if scope == "proactive":
             return row[0]
@@ -142,6 +137,7 @@ class ImageQuotaGate:
             JOIN execution_tasks p ON p.task_id = json_extract(n.value, '$.task_id') {join}
             WHERE substr(n.key, 1, ?) = ?
             AND json_extract(n.value, '$.action') IN ('image.generate', 'image.edit', 'image.mask_edit')
+            AND json_extract(n.value, '$.state') = 'succeeded'
             AND p.created_at >= ? AND {' AND '.join(predicates)}""", (len(PREFIX), PREFIX, *parameters))
         return row[0] + native[0]
 

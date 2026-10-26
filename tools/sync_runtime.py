@@ -9,6 +9,7 @@
     python tools/sync_runtime.py --check
     python tools/sync_runtime.py --plan
     python tools/sync_runtime.py --apply --plan-path <plan.json>
+    python tools/sync_runtime.py --plan --include companion_v2/conversation/media/quota.py
 
 运行目录里的 ``data/``、``__pycache__/``、``.git/`` 和发布时生成的
 ``RELEASE_FILES.json`` 不会被同步覆盖。差异备份写在仓库外的
@@ -97,14 +98,15 @@ def print_report(report, *, limit: int = 40) -> None:
             print("  … 另有 %d 个" % (len(rows) - limit))
 
 
-def make_plan(source: Path, live: Path, backup_root: Path) -> Path:
-    report = compare(source, live)
-    names = sorted(set(report["missing"]) | set(report["different"]))
+def make_plan(source: Path, live: Path, backup_root: Path, names: list[str] | None = None) -> Path:
+    report = compare(source, live, names)
+    verify_files = sorted(set(names)) if names is not None else None
+    changes = sorted(set(report["missing"]) | set(report["different"]))
     stamp = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d-%H%M%S")
     directory = backup_root / ("runtime-sync-" + stamp)
     directory.mkdir(parents=True, exist_ok=True)
     rows = []
-    for name in names:
+    for name in changes:
         source_path = target(source, name)
         live_path = target(live, name)
         before = live_path.read_bytes() if live_path.is_file() else None
@@ -123,6 +125,7 @@ def make_plan(source: Path, live: Path, backup_root: Path) -> Path:
         "source": str(source),
         "live": str(live),
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "verify_files": verify_files,
         "changes": rows,
         "extra_in_live": report["extra"],
     }
@@ -153,7 +156,12 @@ def apply_plan(plan_path: Path) -> None:
         temporary = live_path.with_name(live_path.name + ".companion-sync.tmp")
         shutil.copy2(source_path, temporary)
         os.replace(temporary, live_path)
-    mismatches = [name for name in repository_files(source)
+    verify_files = plan.get("verify_files")
+    if verify_files is None:
+        verify_files = repository_files(source)
+    elif type(verify_files) is not list or any(type(name) is not str for name in verify_files):
+        raise ValueError("同步计划的校验文件列表无效")
+    mismatches = [name for name in verify_files
                   if target(source, name).read_bytes() != target(live, name).read_bytes()]
     if mismatches:
         raise AssertionError("同步后仍有差异：" + "、".join(mismatches))
@@ -166,6 +174,8 @@ def main(argv=None) -> int:
     parser.add_argument("--plan", action="store_true", help="生成带备份的同步计划，不写入运行目录")
     parser.add_argument("--apply", action="store_true", help="按计划写入运行目录")
     parser.add_argument("--plan-path", type=Path, help="要应用的 plan.json")
+    parser.add_argument("--include", action="append", dest="include_files",
+                        help="只检查或计划同步指定的源码相对路径；可重复传入")
     parser.add_argument("--source", type=Path, default=SOURCE)
     parser.add_argument("--live", type=Path, default=DEFAULT_LIVE)
     parser.add_argument("--backup-root", type=Path, default=DEFAULT_BACKUP_ROOT)
@@ -181,12 +191,15 @@ def main(argv=None) -> int:
         if args.plan_path is None:
             print("--apply 需要同时指定 --plan-path", file=sys.stderr)
             return 2
+        if args.include_files:
+            print("--apply 使用计划文件中的校验范围，不要传入 --include", file=sys.stderr)
+            return 2
         apply_plan(args.plan_path)
         return 0
     if args.plan:
-        make_plan(args.source, args.live, args.backup_root)
+        make_plan(args.source, args.live, args.backup_root, args.include_files)
         return 0
-    report = compare(args.source, args.live)
+    report = compare(args.source, args.live, args.include_files)
     print_report(report)
     return 1 if report["missing"] or report["different"] else 0
 

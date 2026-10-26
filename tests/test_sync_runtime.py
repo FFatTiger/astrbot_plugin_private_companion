@@ -2,7 +2,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from tools.sync_runtime import compare, target
+from tools.sync_runtime import apply_plan, compare, make_plan, target
 
 
 class SyncRuntimeTests(unittest.TestCase):
@@ -31,6 +31,23 @@ class SyncRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             with self.assertRaises(ValueError):
                 target(Path(temporary), "../outside.txt")
+
+    def test_selected_plan_updates_only_included_files_and_verifies_that_scope(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, live, backups = root / "source", root / "live", root / "backups"
+            source.mkdir()
+            live.mkdir()
+            (source / "quota.py").write_text("fixed\n", encoding="utf-8")
+            (live / "quota.py").write_text("old\n", encoding="utf-8")
+            (source / "unrelated.py").write_text("source\n", encoding="utf-8")
+            (live / "unrelated.py").write_text("live\n", encoding="utf-8")
+
+            plan = make_plan(source, live, backups, ["quota.py"])
+            apply_plan(plan)
+
+            self.assertEqual((live / "quota.py").read_text(encoding="utf-8"), "fixed\n")
+            self.assertEqual((live / "unrelated.py").read_text(encoding="utf-8"), "live\n")
 
 
 if __name__ == "__main__":

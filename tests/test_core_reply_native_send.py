@@ -102,8 +102,7 @@ class CoreReplyNativeSendTests(unittest.IsolatedAsyncioTestCase):
     async def test_real_native_tool_sends_via_core_without_mutating_shared_context(self):
         event, wrapper, tool = self.prepare()
         with patch("astrbot_host.core_reply_reactions.observe_core_media_send_returned") as media:
-            result = await tool.call(wrapper, messages=[{"type": "plain", "text": "看我找到的！"},
-                {"type": "image", "url": "https://example.invalid/original.png"}])
+            result = await tool.call(wrapper, messages=[{"type": "plain", "text": "看我找到的！"}])
         self.assertIn("sent", result.lower())
         self.platform.send_by_session.assert_awaited_once()
         target, chain = self.platform.send_by_session.call_args.args
@@ -126,20 +125,63 @@ class CoreReplyNativeSendTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.observed, [])
         self.assertTrue(event.get_extra(CORE_REPLY_CONTEXT_EXTRA)["denial_notified"])
 
-    async def test_native_tool_text_uses_cleanup_and_replacement_and_keeps_media(self):
+    async def test_native_tool_text_uses_cleanup_and_replacement(self):
         event, wrapper, tool = self.prepare()
         event.get_extra(CORE_REPLY_CONTEXT_EXTRA)["prepared"]["presentation_settings"] = {
             "content_cleanup_enabled": True, "content_cleanup_scope": "trailing",
             "content_cleanup_words": '["。"]', "content_replacement_enabled": True,
             "content_replacements": '["a => aa"]'}
-        await tool.call(wrapper, messages=[{"type": "plain", "text": "a。"},
-            {"type": "image", "url": "https://example.invalid/original.png"}])
+        await tool.call(wrapper, messages=[{"type": "plain", "text": "a。"}])
         chain = self.platform.send_by_session.call_args.args[1]
         self.assertEqual(chain.get_plain_text(), "aa")
-        self.assertEqual(len(chain.chain), 2)
+        self.assertEqual(len(chain.chain), 1)
         self.assertEqual(self.observed, ["aa"])
         self.assertIn("aa", event.get_extra("_send_message_to_user_current_session_plain_texts"))
         self.assertIn("a。", event.get_extra("_send_message_to_user_current_session_plain_texts"))
+
+    async def test_image_send_tool_sends_only_images_and_normal_reply_keeps_text_and_voice(self):
+        from astrbot.core.message.components import Image, Plain, Record
+        from astrbot.core.message.message_event_result import MessageEventResult, MessageChain, ResultContentType
+        from astrbot_host.core_reply_voice import observe_core_voice_response, prepare_core_reply_voice_message
+        from astrbot_host.core_reply import activate_core_reply_delivery_guard
+        from astrbot_host.core_reply_segmentation import activate_core_reply_segmentation, prepare_core_reply_segmentation
+
+        event, wrapper, tool = self.prepare()
+        state = event.get_extra(CORE_REPLY_CONTEXT_EXTRA)
+        policy = VoiceReplyPolicy(generation_mode="model_tag", language="ja", foreign_text_mode="translation")
+        state["prepared"].update(channel="private", voice_reply_policy=policy,
+                                  segmentation_settings={"min_segment_chars": 100})
+        prepare_core_reply_segmentation(event)
+        rendered = []
+        async def render(_, text, **__):
+            rendered.append(text)
+            return {"type": "record", "data": {"file": "base64://YQ=="}}
+        async def prepare(current, message, authorize, index, count):
+            return await prepare_core_reply_voice_message(event, current, message, renderer=render,
+                delivery=None, authorize=authorize, segment_index=index, segment_count=count)
+        state["prepare_send"] = prepare
+        text = "喏，自拍。今天下午在家闲着呢。"
+        await tool.call(wrapper, messages=[{"type": "plain", "text": "喏，自拍。今天下午在家闲着呢。"},
+            {"type": "image", "url": "https://example.invalid/selfie.png"}])
+
+        image_call = self.platform.send_by_session.call_args
+        self.assertEqual([type(part) for part in image_call.args[1].chain], [Image])
+        self.assertEqual(rendered, [])
+
+        response = NS(role="assistant", completion_text=f"<pc_tts>はい、自撮り。</pc_tts>{text}",
+                      is_chunk=False, tools_call_name=(), result_chain=MessageChain(chain=[Plain(text)]))
+        observe_core_voice_response(event, response)
+        event.set_result(MessageEventResult().message(response.completion_text)
+                         .set_result_content_type(ResultContentType.LLM_RESULT))
+        activate_core_reply_delivery_guard(event)
+        activate_core_reply_segmentation(event)
+        await event.send(MessageChain(chain=[Plain(response.completion_text)]))
+
+        self.assertEqual(rendered, ["はい、自撮り。"])
+        components = [component for chain in event.sent for component in chain]
+        self.assertEqual([component.text for component in components if isinstance(component, Plain)], [text])
+        self.assertEqual(sum(isinstance(component, Record) for component in components), 1)
+        self.assertEqual(self.platform.send_by_session.await_count, 1)
 
     async def test_native_tool_empty_after_cleanup_never_attempts_send(self):
         event, wrapper, tool = self.prepare()

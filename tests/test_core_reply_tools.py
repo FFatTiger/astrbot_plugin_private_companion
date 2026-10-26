@@ -18,13 +18,15 @@ from astrbot.core.pipeline.process_stage.follow_up import _ACTIVE_AGENT_RUNNERS
 from astrbot.core.provider.entities import LLMResponse, ProviderRequest
 from mcp.types import CallToolResult
 
-from astrbot_host.core_reply import prepare_core_reply_event
-from astrbot_host.core_reply_tools import close_core_reply_tools, inject_core_reply_tools, native_tool_name
+from astrbot_host.core_reply import CORE_REPLY_CONTEXT_EXTRA, prepare_core_reply_event
+from astrbot_host.core_reply_tools import (CoreReplyToolSession, close_core_reply_tools, inject_core_reply_tools,
+                                           native_tool_name)
 from astrbot_host.core_reply_telemetry import observe_core_agent_begin, prepare_core_reply_telemetry
 from astrbot_host.core_reply_tool_dispatch import observe_core_tool_dispatch_begin, restore_core_tool_dispatch
 from companion_v2.agenda.service import AgendaService
 from companion_v2.execution.models import TaskError, require
 from companion_v2.foundation.outcome import Outcome
+from companion_v2.foundation.refs import ScopeKind
 from companion_v2.model_gateway.models import MAX_TOOL_CATALOG
 from tests.test_astrbot_core_reply import FakeEvent
 from tests.test_external_tools import ExternalFixture
@@ -183,6 +185,31 @@ class CoreReplyToolsTests(ExternalFixture, unittest.IsolatedAsyncioTestCase):
         denied = await self.call_native("device.play", {"query": 7})
         self.assertEqual(denied["code"], "invalid_tool_arguments")
         self.assertEqual(self.extension_calls, [])
+
+    async def test_group_skip_latches_delivery_guard_when_authorization_fails(self):
+        event = FakeEvent()
+        prepared = {"context": self.context, "event_id": "group-skip-failed"}
+
+        async def stopped(_prepared):
+            return Outcome.failed("host_not_running", "test host stopped")
+
+        prepare_core_reply_event(event, prepared, authorize=stopped)
+        state = event.get_extra(CORE_REPLY_CONTEXT_EXTRA)
+        session = CoreReplyToolSession.__new__(CoreReplyToolSession)
+        session.event, session.state, session.prepared = event, state, prepared
+        session.context = NS(scope=NS(kind=ScopeKind.GROUP))
+        session.application = self.app
+        session.native_run_context, session.native_calls = None, []
+        arguments = {"mode": "skip", "reason": "话题已经结束"}
+        wrapper = self.wrapper("group.participation.choose", arguments, event=event)
+
+        result = json.loads(await session.call("group.participation.choose", wrapper, arguments))
+
+        self.assertEqual(result["code"], "host_not_running")
+        self.assertEqual(state["group_participation"]["mode"], "skip")
+        state["delivery_guard_active"] = True
+        await event.send("不应发送")
+        self.assertEqual(event.sent, [])
 
     async def test_images_use_native_mcp_contract_and_original_generation_is_reused(self):
         async def with_image(invocation):

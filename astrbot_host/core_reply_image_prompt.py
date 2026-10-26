@@ -14,15 +14,15 @@ from .native_extensions.request_context import set_system_instruction
 
 logger = logging.getLogger(__name__)
 _PURPOSES = {
-    "image.generate": "按画面描述生成新图，包括无参考图的角色自拍、头像、穿搭照与普通场景",
-    "image.edit": "依据本轮附图、已保存产物或角色参考素材改图，也可用人设参考图拍新的自拍",
+    "image.generate": "没有可用参考图时按画面描述生成新图；包括全新角色、普通场景与无身份锚点的自拍",
+    "image.edit": "依据本轮附图、已保存产物或角色参考素材改图；需要保持角色身份或参考图一致时优先使用",
     "image.mask_edit": "使用明确底图和蒙版做局部编辑",
 }
 _DELIVERY = (
     "生成工具返回的图片由 AstrBot 缓存供查看，生成成功与已经发给对方是两个步骤。"
     "图片符合请求时，把工具结果实际提供的缓存原路径交给 send_message_to_user，"
-    "使用 messages=[{\"type\":\"image\",\"path\":\"工具返回的原路径\"}] 投递当前会话，session 留空。"
-    "需要随图说话可在同一 messages 中加入 plain.text；投递成功后自然收住，避免重复发送同一张图或重复随图正文。"
+    "使用 messages=[{\"type\":\"image\",\"path\":\"工具返回的原路径\"}] 投递当前会话，session 留空；图片投递只包含图片。"
+    "不要把 plain.text 或语音放进图片投递；需要说的话由本轮正常回复发送一次。图片投递成功后自然收住，避免重复发送同一张图。"
     "根据工具结果说明实际进展：没有成功结果时不声称已生成或送达，unknown 时保留原操作，不换编号重做。"
     "图片错误码 host_image_limit 表示宿主本地图片处理预算超限（字节数、尺寸或张数），"
     "reference_image_limit 表示已保存参考素材超出原生图像输入上限；两者都不是服务商日额度错误。"
@@ -42,9 +42,9 @@ def core_image_tool_contract(action, description, parameters, *, reference_limit
     properties = parameters.get("properties", {})
     prompt = properties.get("prompt")
     if isinstance(prompt, dict):
-        prompt["description"] = (
-            "本次画面或修改要求，按图片调用偏好的格式书写；角色出镜时展开当前外观、穿搭与场景，自拍写明 selfie。"
-        )
+        prompt["description"] = ("本次画面或修改要求，按图片调用偏好的格式书写；"
+                                  "有身份参考图时只写动作、镜头、场景、光线和用户明确要求的变化，"
+                                  "不要重复或改写参考图已有的固定外貌；自拍写明 selfie。")
     if action == "image.edit" and type(reference_limit) is int and reference_limit > 0:
         for name in ("reference_ids", "reference_indices", "reference_roles"):
             reference = properties.get(name)
@@ -78,19 +78,6 @@ def core_image_tools(session, offered):
         logger.info("[CompanionV2][image] stage=policy allow=%s mode=%s actions=%s kept=0",
                     values["allow_user_requests"], values["trigger_mode"], present)
         return tuple(item for item in offered if item.spec.action not in IMAGE_ACTIONS), None
-    if values["trigger_mode"] == "rules":
-        state = getattr(session, "state", None)
-        command = state.get("functional_command") if isinstance(state, Mapping) else None
-        command_intent = getattr(command, "intent", None)
-        if command_intent not in {"image_generate", "image_edit"}:
-            prepared = getattr(session, "prepared", None)
-            original = prepared.get("native_input") if isinstance(prepared, Mapping) else None
-            text = getattr(original, "text", "")
-            matched = is_rule_image_request(text, has_images=bool(getattr(original, "images", ())))
-            if not matched:
-                logger.info("[CompanionV2][image] stage=rules matched=0 text_chars=%s actions=%s kept=0",
-                            len(text or ""), present)
-                return tuple(item for item in offered if item.spec.action not in IMAGE_ACTIONS), None
     logger.info("[CompanionV2][image] stage=keep mode=%s actions=%s", values["trigger_mode"], present)
     return offered, values
 
@@ -112,6 +99,35 @@ def _reference_date(session):
     return at.astimezone(ZoneInfo(timezone_name)).date().isoformat()
 
 
+def _identity_reference_guidance(material):
+    """Tell the model when an identity anchor is available without copying IDs."""
+    if not isinstance(material, Mapping):
+        return ""
+    references = material.get("references")
+    if not isinstance(references, (list, tuple)):
+        return ""
+    has_identity = False
+    for item in references:
+        if not isinstance(item, Mapping):
+            continue
+        roles = item.get("roles", ())
+        roles = {getattr(role, "value", role) for role in roles} if isinstance(roles, (list, tuple, set)) else set()
+        if "identity" not in roles:
+            continue
+        has_identity = True
+    if not has_identity:
+        return ""
+    return (
+        "当前参考材料有可用的 identity 身份参考；其中标注 base_identity 的素材应作为主身份锚点。"
+        "角色本人自拍、穿搭照或需要保持人物一致时，"
+        "优先调用 image.edit，使用 companion_v2_context 中对应的 reference_ids，"
+        "reference_indices=[]，并按所选顺序填写 reference_roles=[\"identity\"]。"
+        "只有没有可用身份参考，或用户明确要求全新角色时才使用 image.generate。"
+        "选用身份参考后，prompt 只写动作、镜头、场景、光线和用户明确要求的变化；"
+        "不要重复发色、眼睛、脸型、发饰等已由参考图提供的固定外貌，也不要无故换脸。"
+    )
+
+
 def inject_core_image_prompt(session, request, offered, values):
     """Keep configuration in system and role reference data in the turn suffix."""
     session.state.pop("_image_reference_material", None)
@@ -131,11 +147,21 @@ def inject_core_image_prompt(session, request, offered, values):
             reference_limit = None
 
     descriptions = "\n".join(native_tool_name(action) + "：" + _PURPOSES[action] for action in actions)
-    rule_hint = (
-        "本轮用户文本已命中图片请求规则。若这句话确实是在要新图、自拍或改图，"
-        "直接调用对应图片工具，不要只回一段描述或反复确认。"
-        if values["trigger_mode"] == "rules" else ""
-    )
+    rule_hint = ""
+    if values["trigger_mode"] == "rules":
+        state = getattr(session, "state", None)
+        command = state.get("functional_command") if isinstance(state, Mapping) else None
+        command_intent = getattr(command, "intent", None)
+        prepared = getattr(session, "prepared", None)
+        original = prepared.get("native_input") if isinstance(prepared, Mapping) else None
+        text = getattr(original, "text", "")
+        matched = command_intent in {"image_generate", "image_edit"} or is_rule_image_request(
+            text, has_images=bool(getattr(original, "images", ())))
+        if matched:
+            rule_hint = (
+                "本轮用户文本已命中图片请求规则。若这句话确实是在要新图、自拍或改图，"
+                "直接调用对应图片工具，不要只回一段描述或反复确认。"
+            )
     instruction = "\n".join(part for part in (
         prompt_instruction(values), rule_hint,
         "本轮图片工具：\n" + descriptions, _DELIVERY) if part)
@@ -157,6 +183,9 @@ def inject_core_image_prompt(session, request, offered, values):
                 material = owner.prompt_material(session.context, local_date=_reference_date(session))
                 if isinstance(material, dict) and (material.get("references") or material.get("wardrobe")):
                     session.state["_image_reference_material"] = material
+                    route_guidance = _identity_reference_guidance(material)
+                    if route_guidance:
+                        instruction += "\n" + route_guidance
             except Exception as error:
                 logger.warning("[CompanionV2] 核心生图参考资料暂不可用 error_type=%s", type(error).__name__)
     set_system_instruction(request, "image_output", instruction)

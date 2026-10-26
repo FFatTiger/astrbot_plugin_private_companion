@@ -251,16 +251,7 @@ class CoreReplyToolSession:
         if arguments["mode"] == "skip":
             if self.state.get("_business_tools_started") or self.state.get("send_attempts", 0):
                 raise TaskError("group_participation_started", "a group turn cannot revoke an operation that already began")
-            calls = self.native_calls
-            if self.native_run_context is None:
-                latest = next((message for message in reversed(getattr(wrapper, "messages", ()))
-                               if _field(message, "role") == "assistant" and _field(message, "tool_calls")), None)
-                calls = _field(latest, "tool_calls", ())
-            from companion_v2.conversation.behavior.service import ANNOTATIONS
-            annotation_names = {native_tool_name(action) for action in ANNOTATIONS}
-            operations = [call for call in calls
-                          if _field(call, "name", _field(_field(call, "function"), "name")) not in annotation_names]
-            if len(operations) != 1:
+            if not self._skip_is_alone(wrapper):
                 raise TaskError("group_participation_skip_alone", "listening may accompany learning notes, but no business operation")
         admission = _field(self.prepared, "group_admission", {}) or {}
         act, signature = "", ""
@@ -279,6 +270,38 @@ class CoreReplyToolSession:
         from .core_reply_tracking import observe_core_group_participation
         observe_core_group_participation(self.event, decision)
         return {"state": "succeeded", "effect": "none", "payload": dict(decision), "replayed": False}
+
+    def _skip_is_alone(self, wrapper):
+        calls = self.native_calls
+        if self.native_run_context is None:
+            latest = next((message for message in reversed(getattr(wrapper, "messages", ()))
+                           if _field(message, "role") == "assistant" and _field(message, "tool_calls")), None)
+            calls = _field(latest, "tool_calls", ())
+        from companion_v2.conversation.behavior.service import ANNOTATIONS
+        annotation_names = {native_tool_name(action) for action in ANNOTATIONS}
+        operations = [call for call in calls
+                      if _field(call, "name", _field(_field(call, "function"), "name")) not in annotation_names]
+        return len(operations) == 1
+
+    def _latch_group_skip(self, wrapper, action, arguments):
+        reason = arguments.get("reason", "")
+        if (action != "group.participation.choose" or arguments.get("mode") != "skip"
+                or not isinstance(reason, str)
+                or self.context.scope.kind is not ScopeKind.GROUP
+                or self.state.get("group_participation") is not None
+                or self.state.get("_business_tools_started") or self.state.get("send_attempts", 0)):
+            return
+        try:
+            call_id = native_call_id(wrapper, action, arguments)
+        except TaskError:
+            return
+        if not self._skip_is_alone(wrapper):
+            return
+        decision = {"mode": "skip", "reason": " ".join(reason.split())[:256],
+                    "act": "", "signature": "", "call_id": call_id}
+        self.state["group_participation"] = decision
+        from .core_reply_tracking import observe_core_group_participation
+        observe_core_group_participation(self.event, decision)
 
     async def wait_source(self):
         pending = _field(self.prepared, "native_source_future")
@@ -325,6 +348,7 @@ class CoreReplyToolSession:
     async def call(self, action, wrapper, arguments):
         result = None
         try:
+            self._latch_group_skip(wrapper, action, arguments)
             await self.authorize(wrapper)
             from companion_v2.conversation.behavior.service import ANNOTATIONS
             if (self.state.get("group_participation", {}).get("mode") == "skip"

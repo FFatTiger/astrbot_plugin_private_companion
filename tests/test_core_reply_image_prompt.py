@@ -71,14 +71,17 @@ class CoreReplyImagePromptTests(unittest.IsolatedAsyncioTestCase):
         settings.assert_not_called()
         self.references.prompt_material.assert_not_called()
 
-    def test_rules_mode_hides_image_tools_for_non_image_turns(self):
+    def test_rules_mode_keeps_image_tools_and_only_hints_matching_turns(self):
         values = {**DEFAULTS, "trigger_mode": "rules"}
         self.prepared["native_input"] = NS(text="今天天气不错",
                                            at=self.prepared["native_input"].at)
         with patch("astrbot_host.core_reply_image_prompt.effective_settings", return_value=values):
             offered, preferences = core_image_tools(self.session, self.offered)
-        self.assertEqual([item.spec.action for item in offered], ["memory.query"])
-        self.assertIsNone(preferences)
+        self.assertEqual([item.spec.action for item in offered],
+                         ["memory.query", "image.generate", "image.edit"])
+        self.assertEqual(preferences, values)
+        self.inject(offered=offered, values=preferences)
+        self.assertNotIn("已命中图片请求规则", self.request.system_prompt)
 
         self.prepared["native_input"] = NS(text="帮我改一下", at=self.prepared["native_input"].at,
                                            images=(object(),))
@@ -87,6 +90,8 @@ class CoreReplyImagePromptTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.spec.action for item in offered],
                          ["memory.query", "image.generate", "image.edit"])
         self.assertEqual(preferences, values)
+        self.inject(offered=offered, values=preferences)
+        self.assertIn("已命中图片请求规则", self.request.system_prompt)
 
     def test_tool_mode_keeps_image_tools_available_on_non_image_turns(self):
         values = {**DEFAULTS, "trigger_mode": "tool"}
@@ -143,6 +148,22 @@ class CoreReplyImagePromptTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("host_image_limit", prompt)
         self.assertIn("不是服务商日额度错误", prompt)
         self.assertNotIn("role-face", prompt)
+
+    def test_identity_reference_guidance_prefers_edit_and_avoids_fixed_appearance_repetition(self):
+        self.inject()
+        prompt = self.request.system_prompt
+        self.assertIn("优先调用 image.edit", prompt)
+        self.assertIn("reference_indices=[]", prompt)
+        self.assertIn('reference_roles=["identity"]', prompt)
+        self.assertIn("不要重复发色、眼睛、脸型、发饰", prompt)
+
+    def test_without_identity_reference_does_not_add_identity_route_guidance(self):
+        self.references.prompt_material.return_value = {
+            "references": [{"id": "outfit", "roles": ["wardrobe"]}],
+            "wardrobe": {"tendency": "居家", "items": []},
+        }
+        self.inject()
+        self.assertNotIn("当前参考材料有可用的 identity 身份参考", self.request.system_prompt)
 
     def test_active_reference_limit_is_explained_in_prompt_and_request_tool_schema(self):
         settings = {
