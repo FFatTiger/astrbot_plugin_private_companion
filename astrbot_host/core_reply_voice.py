@@ -246,7 +246,7 @@ async def prepare_core_reply_voice_message(
         records = []
         for chunk in chunks:
             await authorize()
-            render_options = {"provider_id": policy.provider_for_language(),
+            render_options = {"provider_id": policy.provider_for_language(kind),
                               "timeout_seconds": policy.timeout_seconds}
             model_override = getattr(policy, "_model_override", "")
             voice_override = getattr(policy, "_voice_override", "")

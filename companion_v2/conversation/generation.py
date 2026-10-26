@@ -758,7 +758,7 @@ class LocalReplyGenerator:
                         connection.execute("""INSERT INTO conversation_voice_parts
                             (part_id, speech, provider_id, delivery_mode, position, timeout_seconds, cooldown_seconds)
                             VALUES (?, ?, ?, ?, ?, ?, ?)""", (part_id, speech[sequence - 1],
-                            policy.provider_for_language(), "voice_only" if action == "voice_only" else policy.delivery_mode,
+                            policy.provider_for_language(run.task.spec.context.scope.kind.value), "voice_only" if action == "voice_only" else policy.delivery_mode,
                             policy.position,
                             policy.timeout_seconds, policy.cooldown(run.task.spec.context.scope.kind.value)))
                 if images:

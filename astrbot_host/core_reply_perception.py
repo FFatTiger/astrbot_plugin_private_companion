@@ -305,9 +305,9 @@ def _tts_config(native_context, event):
     return values if isinstance(values, Mapping) else {}
 
 
-async def _selected_tts_provider(native_context, event, *, policy, host_enabled):
+async def _selected_tts_provider(native_context, event, *, policy, host_enabled, channel=""):
     """Follow the native voice renderer's language override and session route."""
-    selected = _single_line(policy.provider_for_language(), 128) if policy else ""
+    selected = _single_line(policy.provider_for_language(channel), 128) if policy else ""
     if native_context is None:
         return None, selected, "host_unavailable"
     if selected:
@@ -347,7 +347,8 @@ async def _tts_route(native_context, event, prepared):
     configured_policy = configured_policy if isinstance(configured_policy, VoiceReplyPolicy) else None
     policy = active_policy or configured_policy
     provider, selected, reason = await _selected_tts_provider(
-        native_context, event, policy=policy, host_enabled=host_enabled)
+        native_context, event, policy=policy, host_enabled=host_enabled,
+        channel=prepared.get("channel", ""))
     route = {
         "status": "available" if provider is not None else "unavailable",
         "identity": "AstrBot text-to-speech Provider configuration",

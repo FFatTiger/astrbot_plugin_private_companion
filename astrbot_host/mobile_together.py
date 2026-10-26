@@ -113,11 +113,23 @@ class MobileTogetherBridge:
             # A wildcard private target is the persisted account mapping. Resolve
             # the current person through the same route resolver used by inbound
             # messages instead of requiring one stored row per person.
-            matches = []
+            # An explicit participant mapping wins over a wildcard account
+            # template.  Wildcard targets exist so a test account can accept
+            # arbitrary private users without every user becoming ambiguous
+            # with the normal account's explicitly configured primary target.
+            configured_target_ids = {getattr(target, "target_id", None)
+                                     for target in getattr(settings, "targets", ())}
+            exact_matches, wildcard_matches = [], []
             for account in settings.accounts:
                 target = settings.private_target(account.platform_id, account.self_id, user_id)
-                if target is not None:
-                    matches.append(target)
+                if target is None:
+                    continue
+                target_id = getattr(target, "target_id", None)
+                if target_id is not None and configured_target_ids and target_id not in configured_target_ids:
+                    wildcard_matches.append(target)
+                else:
+                    exact_matches.append(target)
+            matches = exact_matches or wildcard_matches
             if not matches:
                 return None
             if len(matches) != 1:

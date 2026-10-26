@@ -371,7 +371,7 @@ class ProactiveContacts:
             speech = re.sub(r"\s+", " ",
                 strip_voice_markup(strip_internal_expression_protocol(speech))).strip()
             if speech and len(speech) <= 2000:
-                voice = VoicePlan(speech, provider_id=policy.provider_for_language(),
+                voice = VoicePlan(speech, provider_id=policy.provider_for_language(context.scope.kind.value),
                     timeout_seconds=policy.timeout_seconds, position=policy.position)
             else:
                 logger.info("V2 proactive voice omitted: speech unavailable or too long language=%s", policy.language)

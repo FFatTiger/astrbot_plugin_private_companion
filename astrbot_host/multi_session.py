@@ -1018,7 +1018,7 @@ class MultiHostSession:
                                                     extra_prompt=extra_prompt)
                             voice_policy = candidate
                 from .fish_audio import provider_direction
-                voice_direction = await provider_direction(self.bridge.context, voice_policy, event.unified_msg_origin)
+                voice_direction = await provider_direction(self.bridge.context, voice_policy, event.unified_msg_origin, channel)
                 source_future = None
                 if self.core_reply_observations is not None:
                     try:

@@ -1,6 +1,7 @@
 """Reality belongs to the active V2 context, actual host providers and Cron lifecycle."""
 
 import asyncio
+from dataclasses import replace
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -17,6 +18,9 @@ from astrbot.core.provider.entities import LLMResponse, ProviderRequest, TokenUs
 from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
 from astrbot_host.integration_registry import UnifiedCompanionExtensionAPI
 from astrbot_host.multi_controller import AstrBotMultiController
+from astrbot_host.multi_settings import PrivateTarget
+from companion_v2.adapters.astrbot.native import HostAccount
+from companion_v2.identity_policy.object_access import ObjectAccessPolicy
 from astrbot_host.native_extensions.reality.host_events import RealityHostEvents
 from astrbot_host.native_extensions.reality import mobile_gateway
 from astrbot_host.native_extensions.reality.mobile_gateway import _MobileRequestState, _mobile_request_state
@@ -83,6 +87,22 @@ class RealityHostGlueTests(unittest.IsolatedAsyncioTestCase):
         return {table: self.app.runtime.read_one("SELECT COUNT(*) AS n FROM " + table, ())["n"]
             for table in ("conversation_batches", "conversation_delivery_receipts",
                           "conversation_native_turns", "conversation_native_sends")}
+
+    async def test_primary_camera_user_is_not_ambiguous_with_a_wildcard_test_account(self):
+        policy = ObjectAccessPolicy(self.app.runtime)
+        policy.set_tier(self.context.actor.subject, AuthorizationTier.CORE,
+                        expected_revision=policy.revision, observed_at=support.NOW)
+        settings = self.controller.settings
+        wildcard = PrivateTarget("test-wildcard", "test", "test-account", "bot-test", "*")
+        test_account = HostAccount("test", "test-account", "bot-test")
+        self.controller.settings = replace(
+            settings,
+            targets=settings.targets + (wildcard,),
+            account_bindings=settings.accounts + (test_account,),
+        )
+
+        self.assertTrue(self.runtime._is_configured_admin_user_id("200"))
+        self.assertTrue(self.runtime._reality_touch_camera_user_eligible("200"))
 
     async def test_current_private_persona_history_and_actual_model_usage(self):
         background = await self.api.get_realtime_context("200", purpose="提醒喝水")

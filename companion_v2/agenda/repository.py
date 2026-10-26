@@ -98,8 +98,9 @@ class AgendaRepository:
         The scheduler claims a follow-up while selecting a candidate.  That
         claim prevents duplicates, but its timestamp is not evidence that the
         message was sent.  Only a confirmed delivery may open the reply-review
-        window, so keep the first receipt time even if the platform retries or
-        reports the same delivery again.
+        window.  The receipt carries its original ``delivered_at``, so a replay
+        writes the same value; a segmented message may advance to its latest
+        delivered part.
         """
         timestamp = stamp(at)
         with self.runtime.transaction() as connection:

@@ -147,6 +147,12 @@ class VoiceReplyPolicy:
     zh_provider_id: str = ""
     ja_provider_id: str = ""
     en_provider_id: str = ""
+    private_zh_provider_id: str = ""
+    private_ja_provider_id: str = ""
+    private_en_provider_id: str = ""
+    group_zh_provider_id: str = ""
+    group_ja_provider_id: str = ""
+    group_en_provider_id: str = ""
     extra_prompt: str = ""
 
     def __post_init__(self):
@@ -175,7 +181,10 @@ class VoiceReplyPolicy:
         for value, limit in ((self.trigger_keywords, 2000), (self.primary_mention_keywords, 2000),
                              (self.primary_mention_prompt, 2000), (self.provider_id, 128),
                              (self.zh_provider_id, 128), (self.ja_provider_id, 128),
-                             (self.en_provider_id, 128), (self.extra_prompt, 2000)):
+                             (self.en_provider_id, 128), (self.private_zh_provider_id, 128),
+                             (self.private_ja_provider_id, 128), (self.private_en_provider_id, 128),
+                             (self.group_zh_provider_id, 128), (self.group_ja_provider_id, 128),
+                             (self.group_en_provider_id, 128), (self.extra_prompt, 2000)):
             if not isinstance(value, str) or len(value) > limit:
                 raise ValueError("voice reply text setting is invalid")
         words = tuple(word.strip() for word in re.split(r"[,，;；\n]+", self.primary_mention_keywords)
@@ -226,9 +235,15 @@ class VoiceReplyPolicy:
             prompt += "\n" + self.extra_prompt.strip()
         return prompt
 
-    def provider_for_language(self):
-        return (getattr(self, "_provider_override", "")
-                or getattr(self, self.language + "_provider_id") or self.provider_id)
+    def provider_for_language(self, channel=None):
+        transient = getattr(self, "_provider_override", "")
+        if transient:
+            return transient
+        if channel in ("private", "group"):
+            channel_override = getattr(self, f"{channel}_{self.language}_provider_id", "")
+            if channel_override:
+                return channel_override
+        return getattr(self, self.language + "_provider_id") or self.provider_id
 
     def chance(self, kind):
         override = self.group_probability if kind == "group" else self.private_probability
