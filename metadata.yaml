@@ -25,4 +25,6 @@ tags:
   - 能力整合
 support_platforms:
   - aiocqhttp
+  - qq_official
+  - qq_official_webhook
 astrbot_version: ">=4.27.2"

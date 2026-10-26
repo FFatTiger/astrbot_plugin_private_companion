@@ -235,7 +235,7 @@ window.CompanionNativeExtensionPanel = (() => {
           this.field(child, descriptor, value?.[child], [key, child], parent)).join("");
         return `<details class="mobile-config-section" data-mobile-config-section="${escape(group.id)}" ${open ? "open" : ""}>`
           + `<summary><span><strong>${escape(group.title)}</strong><small>${escape(group.summary)}</small></span>`
-          + `<i class="mobile-config-chevron" data-lucide="chevron-down" aria-hidden="true"></i></summary>`
+          + `<span class="mobile-config-chevron" aria-hidden="true"></span></summary>`
           + `<div class="mobile-config-section-body">${body}</div></details>`;
       }).join("")}</div>`;
     }
