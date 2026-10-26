@@ -33,6 +33,20 @@ class PersonaMapping:
     role_id: str
 
 
+@dataclass(frozen=True)
+class WindowLink:
+    """One primary private window and the windows merged into it.
+
+    ``mode='role'`` shares the role/memory but keeps each native window for
+    replies.  ``mode='primary'`` additionally routes replies and proactive
+    contacts to the primary window.
+    """
+
+    primary_target_id: str
+    alias_target_ids: tuple[str, ...]
+    mode: str = "primary"
+
+
 def _shared_persona_roles(personas: tuple[PersonaMapping, ...]) -> tuple[PersonaMapping, ...]:
     """Keep one role id when the same AstrBot persona uses the same character name.
 
@@ -66,6 +80,34 @@ def _shared_persona_roles(personas: tuple[PersonaMapping, ...]) -> tuple[Persona
                  for mapping in personas)
 
 
+def _parse_window_links(values, targets):
+    if values is None:
+        return ()
+    if type(values) is not list or len(values) > 64:
+        raise HostControlError("host_mappings_invalid", "window links must be a bounded list")
+    private = {target.target_id: target for target in targets}
+    links, claimed = [], set()
+    for row in values:
+        if (type(row) is not dict or set(row) - {"primary_target_id", "alias_target_ids", "mode"}
+                or not {"primary_target_id", "alias_target_ids"}.issubset(row)):
+            raise HostControlError("host_mappings_invalid", "window link fields are incomplete or unknown")
+        primary = row["primary_target_id"]
+        aliases, mode = row["alias_target_ids"], row.get("mode", "primary")
+        if (type(primary) is not str or primary not in private or type(aliases) is not list
+                or not aliases or len(aliases) > 128 or mode not in ("primary", "role")
+                or private[primary].participant_id == "*"):
+            raise HostControlError("host_mappings_conflict", "window links need private targets and a valid mode")
+        kept = []
+        for alias in aliases:
+            if (type(alias) is not str or alias not in private or alias == primary
+                    or private[alias].participant_id == "*" or alias in claimed or alias in kept):
+                raise HostControlError("host_mappings_conflict", "a private window can only be merged once")
+            kept.append(alias)
+            claimed.add(alias)
+        links.append(WindowLink(primary, tuple(kept), mode))
+    return tuple(sorted(links, key=lambda item: item.primary_target_id))
+
+
 @dataclass(frozen=True)
 class MultiHostSettings:
     enabled: bool
@@ -77,12 +119,24 @@ class MultiHostSettings:
     common: HostSettings
     group_targets: tuple[GroupTarget, ...] = ()
     group_delivery_mode: str = "onebot_group"
+    window_links: tuple[WindowLink, ...] = ()
     _legacy_group_delivery_shape: bool = field(default=False, compare=False, repr=False)
     _storage_installation_id: str | None = field(default=None, compare=False, repr=False)
 
     @property
     def all_targets(self):
         return self.targets + self.group_targets
+
+    @property
+    def alias_target_ids(self):
+        return frozenset(alias for link in self.window_links for alias in link.alias_target_ids)
+
+    @property
+    def primary_targets(self):
+        """Private windows that may own proactive work and core binding."""
+        aliases = {alias for link in self.window_links if link.mode == "primary"
+                   for alias in link.alias_target_ids}
+        return tuple(target for target in self.targets if target.target_id not in aliases)
 
     @property
     def installation_id(self):
@@ -240,10 +294,12 @@ class MultiHostSettings:
                 or len(set(capabilities)) != len(capabilities)
                 or not REQUIRED_CAPABILITIES.issubset(capabilities) or not set(capabilities).issubset(ALLOWED_CAPABILITIES)):
             raise HostControlError("host_capabilities_invalid", "configure registered non-core capabilities including reply prerequisites")
+        window_links = _parse_window_links(section.get("window_links"), targets)
         personas = _shared_persona_roles(tuple(personas))
         return cls(enabled, key, tuple(sorted(targets, key=lambda t: t.target_id)),
                    tuple(sorted(personas, key=lambda p: (p.bot_id, p.persona_id))), account_bindings, tuple(sorted(capabilities)),
-                   common, groups, "onebot_group", legacy_group_delivery_shape or raw_group_mode == "preview")
+                   common, groups, "onebot_group", window_links,
+                   legacy_group_delivery_shape or raw_group_mode == "preview")
 
     def require_ready(self):
         if not self.enabled:
@@ -256,6 +312,16 @@ class MultiHostSettings:
         if found is None:
             raise HostControlError("host_target_unavailable", "the conversation target is not configured")
         return found
+
+    def window_link_for_target(self, target_id):
+        return next((link for link in self.window_links if target_id in link.alias_target_ids), None)
+
+    def window_links_for_primary(self, target_id):
+        return tuple(link for link in self.window_links if link.primary_target_id == target_id)
+
+    def effective_private_target(self, target):
+        link = self.window_link_for_target(target.target_id)
+        return self.target(link.primary_target_id) if link is not None and link.mode == "primary" else target
 
     def private_target(self, platform_id, account_id, participant_id):
         exact = next((item for item in self.targets if item.route_key ==

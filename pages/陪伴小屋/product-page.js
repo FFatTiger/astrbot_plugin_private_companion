@@ -1064,6 +1064,7 @@ window.CompanionProduct = (() => {
       if(context.kind==="host") {
         const allowed=(method==="GET"&&path==="host/status")
           || (method==="POST"&&path==="host/start") || path==="accounts"
+          || (method==="POST"&&path==="accounts/model-provider")
           || (method==="GET"&&path==="acquaintance"&&typeof catalog?.acquaintance_api==="string");
         if(!allowed)throw fail("invalid_response");
         mapped=path==="acquaintance"?relative(catalog.acquaintance_api):path;

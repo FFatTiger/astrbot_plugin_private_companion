@@ -446,3 +446,24 @@ dialog::backdrop { animation: fade .3s both; }
 .role-binding-identity strong { color: var(--ink); font-size: 13px; }
 .role-binding-identity input { box-sizing: border-box; width: 100%; }
 .role-binding-identity small { color: var(--muted); font-size: 10px; }
+
+
+/* 首次启动的共享模型选择：账号与会话负责启动，模型与连接页负责启动后的任务路由。 */
+.shared-model-panel { display: grid; gap: 12px; }
+.shared-model-panel .panel-heading { margin-bottom: 0; }
+.shared-model-intro { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.shared-model-controls { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 10px; }
+.shared-model-select { display: flex; flex: 1 1 280px; min-width: 0; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; }
+.shared-model-select select { width: 100%; min-height: 38px; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; }
+.shared-model-select select:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
+.shared-model-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.75; }
+.shared-model-note[data-kind="error"] { color: var(--danger, #b13b3b); }
+.session-window-link { display: grid; gap: 8px; margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-muted); }
+.session-window-link h4 { margin: 0; font-size: 13px; }
+.session-window-link-help { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.session-window-link-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.session-window-link-controls label { display: grid; gap: 4px; min-width: 0; color: var(--muted); font-size: 11px; }
+.session-window-link-controls select { width: 100%; min-width: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; }
+.session-window-link-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.session-window-link-state { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+@media (max-width: 720px) { .session-window-link-controls { grid-template-columns: 1fr; } }

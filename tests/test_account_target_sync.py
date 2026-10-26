@@ -175,3 +175,54 @@ class AccountTargetSyncTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SharedModelProviderBootstrapTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        class FakeProvider:
+            def meta(self):
+                return NS(id="provider-a", name="Shared model")
+
+        self.provider = FakeProvider()
+        self.config = group_config()
+        self.config.setdefault("model", {})["provider_id"] = ""
+        self.controller = NS(
+            config=self.config,
+            context=NS(get_all_providers=lambda: [self.provider],
+                       get_provider_by_id=lambda provider_id: self.provider if provider_id == "provider-a" else None),
+            native_types=NS(provider=FakeProvider),
+            settings_error=None,
+            save_plugin_config=self.save_config,
+            refresh_settings=lambda: None,
+            initialize_profile=AsyncMock(return_value=NS(failure=None)),
+            status=lambda: {"state": "uninitialized"},
+        )
+        self.api = AccountSessionWebAPI(self.controller)
+
+    def save_config(self, candidate):
+        self.config.clear()
+        self.config.update(candidate)
+
+    async def call(self, **body):
+        request = NS(username="admin", query={},
+            body=AsyncMock(return_value=json.dumps(body, ensure_ascii=False).encode("utf-8")))
+        with patch("astrbot_host.account_session_api.request", request):
+            return await self.api.save_model_provider()
+
+    async def test_shared_provider_can_be_selected_before_role_runtime_exists(self):
+        result = await self.call(provider_id="provider-a")
+        self.assertEqual(result["status"], "ok", result)
+        self.assertEqual(self.config["model"]["provider_id"], "provider-a")
+        self.assertTrue(result["data"]["saved"])
+        self.assertTrue(result["data"]["prepared"])
+        self.assertEqual(result["data"]["model"]["provider_id"], "provider-a")
+        self.assertIn({"id": "provider-a", "name": "Shared model"}, result["data"]["model"]["providers"])
+        self.controller.initialize_profile.assert_awaited_once()
+
+    async def test_unknown_shared_provider_is_rejected_without_overwriting_config(self):
+        before = deepcopy(self.config)
+        result = await self.call(provider_id="missing-provider")
+        self.assertEqual(result["status"], "error", result)
+        self.assertEqual(result["data"]["code"], "host_provider_unavailable")
+        self.assertEqual(self.config, before)
+        self.controller.initialize_profile.assert_not_awaited()

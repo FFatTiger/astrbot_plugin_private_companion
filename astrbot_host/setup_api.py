@@ -392,7 +392,11 @@ class SetupWebAPI:
                                     "bot_id": account["bot_id"], "persona_id": persona_id,
                                     "role_id": mapping["role_id"] if mapping else derive_role_id(account["account_id"], persona_id),
                                     "label": persona_id, "mapped": mapping is not None})
-            directory = await self.controller.session_topology.inventory_report()
+            # When the shared host is assembled, use its normalized settings so
+            # a persona that is shared by several Bot accounts reports the same
+            # canonical role id that the role editor and runtime use.
+            inventory_settings = getattr(self.controller, "settings", None)
+            directory = await self.controller.session_topology.inventory_report(settings=inventory_settings)
             targets = directory["targets"]
             # The setup page runs before the first runtime profile exists, so
             # page/targets cannot supply migration routes yet. The setup catalog

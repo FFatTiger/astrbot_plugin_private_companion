@@ -7,7 +7,7 @@
   <title>账号与会话 · Companion V2</title>
   <link rel="stylesheet" href="style.css">
   <script src="../../embedded-bridge.js" defer></script>
-  <script src="app.js?v=topology-viewport-20261024" defer></script>
+  <script src="app.js?v=shared-model-bootstrap-20261026" defer></script>
 </head>
 <body>
   <main class="shell">
@@ -23,6 +23,17 @@
         <div><dt>是否接收消息</dt><dd id="accepting">—</dd></div>
       </dl>
       <p id="safety-note" class="safety-note" hidden></p>
+    </section>
+
+    <section class="status-panel shared-model-panel" id="shared-model-panel" aria-labelledby="shared-model-heading">
+      <div class="panel-heading">
+        <div><h2 id="shared-model-heading">共享启动模型</h2><p class="shared-model-intro">先选择插件准备启动时使用的 AstrBot 文本模型。启动后可在「模型与连接」中细调各任务路由。</p></div>
+      </div>
+      <div class="shared-model-controls">
+        <label class="shared-model-select"><span>插件启动模型</span><select id="shared-model-provider" aria-label="插件启动共享模型"></select></label>
+        <button id="save-shared-model" class="button button-primary" type="button" disabled>保存共享模型</button>
+      </div>
+      <p id="shared-model-note" class="shared-model-note" role="status" aria-live="polite">正在读取已加载的模型连接…</p>
     </section>
 
     <section class="topology-panel" aria-labelledby="topology-heading">
@@ -101,6 +112,16 @@
         <p id="session-manager-meta" class="session-manager-meta"></p>
         <div id="session-manager-related" class="session-manager-related"></div>
         <button id="topology-pin-session" class="button button-quiet topology-pin-session" type="button" aria-pressed="false" hidden>置顶窗口</button>
+        <section id="session-window-link" class="session-window-link" aria-labelledby="session-window-link-heading" hidden>
+          <h4 id="session-window-link-heading">用户窗口合并</h4>
+          <p class="session-window-link-help">同一用户在不同平台或 Bot 下的窗口可以手动合并。只共享角色会保留各自窗口；主窗口接管会把回复和主动联系统一到当前窗口。</p>
+          <div class="session-window-link-controls">
+            <label><span>合并方式</span><select id="window-link-mode"><option value="role">只共享角色（保留各自窗口）</option><option value="primary">主窗口接管（回复统一到当前窗口）</option></select></label>
+            <label><span>要合并的窗口</span><select id="window-link-aliases" multiple size="4"></select></label>
+          </div>
+          <div class="session-window-link-actions"><button id="window-link-save" class="button button-primary" type="button">合并到当前窗口</button><button id="window-link-unlink" class="button button-quiet" type="button" hidden>解除合并</button></div>
+          <p id="window-link-state" class="session-window-link-state" role="status"></p>
+        </section>
         <section id="session-group-network" class="session-group-network" aria-labelledby="session-group-network-heading" hidden>
           <div class="group-network-heading"><h4 id="session-group-network-heading">群成员与关系网</h4><span id="session-group-network-counts"></span></div>
           <p id="session-group-network-state" class="group-network-state" role="status"></p>

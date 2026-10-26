@@ -35,7 +35,7 @@ window.CompanionModelsPage = (() => {
     model_provider_unavailable: "所选 AstrBot 模型未加载或暂不可用于 V2。", model_capability_mismatch: "所选模型提供方不支持这项任务。", model_output_limit: "输出上限超过所选模型提供方能力。",
     model_catalog_unavailable: "无法读取已加载的 AstrBot 文本模型提供方。",
     model_fallback_duplicate: "备用模型提供方必须与主模型提供方不同。", core_access_required: "当前账号没有管理权限。", dashboard_identity_required: "请从已登录的 AstrBot 管理界面打开小屋。",
-    staging_not_initialized: "角色数据尚未就绪，请在「账号与会话」保存角色映射；已保存可重新读取状态。", staging_host_terminated: "插件已停止，请重新打开插件。", bridge_timeout: "连接超时，请核对原保存结果。",
+    staging_not_initialized: "角色数据尚未就绪。请先在「账号与会话」选择共享启动模型并完成准备启动，再回来配置各任务路由。", staging_host_terminated: "插件已停止，请重新打开插件。", bridge_timeout: "连接超时，请核对原保存结果。",
     model_route_invalid: "替换规则未通过校验：请检查规则默认模型提供方、匹配方式与时段。",
     model_refused: "所选模型提供方拒绝了这次请求。",
     model_probe_timeout: "测试超时，结果未知。", model_probe_failed: "模型提供方未返回可确认结果。",

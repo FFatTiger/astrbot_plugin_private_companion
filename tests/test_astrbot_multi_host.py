@@ -98,6 +98,20 @@ class MultiSettingsTests(unittest.TestCase):
         ]}
         self.assertEqual(MultiAuthority._binding_differences(pinned, current), ())
 
+    def test_window_links_reference_existing_private_windows_and_one_mode(self):
+        config = multi_config()
+        config["multi_host"]["window_links"] = [
+            {"primary_target_id": "first", "alias_target_ids": ["second"], "mode": "role"},
+        ]
+        parsed = MultiHostSettings.parse(config)
+        self.assertEqual(parsed.window_links[0].alias_target_ids, ("second",))
+        self.assertEqual(parsed.window_links[0].mode, "role")
+        self.assertEqual(parsed.window_link_for_target("second").primary_target_id, "first")
+        bad = deepcopy(config)
+        bad["multi_host"]["window_links"][0]["alias_target_ids"] = ["first"]
+        with self.assertRaises(ValueError):
+            MultiHostSettings.parse(bad)
+
 
 class NativePersonaSelectionTests(unittest.IsolatedAsyncioTestCase):
     async def test_group_window_ignores_the_private_conversation_default(self):
@@ -162,6 +176,54 @@ class LegacyStagingReceiptTests(unittest.TestCase):
 
 
 class MultiHostTests(MultiFixture, unittest.IsolatedAsyncioTestCase):
+    async def test_primary_window_link_moves_alias_capture_to_the_primary_window(self):
+        config = multi_config()
+        config["multi_host"]["window_links"] = [
+            {"primary_target_id": "first", "alias_target_ids": ["second"], "mode": "primary"},
+        ]
+        self.controller = self.make_controller(config)
+        await self.start_host()
+        captured = (await self.controller.session.bridge.capture(self.event("second"))).unwrap()
+        self.assertEqual(captured.principal.account_id, "100")
+        self.assertEqual(captured.route.scope.account_id, "100")
+        self.assertEqual(captured.route.scope.native_scope_id, "200")
+        accepted = await self.controller.receive_claimed(self.event("second"))
+        self.assertTrue(accepted.is_success, accepted.failure)
+
+    async def test_role_window_link_keeps_alias_scope_but_shares_primary_role(self):
+        config = multi_config()
+        config["multi_host"]["personas"] = [
+            {"bot_id": "bot-a", "persona_id": "original", "role_id": "星缘"},
+            {"bot_id": "bot-a", "persona_id": "second", "role_id": "小星"},
+            {"bot_id": "bot-b", "persona_id": "original", "role_id": "小星"},
+            {"bot_id": "bot-b", "persona_id": "second", "role_id": "小星"},
+        ]
+        config["multi_host"]["window_links"] = [
+            {"primary_target_id": "first", "alias_target_ids": ["second"], "mode": "role"},
+        ]
+        self.controller = self.make_controller(config)
+        await self.start_host()
+        captured = (await self.controller.session.bridge.capture(self.event("second"))).unwrap()
+        self.assertEqual(captured.route.scope.account_id, "101")
+        self.assertEqual(captured.role.subject_id, "星缘")
+        accepted = await self.controller.receive_claimed(self.event("second"))
+        self.assertTrue(accepted.is_success, accepted.failure)
+
+    async def test_window_link_api_saves_primary_mode(self):
+        from astrbot_host.account_session_api import AccountSessionWebAPI
+        from types import SimpleNamespace as NS
+
+        api = AccountSessionWebAPI(self.controller)
+        body = json.dumps({"primary_target_id": "first", "alias_target_ids": ["second"],
+                           "mode": "primary"}).encode("utf-8")
+        fake_request = NS(username="admin", query={}, body=AsyncMock(return_value=body))
+        with patch("astrbot_host.account_session_api.request", fake_request), \
+                patch.object(self.controller, "apply_bindings", AsyncMock(return_value={"started": False})) as apply:
+            response = await api.link_window()
+        self.assertEqual(response["status"], "ok")
+        candidate = apply.await_args.args[0]
+        self.assertEqual(candidate["multi_host"]["window_links"][0]["alias_target_ids"], ["second"])
+
     async def test_reviewed_bindings_detect_conflict_before_stopping_the_running_host(self):
         await self.start_host()
         expected = deepcopy(self.controller.config)

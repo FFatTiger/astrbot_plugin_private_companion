@@ -441,19 +441,19 @@ test("display labels preserve names while internal role and executor keys stay o
 test("the account workspace relays account discovery, mappings, relationship discoveries and startup", async () => {
   const h = await harness();
   h.product.mountWorkspace();
-  for (const [method, endpoint] of [["GET", "accounts"], ["POST", "accounts"], ["POST", "host/start"]]) {
+  for (const [method, endpoint] of [["GET", "accounts"], ["POST", "accounts"], ["POST", "accounts/model-provider"], ["POST", "host/start"]]) {
     await h.request(h.host, method, endpoint);
     assert.equal(h.host.messages.at(-1).ok, true);
   }
   await h.request(h.host, "GET", "acquaintance");
   assert.equal(h.host.messages.at(-1).ok, true);
   assert.deepEqual(h.calls.map(call => `${call.method} ${call.endpoint}`),
-    ["GET accounts", "POST accounts", "POST host/start", "GET acquaintance"]);
+    ["GET accounts", "POST accounts", "POST accounts/model-provider", "POST host/start", "GET acquaintance"]);
   await h.request(h.host, "GET", "accounts/session");
   await h.request(h.host, "POST", "accounts/session/extra");
   await h.request(h.host, "POST", "acquaintance");
   await h.request(h.host, "GET", "acquaintance/authorization");
-  assert.equal(h.calls.length, 4);
+  assert.equal(h.calls.length, 5);
   assert.equal(h.host.messages.at(-1).ok, false);
 });
 
@@ -467,12 +467,12 @@ test("an uninitialized directory leaves role mapping available for automatic pre
   }
   h.product.mountWorkspace();
   assert.equal(h.host.srcdoc, "<p>host</p>");
-  for (const [method, endpoint] of [["GET", "accounts"], ["POST", "accounts"], ["GET", "host/status"]]) {
+  for (const [method, endpoint] of [["GET", "accounts"], ["POST", "accounts"], ["POST", "accounts/model-provider"], ["GET", "host/status"]]) {
     await h.request(h.host, method, endpoint);
     assert.equal(h.host.messages.at(-1).ok, true);
   }
   assert.deepEqual(h.calls.map(call => `${call.method} ${call.endpoint}`),
-    ["GET accounts", "POST accounts", "GET host/status"]);
+    ["GET accounts", "POST accounts", "POST accounts/model-provider", "GET host/status"]);
 });
 
 test("directory failures keep the cottage title and a recovered single role has no selector", async () => {

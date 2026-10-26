@@ -1,6 +1,8 @@
 "use strict";
 (() => {
   const $ = (id) => document.getElementById(id);
+  const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g,
+    character => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[character]));
   const candidates = [
     { mode: "multi", prefix: "host" },
   ];
@@ -50,7 +52,7 @@
     host_mappings_required: "请先绑定至少一个 Bot 账号与人格。",
     host_group_delivery_invalid: "群聊发送设置无效，请检查插件的群聊设置。",
     host_capabilities_invalid: "角色能力设置无效，请检查插件的能力配置。",
-    host_provider_required: "请先选择可用的模型连接。",
+    host_provider_required: "请先在本页保存共享启动模型。",
     host_provider_changed: "模型连接在准备期间发生变化，请刷新状态后重试。",
     host_target_unavailable: "目标窗口不在当前配置中，请刷新并核对角色映射。",
     host_terminated: "插件正在停止或已停止，请重新加载插件后重试。",
@@ -58,13 +60,14 @@
     account_config_running: "角色映射正在应用，请稍候再读取状态。",
     account_config_invalid: "绑定配置不完整或会话来源已变化，请重新核对。",
     account_config_save_failed: "保存失败，请检查插件数据目录是否可写后重试。",
+    account_model_provider_failed: "共享启动模型保存失败，请刷新状态并检查插件配置后重试。",
     account_session_unavailable: "这个会话已切换或不在当前目录中，请刷新。",
     account_session_persona_pinned: "AstrBot 已固定此会话人格，请在角色映射中调整。",
     account_session_persona_unmapped: "这个人格尚未绑定到当前 Bot，请先添加人格绑定。",
     account_core_window_required: "已确认的核心管理员窗口需要保留。",
     host_must_stop: "当前任务仍在收尾，请稍后保存映射。",
     setup_targets_unavailable: "会话目录暂时不可读取。",
-    host_provider_unavailable: "所选模型连接暂不支持此操作。",
+    host_provider_unavailable: "所选共享启动模型当前不可用，请重新选择。",
     host_control_failed: "角色运行环境准备失败，请查看 AstrBot 日志中的 CompanionV2 异常详情。",
     host_module_unavailable: "插件模块加载失败，请重新加载 V2 插件；若仍失败，请检查安装包并查看 AstrBot 日志。",
     host_native_lookup_timeout: "AstrBot 读取原生状态超时，请刷新状态后重试。",
@@ -134,6 +137,8 @@
   let topologySessionPage = 0;
   let topologySessionFilter = "all";
   let bindingConfig = null;
+  let modelConfig = null;
+  let modelSaving = false;
   let bindingsDirty = false;
   let groupTargetsDirty = false;
   let groupTargetDraft = null;
@@ -738,6 +743,87 @@
     paintTopologySelection();
   }
 
+  let windowLinkTargetId = "";
+  function windowLinkFor(targetId) {
+    return (bindingConfig?.window_links || []).find(link =>
+      link.primary_target_id === targetId || (link.alias_target_ids || []).includes(targetId)) || null;
+  }
+  function renderWindowLink(item) {
+    const panel = $("session-window-link");
+    if (!panel) return;
+    const isPrivate = item.kind === "session" && item.scopeKind === "private";
+    panel.hidden = !isPrivate;
+    if (!isPrivate) { windowLinkTargetId = ""; return; }
+    const targetId = String(item.targetId || "");
+    windowLinkTargetId = targetId;
+    const link = windowLinkFor(targetId);
+    const primaryMode = link?.mode === "primary";
+    const select = $("window-link-aliases");
+    const mode = $("window-link-mode");
+    const save = $("window-link-save");
+    const unlink = $("window-link-unlink");
+    const state = $("window-link-state");
+    const aliases = (topologySnapshot?.sessions || []).filter(row => row.scopeKind === "private"
+      && String(row.targetId || "") !== targetId
+      && !((bindingConfig?.window_links || []).some(other => other.primary_target_id !== targetId
+        && (other.alias_target_ids || []).includes(row.targetId))));
+    select.replaceChildren(...aliases.map(row => {
+      const option = document.createElement("option");
+      option.value = row.targetId;
+      option.textContent = row.label;
+      return option;
+    }));
+    save.disabled = !aliases.length || busy;
+    if (link) {
+      const primary = topologySnapshot?.sessions.find(row => row.targetId === link.primary_target_id);
+      const names = (link.alias_target_ids || []).map(alias =>
+        topologySnapshot?.sessions.find(row => row.targetId === alias)?.label || alias);
+      if (link.primary_target_id === targetId) {
+        state.textContent = `当前窗口是主窗口，已合并 ${names.length} 个窗口：${names.join("、") || "—"}。${primaryMode ? "回复统一到当前窗口。" : "只共享角色，回复仍回各自窗口。"}`;
+        unlink.hidden = false;
+      } else {
+        state.textContent = `当前窗口已合并到「${primary?.label || link.primary_target_id}」， ${primaryMode ? "消息由主窗口统一回复。" : "角色和记忆共享，回复仍在当前窗口。"}`;
+        unlink.hidden = false;
+      }
+    } else {
+      state.textContent = aliases.length ? "选择要合并的窗口和合并方式。" : "没有其他可合并的私聊窗口。";
+      unlink.hidden = true;
+    }
+    mode.disabled = Boolean(link && link.primary_target_id !== targetId);
+    select.disabled = Boolean(link && link.primary_target_id !== targetId);
+    save.hidden = Boolean(link && link.primary_target_id !== targetId);
+    unlink.dataset.primaryTargetId = link?.primary_target_id || "";
+  }
+  async function saveWindowLink() {
+    if (busy || !windowLinkTargetId) return;
+    const aliases = [...($("window-link-aliases")?.selectedOptions || [])].map(option => option.value);
+    const mode = $("window-link-mode")?.value || "role";
+    if (!aliases.length) { notice("请选择至少一个要合并的窗口。", "error"); return; }
+    setBusy(true);
+    try {
+      await api("POST", `${accountApi}/window-link`, {primary_target_id: windowLinkTargetId,
+        alias_target_ids: aliases, mode}, 60000);
+      await readBindingConfig();
+      try { await readStatus(); } catch { /* configuration is already saved */ }
+      notice(mode === "primary" ? "窗口已合并，回复和主动联系将由主窗口接管。" : "窗口已合并，只共享角色与记忆。", "success");
+    } catch (error) {
+      notice(`窗口合并未完成：${publicError(error)}`, "error");
+    } finally { setBusy(false); renderTopology(); }
+  }
+  async function unlinkWindow() {
+    const primary = $("window-link-unlink")?.dataset.primaryTargetId;
+    if (busy || !primary) return;
+    setBusy(true);
+    try {
+      await api("POST", `${accountApi}/window-unlink`, {primary_target_id: primary}, 60000);
+      await readBindingConfig();
+      try { await readStatus(); } catch { /* configuration is already saved */ }
+      notice("窗口合并已解除。", "success");
+    } catch (error) {
+      notice(`解除合并未完成：${publicError(error)}`, "error");
+    } finally { setBusy(false); renderTopology(); }
+  }
+
   function renderSessionManager() {
     const panel = $("session-manager");
     const item = topologyItems(topologySnapshot || {accounts: [], roles: [], personas: [], sessions: []})
@@ -752,6 +838,7 @@
     pinButton.textContent = isPinned ? "取消置顶" : "置顶窗口";
     pinButton.setAttribute("aria-pressed", String(isPinned));
     pinButton.disabled = busy;
+    renderWindowLink(item);
     const related = $("session-manager-related");
     related.replaceChildren();
     renderGroupNetwork(item.kind === "session" ? item.raw : null);
@@ -1133,6 +1220,76 @@
   function hasSavedRoleMappings() {
     return (status?.targets || []).some(target => Array.isArray(target?.roles) && target.roles.length > 0);
   }
+  function modelProviderName(providerId) {
+    const config = modelConfig || {};
+    return config.providers?.find(item => item.id === providerId)?.name || providerId || "未选择";
+  }
+  function renderSharedModel() {
+    const select = $("shared-model-provider"), save = $("save-shared-model"), note = $("shared-model-note");
+    if (!select || !save || !note) return;
+    if (!modelConfig) {
+      select.innerHTML = `<option value="">正在读取模型连接…</option>`;
+      select.disabled = true; save.disabled = true;
+      note.textContent = "正在读取已加载的模型连接…";
+      note.dataset.kind = "info";
+      return;
+    }
+    const providers = Array.isArray(modelConfig?.providers) ? modelConfig.providers : [];
+    const current = String(modelConfig?.provider_id || "");
+    const previous = select.value;
+    select.innerHTML = `<option value="">请选择已加载的文本模型</option>${providers.map(provider =>
+      `<option value="${escapeHTML(provider.id)}">${escapeHTML(provider.name || provider.id)}（${escapeHTML(provider.id)}）</option>`).join("")}`;
+    const desired = providers.some(item => item.id === previous) ? previous
+      : providers.some(item => item.id === current) ? current : "";
+    select.value = desired;
+    select.disabled = busy || modelSaving || !providers.length;
+    save.disabled = busy || modelSaving || !providers.length || !select.value;
+    if (!providers.length) {
+      note.textContent = "AstrBot 没有读取到已加载的文本模型。请先在 AstrBot 模型配置中添加并启用一个 Provider。";
+      note.dataset.kind = "error";
+    } else if (!current) {
+      note.textContent = "尚未选择插件启动模型。先在这里保存，角色映射才能准备启动；启动后再到「模型与连接」细调任务路由。";
+      note.dataset.kind = "info";
+    } else if (!providers.some(item => item.id === current)) {
+      note.textContent = `已保存的启动模型 ${current} 当前不可用，请重新选择。`;
+      note.dataset.kind = "error";
+    } else {
+      note.textContent = `当前启动模型：${modelProviderName(current)}。保存角色映射后即可点「准备并启动」。`;
+      note.dataset.kind = "info";
+    }
+  }
+  async function saveSharedModel() {
+    if (busy || modelSaving) return;
+    const select = $("shared-model-provider"), button = $("save-shared-model");
+    const providerId = String(select?.value || "");
+    if (!providerId) { notice("请先选择一个已加载的文本模型。", "error"); return; }
+    modelSaving = true;
+    setLoading(button, true);
+    setBusy(true);
+    notice("正在保存共享模型连接…", "info");
+    try {
+      const result = await api("POST", `${accountApi}/model-provider`, {provider_id: providerId}, 60000);
+      if (result?.model) modelConfig = result.model;
+      let refreshed = true;
+      try { await readStatus(); } catch { refreshed = false; }
+      if (!refreshed) {
+        notice("共享模型已保存；运行状态暂未读到，请点「刷新状态」核对后再准备启动。", "info");
+      } else if (result?.prepared) {
+        notice("共享模型已保存，角色运行环境已准备。现在可以点「准备并启动」。", "success");
+      } else if (result?.initialization_error) {
+        notice(`共享模型已保存；角色运行环境尚未就绪：${failureMessage(result.initialization_error)}。请先完成角色映射，再点「准备并启动」。`, "info");
+      } else {
+        notice("共享模型已保存。请点「准备并启动」完成角色准备。", "success");
+      }
+    } catch (error) {
+      notice(`共享模型保存未完成：${publicError(error)}`, "error");
+    } finally {
+      modelSaving = false;
+      setBusy(false);
+      setLoading(button, false);
+      renderSharedModel();
+    }
+  }
   function isAccepting() { return Boolean(status?.accepting); }
   function isEnabled() {
     if (!status || !host) return false;
@@ -1328,6 +1485,7 @@
   function renderBindingEditor(data) {
     if (!data) return;
     bindingConfig = data;
+    if (data.model) modelConfig = data.model;
     const discovered = data.discovered || {}, accounts = discovered.accounts || data.accounts || [];
     const accountByKey = new Map(accounts.map(x => [`${x.platform_id}|${x.account_id}|${x.bot_id}`, x]));
     bindingConfig._accountByKey = accountByKey;
@@ -1349,6 +1507,7 @@
     updateBindingCheck();
     renderGroupTargets();
     renderTopology();
+    renderSharedModel();
   }
 
   const groupRouteKey = row => JSON.stringify([row.platform_id || "", row.account_id || "",
@@ -1565,7 +1724,7 @@
       if (result.startup_error) {
         const modelPending = ["host_provider_required", "host_provider_unavailable"].includes(result.startup_error);
         const message = modelPending
-          ? "请到「模型与连接」选择当前可用的模型连接，再点「准备并启动」；角色映射已经保存。"
+          ? "角色映射已经保存。请在本页上方「共享启动模型」选择一个已加载的文本模型并保存，再点「准备并启动」。"
           : `运行未启动：${failureMessage(result.startup_error)}`;
         notice(`角色映射已保存。${message}`, modelPending ? "info" : "error");
         return;
@@ -1603,11 +1762,14 @@
   }
   function updateControls() {
     $("refresh").disabled = busy;
+    const hasProvider = typeof modelConfig !== "undefined" && Boolean(modelConfig?.provider_id);
     const start = $("start-host");
     if (start) {
       start.hidden = !isEnabled() || isAccepting();
-      start.disabled = busy || start.hidden;
+      start.disabled = busy || start.hidden || !hasProvider;
+      start.title = hasProvider ? "" : "请先保存共享启动模型";
     }
+    if (typeof renderSharedModel === "function") renderSharedModel();
   }
   async function startHost() {
     if (busy || !host || !isEnabled() || isAccepting()) return;
@@ -1704,6 +1866,8 @@
     finally { setBusy(false); setLoading($("refresh"), false); }
   });
   $("start-host")?.addEventListener("click", startHost);
+  $("shared-model-provider")?.addEventListener("change", renderSharedModel);
+  $("save-shared-model")?.addEventListener("click", saveSharedModel);
   $("topology-session-prev").addEventListener("click", () => changeTopologySessionPage(-1));
   $("topology-session-next").addEventListener("click", () => changeTopologySessionPage(1));
   $("topology-session-filters").addEventListener("click", event => {
@@ -1722,6 +1886,8 @@
     scheduleTopologyLinks();
   });
   $("topology-pin-session").addEventListener("click", toggleTopologyPin);
+  $("window-link-save")?.addEventListener("click", saveWindowLink);
+  $("window-link-unlink")?.addEventListener("click", unlinkWindow);
   $("close-session-manager").addEventListener("click", () => { topologySelection = null; paintTopologySelection(); });
   $("hide-unlinked-personas")?.addEventListener("change", () => {
     refreshPersonaVisibility();

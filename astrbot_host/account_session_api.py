@@ -28,8 +28,14 @@ class AccountSessionWebAPI:
     def routes(self):
         return [(PREFIX, self.get, ["GET"], "Read account bindings and native session topology"),
                 (PREFIX, self.save, ["POST"], "Apply reviewed account and group bindings"),
+                (PREFIX + "/model-provider", self.save_model_provider, ["POST"],
+                 "Choose the shared model provider used to initialize the V2 host"),
                 (PREFIX + "/role", self.add_role, ["POST"],
                  "Create a companion role for one connected Bot and selected native personas"),
+                (PREFIX + "/window-link", self.link_window, ["POST"],
+                 "Merge private windows into a primary window or share their role"),
+                (PREFIX + "/window-unlink", self.unlink_window, ["POST"],
+                 "Remove one private-window merge"),
                 (PREFIX + "/group-target", self.save_group_target, ["POST"],
                  "Enable or disable one discovered group target"),
                 (PREFIX + "/session", self.save_session, ["POST"], "Manage a discovered native session")]
@@ -41,6 +47,46 @@ class AccountSessionWebAPI:
             raise TaskError("dashboard_identity_required", "sign in to the AstrBot Dashboard as an administrator")
         if request.query:
             raise TaskError("account_config_invalid", "query fields are not allowed")
+
+    def _model_providers(self):
+        """Return loaded AstrBot providers that can start the V2 host.
+
+        Account/session setup must not depend on the role-scoped model page:
+        that page intentionally appears only after a runtime exists.  This
+        small read-only catalog is the bootstrap surface for first startup.
+        """
+        context = getattr(self.controller, "context", None)
+        expected_type = getattr(getattr(self.controller, "native_types", None), "provider", None)
+        if context is None or expected_type is None:
+            return []
+        found = []
+        try:
+            inventory = list(context.get_all_providers() or [])
+        except Exception:
+            return []
+        for provider in inventory:
+            try:
+                if not isinstance(provider, expected_type):
+                    continue
+                meta = provider.meta() if callable(getattr(provider, "meta", None)) else None
+                identifier = str(getattr(meta, "id", "") or getattr(provider, "id", "") or "").strip()
+                if not identifier:
+                    continue
+                name = str(getattr(meta, "name", "") or getattr(provider, "name", "") or identifier).strip()
+                found.append({"id": identifier, "name": (name or identifier)[:120]})
+            except (AttributeError, TypeError, ValueError):
+                continue
+        return sorted({item["id"]: item for item in found}.values(),
+                      key=lambda item: (item["name"].lower(), item["id"]))
+
+    def _configured_provider_id(self):
+        config = getattr(self.controller, "config", {})
+        section = config.get("model", {}) if isinstance(config, dict) else {}
+        return str(section.get("provider_id", "")) if isinstance(section, dict) else ""
+
+    def _model_view(self):
+        return {"provider_id": self._configured_provider_id(),
+                "providers": self._model_providers()}
 
     def _view(self):
         controller = self.controller
@@ -59,7 +105,9 @@ class AccountSessionWebAPI:
                     {name: row[name] for name in ("platform_id", "account_id", "bot_id")}
                     for row in [*section.get("accounts", []), *targets, *groups]}
         return {"mode": "multi", "enabled": enabled,
-                "accounts": list(accounts.values()), "personas": personas, "sessions": targets, "groups": groups}
+                "accounts": list(accounts.values()), "personas": personas, "sessions": targets, "groups": groups,
+                "window_links": deepcopy(section.get("window_links", [])),
+                "model": self._model_view()}
 
     async def _discovered(self):
         from .setup_api import SetupWebAPI
@@ -138,6 +186,87 @@ class AccountSessionWebAPI:
             return self._error("account_config_invalid", "the role could not be validated")
         except OSError:
             return self._error("account_config_save_failed", "the role could not be saved")
+
+    async def link_window(self):
+        """Merge selected private windows under one primary window."""
+        try:
+            self._admin()
+            body = await self._body()
+            if set(body) != {"primary_target_id", "alias_target_ids", "mode"}:
+                raise TaskError("account_config_invalid", "choose a primary window, at least one alias and a merge mode")
+            primary, aliases, mode = body["primary_target_id"], body["alias_target_ids"], body["mode"]
+            if (type(primary) is not str or not primary.strip() or type(aliases) is not list
+                    or not aliases or len(aliases) > 128 or mode not in ("role", "primary")):
+                raise TaskError("account_config_invalid", "choose a primary window, at least one alias and a merge mode")
+            aliases = sorted({str(item).strip() for item in aliases if type(item) is str and item.strip()})
+            if not aliases:
+                raise TaskError("account_config_invalid", "choose at least one alias window")
+            candidate = deepcopy(dict(self.controller.config))
+            section = candidate.setdefault("multi_host", {})
+            if mode == "role":
+                await self._share_window_roles(section, primary, aliases)
+            links = [row for row in section.get("window_links", []) if isinstance(row, dict)
+                     and row.get("primary_target_id") != primary
+                     and not (set(row.get("alias_target_ids") or []) & set(aliases))]
+            links.append({"primary_target_id": primary, "alias_target_ids": aliases, "mode": mode})
+            section["window_links"] = links
+            MultiHostSettings.parse(candidate)
+            result = await self.controller.apply_bindings(candidate)
+            return {"status": "ok", "data": {**result, "window_links": links}}
+        except (TaskError, HostControlError) as error:
+            return self._error(error.code, str(error))
+        except (ValueError, TypeError, KeyError):
+            return self._error("account_config_invalid", "the window merge could not be validated")
+
+    async def _share_window_roles(self, section, primary, aliases):
+        rows = {row.get("target_id"): row for row in await self.controller.session_topology.inventory()
+                if row.get("target_id")}
+        primary_row = rows.get(primary)
+        if primary_row is None or not primary_row.get("persona_id"):
+            raise TaskError("account_config_invalid", "the primary window has no resolved persona")
+        personas = [row for row in section.get("personas", []) if isinstance(row, dict)]
+        primary_bot = next((row.get("bot_id") for row in section.get("targets", [])
+                            if row.get("target_id") == primary), None)
+        primary_role = next((row.get("role_id") for row in personas
+                             if row.get("bot_id") == primary_bot
+                             and row.get("persona_id") == primary_row.get("persona_id")), None)
+        if not primary_role:
+            raise TaskError("account_config_invalid", "the primary window has no role mapping")
+        for alias in aliases:
+            alias_row = rows.get(alias)
+            alias_bot = next((row.get("bot_id") for row in section.get("targets", [])
+                              if row.get("target_id") == alias), None)
+            if alias_row is None or not alias_bot or not alias_row.get("persona_id"):
+                raise TaskError("account_config_invalid", "an alias window has no resolved persona")
+            mapping = next((row for row in personas
+                            if row.get("bot_id") == alias_bot
+                            and row.get("persona_id") == alias_row.get("persona_id")), None)
+            if mapping is None:
+                raise TaskError("account_config_invalid", "an alias window persona has no role mapping")
+            mapping["role_id"] = primary_role
+        section["personas"] = personas
+
+    async def unlink_window(self):
+        try:
+            self._admin()
+            body = await self._body()
+            if set(body) != {"primary_target_id"}:
+                raise TaskError("account_config_invalid", "choose the primary window to unmerge")
+            primary = body["primary_target_id"]
+            if type(primary) is not str or not primary.strip():
+                raise TaskError("account_config_invalid", "choose the primary window to unmerge")
+            candidate = deepcopy(dict(self.controller.config))
+            section = candidate.setdefault("multi_host", {})
+            links = [row for row in section.get("window_links", []) if isinstance(row, dict)
+                     and row.get("primary_target_id") != primary]
+            section["window_links"] = links
+            MultiHostSettings.parse(candidate)
+            result = await self.controller.apply_bindings(candidate)
+            return {"status": "ok", "data": {**result, "window_links": links}}
+        except (TaskError, HostControlError) as error:
+            return self._error(error.code, str(error))
+        except (ValueError, TypeError, KeyError):
+            return self._error("account_config_invalid", "the window merge could not be validated")
 
     @staticmethod
     def _error(code, reason):
@@ -280,6 +409,79 @@ class AccountSessionWebAPI:
             detail = " ".join(str(error).split())
             reason = f"{type(error).__name__}: {detail[:512]}" if detail else type(error).__name__
             return self._error("account_group_target_apply_failed", reason)
+
+    async def save_model_provider(self):
+        """Persist the bootstrap text provider without requiring a live role runtime."""
+        try:
+            self._admin()
+            body = await self._body()
+            if set(body) != {"provider_id"} or type(body.get("provider_id")) is not str:
+                raise TaskError("account_config_invalid", "choose exactly one shared model provider")
+            provider_id = body["provider_id"].strip()
+            if not provider_id or len(provider_id) > 512:
+                raise TaskError("account_config_invalid", "the shared model provider id is invalid")
+            available = {item["id"] for item in self._model_providers()}
+            expected_type = getattr(getattr(self.controller, "native_types", None), "provider", None)
+            provider = (self.controller.context.get_provider_by_id(provider_id)
+                        if getattr(self.controller, "context", None) is not None else None)
+            if (provider_id not in available or expected_type is None
+                    or not isinstance(provider, expected_type)):
+                raise TaskError("host_provider_unavailable",
+                                "choose a loaded AstrBot text provider supported by V2")
+            config = self.controller.config
+            if not isinstance(config, dict):
+                raise TaskError("account_config_persistence_unavailable",
+                                "the plugin configuration cannot be edited here")
+            save = getattr(self.controller, "save_plugin_config", None)
+            if not callable(save):
+                raise TaskError("account_config_persistence_unavailable",
+                                "restart the plugin with Dashboard configuration support")
+            candidate = deepcopy(dict(config))
+            model_settings = candidate.setdefault("model", {})
+            if type(model_settings) is not dict:
+                raise TaskError("account_config_invalid", "the plugin model settings have an invalid shape")
+            model_settings["provider_id"] = provider_id
+            profiles = model_settings.get("additional_providers")
+            if type(profiles) is list:
+                model_settings["additional_providers"] = [
+                    profile for profile in profiles
+                    if not isinstance(profile, dict) or profile.get("provider_id") != provider_id
+                ]
+            if model_settings.get("fallback_provider_id") == provider_id:
+                model_settings["fallback_provider_id"] = ""
+            save(candidate)
+            refresh = getattr(self.controller, "refresh_settings", None)
+            if callable(refresh):
+                refresh()
+            prepared = False
+            initialization_error = None
+            if getattr(self.controller, "settings_error", None) is None:
+                try:
+                    initialized = await self.controller.initialize_profile()
+                    failure = getattr(initialized, "failure", None)
+                    if failure is None:
+                        prepared = True
+                    else:
+                        initialization_error = getattr(failure, "code", "host_initialization_failed")
+                except Exception as error:
+                    initialization_error = getattr(error, "code", "host_initialization_failed")
+            return {"status": "ok", "data": {**self._view(), "saved": True,
+                "provider_id": provider_id, "prepared": prepared,
+                "initialization_error": initialization_error,
+                "status": self.controller.status()}}
+        except TaskError as error:
+            return self._error(error.code, str(error))
+        except HostControlError as error:
+            return self._error(error.code, str(error))
+        except (ValueError, TypeError, KeyError, UnicodeError):
+            return self._error("account_config_invalid", "the shared model provider could not be validated")
+        except OSError:
+            return self._error("account_config_save_failed", "the shared model provider could not be saved")
+        except Exception as error:
+            logger.exception("V2 shared model provider update failed")
+            detail = " ".join(str(error).split())
+            reason = f"{type(error).__name__}: {detail[:512]}" if detail else type(error).__name__
+            return self._error("account_model_provider_failed", reason)
 
     async def save(self):
         try:

@@ -260,11 +260,19 @@ class MultiAuthority:
             raise TaskError("host_target_unavailable", "the native conversation route is unavailable")
 
     def _scope(self, target, scope, role):
+        local_role = any(p.bot_id == target.bot_id and p.role_id == role.subject_id
+                         for p in self.settings.personas)
+        if not local_role:
+            link = self.settings.window_link_for_target(target.target_id)
+            if link is not None and link.mode == "role":
+                primary = self.settings.target(link.primary_target_id)
+                local_role = any(p.bot_id == primary.bot_id and p.role_id == role.subject_id
+                                 for p in self.settings.personas)
         if (scope.installation_id != self.runtime.installation_id or scope.kind.value != "private"
                 or (scope.platform, scope.account_id, scope.bot_id, scope.native_scope_id, scope.session_id)
                 != (target.platform_id, target.account_id, target.bot_id, target.participant_id, target.participant_id)
                 or role.installation_id != self.runtime.installation_id
-                or not any(p.bot_id == target.bot_id and p.role_id == role.subject_id for p in self.settings.personas)):
+                or not local_role):
             raise TaskError("host_target_mismatch", "scope and role must come from this configured private target")
 
     def provision_scope(self, target, scope, role):
@@ -280,6 +288,16 @@ class MultiAuthority:
             route = self.personas.register_route(ConversationRoute(scope, user=actor.subject), observed_at=self.now(),
                 adopt_exact_revision=exact["revision"] if exact is not None else None)
             identifier = self.binding_id(scope)
+            current_binding = self.personas.binding(identifier)
+            if current_binding is not None and current_binding.role != role:
+                link = self.settings.window_link_for_target(target.target_id)
+                configurable = (current_binding.source == "astrbot-multi-host"
+                                and current_binding.authority == "configured-private-target")
+                if (link is not None and link.mode == "role") or configurable:
+                    self.personas.set_binding(replace(
+                        current_binding, role=role, revision=current_binding.revision + 1,
+                        source="astrbot-multi-host", authority="configured-private-target"),
+                        expected_revision=current_binding.revision, observed_at=self.now())
             if self.personas.binding(identifier) is None:
                 existing = self.personas.resolve(scope, observed_at=self.now())
                 if existing.failure is None:

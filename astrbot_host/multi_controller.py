@@ -216,7 +216,7 @@ class AstrBotMultiController:
             (AuthorizationTier.CORE.value,),
         )}
         candidates = []
-        for target in settings.targets:
+        for target in settings.primary_targets:
             if target.participant_id == "*":
                 continue
             subject = self.authority.subject(target)
@@ -915,7 +915,7 @@ class AstrBotMultiController:
             platform = self.context.get_platform_inst(meta.id)
             if target is None or platform is None or platform.get_client() is not event.bot:
                 return None
-            return target
+            return self.settings.effective_private_target(target)
         except (ValueError, AttributeError, TypeError):
             return None
 

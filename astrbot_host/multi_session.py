@@ -42,6 +42,7 @@ from companion_v2.conversation.media.image_narration import image_narration_prof
 from companion_v2.conversation.media.video.narration import video_narration_profile
 from companion_v2.conversation.media.understanding import intake_settings as file_intake_settings
 from companion_v2.screen.interpretation import screen_interpretation_profile
+from .settings import HostControlError
 from companion_v2.conversation.voice_reply import VoiceReplyDelivery
 from companion_v2.execution.models import Lane, ProviderBinding, TaskContext, TaskError, digest, require, stamp
 from companion_v2.foundation.outcome import Outcome
@@ -204,7 +205,43 @@ class MultiPrivateBridge(NativePrivateBridge):
             self.authority.ensure_actor(target)
         except (ValueError, AttributeError, TypeError):
             return await super().capture(event)
-        return await super().capture(event)
+        result = await super().capture(event)
+        if not result.is_success:
+            return result
+        try:
+            return Outcome.success(await self._apply_window_link(target, result.unwrap()))
+        except (TaskError, HostControlError, ValueError, KeyError) as error:
+            code = getattr(error, "code", "host_window_link_failed")
+            return Outcome.failed(code, str(error))
+
+    async def _apply_window_link(self, target, captured):
+        """Apply one explicit user-window merge after the normal native capture."""
+        link = self.settings.window_link_for_target(target.target_id)
+        if link is None:
+            return captured
+        primary = self.settings.target(link.primary_target_id)
+        if primary.participant_id == "*":
+            raise TaskError("host_window_link_invalid", "the primary private window is not concrete")
+        account = self.accounts.get((primary.platform_id, primary.account_id))
+        if account is None or account.bot_id != primary.bot_id:
+            raise TaskError("host_window_link_invalid", "the primary Bot account is not connected")
+        cid, role, instruction = await self._role(account, primary.participant_id)
+        if link.mode == "role":
+            # Keep the source window and its identity; only the memory owner and
+            # character instruction come from the primary role.
+            return replace(captured, role=role, instruction=instruction)
+
+        self.authority.ensure_actor(primary)
+        actor = self.authority.actor(primary)
+        scope = ScopeRef(self.installation_id, primary.platform_id, ScopeKind.PRIVATE,
+                         primary.participant_id, primary.bot_id, primary.account_id,
+                         cid, primary.participant_id)
+        principal = AuthenticatedHostPrincipal(self.installation_id, self.host_id, primary.platform_id,
+                                               primary.participant_id, primary.bot_id, primary.account_id)
+        return replace(captured, principal=principal,
+                       route=ConversationRoute(scope, user=actor.subject),
+                       recipients=AudienceRef(scope, (actor.subject,)),
+                       role=role, instruction=instruction)
 
     async def capture_text_only(self, event):
         """Keep authenticated group text when optional native media is unavailable."""
@@ -544,7 +581,7 @@ class MultiHostSession:
                 return NativeConversationTurns(self.runtime).interrupt_open(at=self.now())
             await asyncio.to_thread(interrupt_previous_runner)
             self._native_turns_recovered = True
-        targets = [target for target in self.settings.targets if target.participant_id != "*"]
+        targets = [target for target in self.settings.primary_targets if target.participant_id != "*"]
         targets.extend(self._prepared_wildcard_private_targets())
         seen = set()
         for target in targets:
