@@ -1,5 +1,23 @@
 /* Navigation and status for capabilities owned by the V2 plugin. */
 "use strict";
+/* Mobile dashboards are often served over plain HTTP, where crypto.randomUUID
+   is not exposed.  Every editor uses it for idempotency keys; without this
+   fallback a save can throw after marking the editor busy and leave it stuck. */
+(() => {
+  const target = globalThis.crypto;
+  if (!target || typeof target.randomUUID === "function") return;
+  const randomUUID = () => {
+    const bytes = new Uint8Array(16);
+    if (typeof target.getRandomValues === "function") target.getRandomValues(bytes);
+    else for (let index = 0; index < bytes.length; index++) bytes[index] = Math.floor(Math.random() * 256);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = [...bytes].map(value => value.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  };
+  try { Object.defineProperty(target, "randomUUID", {value: randomUUID, configurable: true}); }
+  catch { target.randomUUID = randomUUID; }
+})();
 window.CompanionProduct = (() => {
   const HOST = "astrbot_plugin_private_companion", PREFIX = "/" + HOST + "/";
   const bundledExtensions = {content:"content", reality:"reality", together:"together", game:"game", live:"live", image:"image", screen:"companion.screen.native"};
