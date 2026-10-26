@@ -71,4 +71,11 @@ class GroupAuthority:
                     authority.personas.set_binding(replace(previous, revision=previous.revision + 1),
                         expected_revision=previous.revision, observed_at=authority.now())
             authority.write(key, scope.document())
-            return TaskContext(actor, resolved.binding, audience)
+            context = TaskContext(actor, resolved.binding, audience)
+            # Group image tools need group-scoped consent even though private
+            # chats have their own automatically provisioned defaults. The
+            # helper checks the role switch, group switch, request-permission
+            # policy and any explicit revocation before issuing anything.
+            from .image_access import ensure_image_access
+            ensure_image_access(authority.runtime, context, observed_at=authority.now())
+            return replace(context, actor=authority.actor(target, principal.native_account_id))

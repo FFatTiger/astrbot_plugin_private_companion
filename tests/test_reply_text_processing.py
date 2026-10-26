@@ -6,7 +6,10 @@ from companion_v2.configuration.models import ConfigurationError
 from companion_v2.conversation.reply_preparation import prepare_reply
 from companion_v2.conversation.reply_settings import validate
 from companion_v2.conversation.segmentation import SegmentationPolicy, LLM_SEGMENT_MARKER as MARKER
-from companion_v2.conversation.text_processing import InternalExpressionProtocolFilter, ReplyTextPolicy, TEXT_DEFAULTS
+from companion_v2.conversation.text_processing import (
+    InternalExpressionProtocolFilter, ReplyTextPolicy, TEXT_DEFAULTS,
+    strip_internal_expression_protocol,
+)
 from companion_v2.conversation.voice_reply import VoiceReplyPolicy
 
 
@@ -95,6 +98,52 @@ class ReplyTextProcessingTests(unittest.TestCase):
             protocol.finish(),
         ))
         self.assertEqual(visible, "正文。后续正文。")
+
+    def test_paired_control_blocks_are_removed_without_eating_delivery_sentinels(self):
+        reaction = ('<pc_reaction_expression>{"purpose":"轻吐槽","emotion":"无奈",'
+                    '"intensity":2}</pc_reaction_expression>')
+        self.assertEqual(strip_internal_expression_protocol("正文。" + reaction + "后续"), "正文。后续")
+        self.assertEqual(
+            strip_internal_expression_protocol('好开心<pc_reaction_expression>{"x":1}[[PCTTS:abc123]]'),
+            "好开心[[PCTTS:abc123]]")
+        self.assertEqual(
+            strip_internal_expression_protocol(
+                '前半<pc_reaction_expression>{"x":1}<<PRIVATE_COMPANION_SPLIT>>后半'),
+            "前半<<PRIVATE_COMPANION_SPLIT>>后半")
+        self.assertEqual(
+            strip_internal_expression_protocol(
+                '好的<pc_reaction_expression>{"purpose":"用`表情`回应",'
+                '"emotion":"开心","intensity":2}</pc_reaction_expression>'),
+            "好的")
+
+    def test_control_block_cleanup_handles_escaping_fullwidth_orphans_and_unknown_names(self):
+        self.assertEqual(strip_internal_expression_protocol(
+            "正文。&lt;pc_reaction_expression&gt;{}&lt;/pc_reaction_expression&gt;"), "正文。")
+        self.assertEqual(strip_internal_expression_protocol(
+            "正文。&#x3C;pc_reaction_expression&#x3E;{}"
+            "&#x3C;/pc_reaction_expression&#x3E;"), "正文。")
+        self.assertEqual(strip_internal_expression_protocol(
+            "正文。＜pc_reaction_expression＞{}＜/pc_reaction_expression＞后续"), "正文。后续")
+        self.assertEqual(strip_internal_expression_protocol(
+            "正文。</pc_reaction_expression>"), "正文。")
+        self.assertEqual(strip_internal_expression_protocol(
+            "<pc_member_safety>{\"safe\":true}</pc_member_safety>"
+            "<personality_sync>{\"ok\":true}</personality_sync>"
+            "<pc_unregistered>{\"x\":1}</pc_unregistered>正文"), "正文")
+
+    def test_control_block_cleanup_preserves_code_and_tts_but_not_prose_after_a_partial_tag(self):
+        code = '示例：`<pc_reaction_expression>{"x":1}</pc_reaction_expression>` 保留'
+        self.assertEqual(strip_internal_expression_protocol(code), code)
+        self.assertEqual(strip_internal_expression_protocol(
+            "<pc_tts>朗读</pc_tts>正文"), "<pc_tts>朗读</pc_tts>正文")
+        self.assertEqual(strip_internal_expression_protocol(
+            "你可以在 <thinking> 里放草稿，但不要外发。这句话很重要。"),
+            "你可以在 <thinking> 里放草稿，但不要外发。这句话很重要。")
+
+    def test_stream_filter_finish_preserves_sentinels_trapped_in_an_unclosed_block(self):
+        protocol = InternalExpressionProtocolFilter()
+        visible = protocol.feed('正文<pc_reaction_expression>{"x":1}[[PCTTS:abc123]]')
+        self.assertEqual(visible + protocol.finish(), "正文[[PCTTS:abc123]]")
 
     def test_voice_wrappers_are_not_visible_when_voice_is_disabled(self):
         prepared = prepare_reply("<pc_tts>前置。</pc_tts>普通正文。", SegmentationPolicy(), policy())

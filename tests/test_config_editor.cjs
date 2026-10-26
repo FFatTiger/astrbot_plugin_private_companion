@@ -1321,6 +1321,37 @@ test('the rest gate mode and dream afterglow are edited as selects, not free tex
   assert.match(painted, /rest_reply_active_windows[\s\S]{0,400}23:00-08:30/);
 });
 
+test('legacy rest-gate aliases normalize before validation and save canonically', async () => {
+  const aliases = {model: 'llm', '模型': 'llm', llm_judge: 'llm', 'llm-judge': 'llm'};
+  const {window} = harness([]);
+  const normalizeDraft = window.CompanionConfigEditors.spec.life.normalizeDraft;
+  for (const [legacy, canonical] of Object.entries(aliases)) {
+    const draft = {rest_reply_mode: legacy};
+    normalizeDraft(draft);
+    assert.equal(draft.rest_reply_mode, canonical, `legacy mode ${legacy} should normalize`);
+  }
+
+  const harnessed = harness(['life']);
+  harnessed.editors.restore();
+  harnessed.editors.paint();
+  harnessed.editors.read();
+  await drains();
+  harnessed.requests[0].resolve(payload('life', {rest_reply_mode: '模型'}));
+  await drains();
+  const [instance] = harnessed.editors.state.instances;
+  assert.equal(instance.state.draft.rest_reply_mode, 'llm');
+  assert.equal(instance.state.base.rest_reply_mode, '模型', 'the saved value stays visible as a migration diff');
+  assert.match(fieldRow(harnessed.painted.life, 'rest_reply_mode'), /value="llm"[^>]*selected/);
+
+  const saving = instance.save(false);
+  await drains();
+  assert.deepEqual(plain(harnessed.requests[1].body.changes), {rest_reply_mode: 'llm'});
+  harnessed.requests[1].resolve({result: {operation_id: 'life-mode', replayed: false},
+    status: newSection('life', {rest_reply_mode: 'llm'}, TOKEN('b'))});
+  await saving;
+  await drains();
+});
+
 test('a life field outside its registered bounds never reaches the network', async () => {
   const harnessed = harness(['life']);
   harnessed.editors.restore();
@@ -1846,6 +1877,35 @@ async function contactLoaded(changes = {}, token = TOKEN('a')) {
   await drains();
   return harnessed;
 }
+
+test('legacy proactive intensity aliases normalize before validation and save canonically', async () => {
+  const aliases = {'': 'off', manual: 'off', none: 'off', default: 'off', standard: 'balanced',
+    active: 'high_private', private: 'high_private', group: 'high_group',
+    online: 'live', '直播': 'live', '高频': 'live'};
+  const {window} = harness([]);
+  const normalizeDraft = window.CompanionConfigEditors.spec['proactive.contact'].normalizeDraft;
+  for (const [legacy, canonical] of Object.entries(aliases)) {
+    const draft = {proactive_intensity_preset: legacy};
+    normalizeDraft(draft);
+    assert.equal(draft.proactive_intensity_preset, canonical, `legacy tier ${legacy} should normalize`);
+  }
+
+  const harnessed = await contactLoaded({proactive_intensity_preset: '高频'});
+  const [instance] = harnessed.editors.state.instances;
+  assert.equal(instance.state.draft.proactive_intensity_preset, 'live');
+  assert.equal(instance.state.base.proactive_intensity_preset, '高频',
+    'the saved alias stays visible as a migration diff');
+  assert.match(fieldRow(harnessed.painted['proactive.contact'], 'proactive_intensity_preset'),
+    /value="live"[^>]*selected/);
+
+  const saving = instance.save(false);
+  await drains();
+  assert.deepEqual(plain(harnessed.requests[1].body.changes), {proactive_intensity_preset: 'live'});
+  harnessed.requests[1].resolve({result: {operation_id: 'contact-tier', replayed: false},
+    status: newSection('proactive.contact', {proactive_intensity_preset: 'live'}, TOKEN('b'))});
+  await saving;
+  await drains();
+});
 
 /* 画出来的某一行控件：从它的行标记切到下一条行标记。 */
 function fieldRow(markup, name) {

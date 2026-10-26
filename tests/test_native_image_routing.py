@@ -1,5 +1,6 @@
 """The model catalog follows the operations enabled by V2 image routes."""
 
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace as NS
@@ -213,6 +214,54 @@ class NativeImageRoutingTests(unittest.TestCase):
         self.assertEqual(self.api.companion_v2_native().owner.backend.operations, ())
         self.assertIs(self.registry.image_extension_api(), self.api)
         self.assertTrue(all(self.registry.current_declaration(action) is None for action in self.declarations))
+
+    def test_output_switch_keeps_management_api_loaded_and_can_be_reenabled(self):
+        current = self.api.output_configuration()
+        saved = self.api.save_output_configuration(current["revision"], {"enabled": False})
+
+        self.assertFalse(saved["settings"]["enabled"])
+        self.assertFalse(self.api.companion_v2_native()._closed)
+        self.assertIs(self.registry.image_extension_api(), self.api)
+        self.assertIn("image.generate", self.api.companion_v2_native().manifest()["package"]["capabilities"])
+        self.assertTrue(self.api.config["native_v2"]["enabled"])
+
+        saved = self.save_online("openai")
+        self.assertTrue(saved["settings"]["enabled"])
+        self.assertEqual(self.api.companion_v2_native().owner.backend.operations, ("generate", "edit"))
+        self.assertIs(self.registry.image_extension_api(), self.api)
+
+    def test_disabled_output_from_previous_run_does_not_hide_configuration(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config_path = root / "image-config.json"
+            config_path.write_text(json.dumps({"native_v2": {
+                "enabled": False,
+                "backend": "auto",
+                "output": {"enabled": False, "backend": "auto", "endpoints": [],
+                           "sd_webui": {}, "comfyui": {}},
+            }}), encoding="utf-8")
+            api = ImageExtensionAPI(data_root=root, config_path=config_path,
+                                    version=PRODUCT_VERSION)
+            try:
+                self.assertFalse(api.output_configuration()["settings"]["enabled"])
+                self.assertFalse(api.companion_v2_native()._closed)
+
+                current = api.output_configuration()
+                saved = api.save_output_configuration(current["revision"], {
+                    "enabled": True,
+                    "backend": "online_api",
+                    "endpoints": [self.endpoint("primary", "image-v1")],
+                })
+
+                self.assertTrue(saved["settings"]["enabled"])
+                self.assertFalse(api.companion_v2_native()._closed)
+                self.assertEqual(api.companion_v2_native().owner.backend.operations,
+                                 ("generate", "edit"))
+                persisted = json.loads(config_path.read_text(encoding="utf-8"))
+                self.assertTrue(persisted["native_v2"]["enabled"])
+                self.assertTrue(persisted["native_v2"]["output"]["enabled"])
+            finally:
+                api.close()
 
     def test_online_backend_exposes_only_operations_supported_by_its_platform(self):
         self.save_online("minimax")

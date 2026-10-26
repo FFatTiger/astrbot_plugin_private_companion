@@ -12,12 +12,14 @@ from unittest.mock import patch
 from tests.multi_host_support import multi_config
 from tests.group_host_support import GroupFixture, Query, group_config
 from tests.staging_bootstrap_support import database_contents, wait_for_batch
+from companion_v2.capabilities.repositories import CapabilityRepository
 from companion_v2.execution.models import TaskContext, digest
 from companion_v2.foundation.refs import AudienceRef, ScopeKind, SubjectKind
 from companion_v2.identity_policy.personas import PersonaDirectory
 from companion_v2.memory.models import AtomRef
 from astrbot.core.message.components import File
 from astrbot_host.group_authority import GroupAuthority
+from astrbot_host.image_access import GROUP_IMAGE_CAPABILITIES
 from astrbot_host.multi_api import PREFIX
 from astrbot_host.multi_settings import MultiHostSettings
 from astrbot_host.settings import HostControlError
@@ -222,6 +224,23 @@ class GroupHostTests(GroupFixture, unittest.IsolatedAsyncioTestCase):
         await self.accepted()
         self.assertEqual([action for action, _ in self.native.platform.client._api._wsr_api.calls],
                          ["send_group_msg", "send_private_msg"])
+
+    async def test_group_admission_provisions_group_scoped_image_consent(self):
+        app = await self.start_host()
+        repository = CapabilityRepository(app.runtime)
+        for _ in range(100):
+            if repository.projection(extension_id="image").is_success:
+                break
+            await asyncio.sleep(0.02)
+        else:
+            self.fail("image capability did not finish installing")
+        context, _ = await self.accept_group()
+        for action in GROUP_IMAGE_CAPABILITIES:
+            self.assertTrue(repository.authorize(extension_id="image", capability_id=action,
+                subject=context.actor.subject, scope=context.scope).is_success)
+        self.assertEqual(repository.authorize(extension_id="image", capability_id="image.mask_edit",
+            subject=context.actor.subject, scope=context.scope).failure.code,
+            "capability_consent_missing")
 
     async def test_revoked_group_grant_is_not_restored_on_intake_or_restart(self):
         app = await self.start_host()

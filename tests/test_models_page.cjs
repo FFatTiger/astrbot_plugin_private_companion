@@ -450,7 +450,14 @@ test('an uncertain save keeps its original operation and blocks further edits un
   node.change('[data-model-field]', {modelField: 'provider', modelKind: 'memory.reflect', value: 'primary'});
   node.click('[data-model-open]', {modelOpen: 'memory.reflect'});
   assert.match(node.innerHTML, /上次保存结果未确认/);
-  node.click('[data-model-action]', {modelAction: 'retry', modelKind: 'memory.reflect'});
+  assert.match(node.innerHTML, /1<\/b> 项保存结果待核对/);
+  assert.match(node.innerHTML, /data-model-action="save-all"[^>]*>核对保存/);
+  const uncertainCard = node.innerHTML.split('data-fncard="memory.reflect"')[1].split('</article>')[0];
+  assert.match(uncertainCard, /data-model-action="save-one"[^>]*>核对保存/);
+  assert.doesNotMatch(uncertainCard, /data-model-action="save-one"[^>]*\sdisabled(?:\s|>)/);
+  assert.match(uncertainCard, /data-model-field="provider"[^>]*disabled/);
+  assert.doesNotMatch(uncertainCard, /data-model-action="retry"/);
+  node.click('[data-model-action]', {modelAction: 'save-one', modelKind: 'memory.reflect'});
   const second = requests.filter(request => request.method === 'POST')[1];
   assert.deepEqual(JSON.parse(JSON.stringify(second.values)), JSON.parse(JSON.stringify(first.values)));
   second.resolve({replayed: true, task: task('memory.reflect', 'secondary', ['text'], 'background')});
@@ -459,6 +466,28 @@ test('an uncertain save keeps its original operation and blocks further edits un
   assert.doesNotMatch(node.innerHTML, /上次保存结果未确认/);
 });
 
+test('a bridge timeout automatically re-sends the same idempotent save once', async () => {
+  const {page, requests, root} = harness();
+  const node = root();
+  page.mount(node);
+  requests[0].resolve(status());
+  await flush();
+  node.change('[data-model-field]', {modelField: 'provider', modelKind: 'memory.reflect', value: 'secondary'});
+  node.click('[data-model-action]', {modelAction: 'save-one', modelKind: 'memory.reflect'});
+  const first = requests.find(request => request.method === 'POST');
+  first.reject(Object.assign(new Error('bridge_timeout'), {code: 'bridge_timeout'}));
+  await flush();
+  const posts = requests.filter(request => request.method === 'POST');
+  assert.equal(posts.length, 2, 'one timed-out save should be reconciled automatically');
+  assert.equal(posts[1].values.operation_key, first.values.operation_key,
+    'the retry must reuse the idempotency key');
+  posts[1].resolve({replayed: true, task: task('memory.reflect', 'secondary', ['text'], 'background')});
+  await flush();
+  assert.match(node.innerHTML, /原保存已确认/);
+  assert.equal(page.isBusy(), false);
+  assert.doesNotMatch(node.innerHTML, /项保存结果待核对/);
+  page.unmount();
+});
 test('switching to the voice tab lazily loads, saves, and plays a synthesized sample result', async () => {
   const {page, requests, root, audioBlobs, revokedAudioUrls} = harness();
   const node = root();

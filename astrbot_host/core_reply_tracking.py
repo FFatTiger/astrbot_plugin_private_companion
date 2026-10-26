@@ -270,6 +270,35 @@ def prepare_core_reply_tracking(event, prepared, *, admission, now, reason="", m
     return state
 
 
+def adopt_core_reply_tracking(event, *, admission, now, submit=None, prepared=None, reopen=False):
+    """Keep group bookkeeping attached after a plugin instance is replaced."""
+    state = event.get_extra(CORE_REPLY_TRACKING_EXTRA)
+    if not isinstance(state, dict):
+        return False
+    state["admission"], state["now"], state["submit"] = admission, now, submit
+    if isinstance(prepared, Mapping):
+        state["laya"] = dict(prepared.get("laya_decision") or {})
+        group = prepared.get("group_admission") or {}
+        state["reason"] = group.get("reason") or state.get("reason", "")
+        state["mentioned"] = bool(group.get("mentioned", state.get("mentioned", False)))
+    core = event.get_extra(CORE_REPLY_CONTEXT_EXTRA)
+    if (isinstance(core, dict) and not core.get("send_attempts")
+            and not core.get("send_unknown")):
+        state["completed"] = False
+        state["send_state"] = "not_started"
+        state["send_attempts"] = 0
+        state["send_returns"] = 0
+        state["unknown_sends"] = 0
+        state["send_failed"] = 0
+        if reopen and not state["inflight"]:
+            state["inflight"] = True
+            _persist(state, "inflight")
+    event.send = state["_send_wrapper"]
+    if callable(state["_original_streaming"]):
+        event.send_streaming = state["_streaming_wrapper"]
+    return True
+
+
 def mark_core_reply_inflight(event):
     state = event.get_extra(CORE_REPLY_TRACKING_EXTRA)
     if not isinstance(state, dict) or state["completed"]:

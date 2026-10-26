@@ -1,4 +1,4 @@
-"""Agenda rows share the V2 transaction and operation authority."""
+﻿"""Agenda rows share the V2 transaction and operation authority."""
 
 from __future__ import annotations
 
@@ -92,6 +92,47 @@ class AgendaRepository:
                     updated_at = excluded.updated_at""", (memo_id, timestamp, timestamp))
             return True
 
+    def record_open_loop_followup_delivery(self, memo_id: str, *, at: datetime) -> bool:
+        """Bind the claim to the message that actually reached the user.
+
+        The scheduler claims a follow-up while selecting a candidate.  That
+        claim prevents duplicates, but its timestamp is not evidence that the
+        message was sent.  Only a confirmed delivery may open the reply-review
+        window, so keep the first receipt time even if the platform retries or
+        reports the same delivery again.
+        """
+        timestamp = stamp(at)
+        with self.runtime.transaction() as connection:
+            result = connection.execute(
+                """UPDATE agenda_open_loop_activity
+                   SET last_followup_at = ?, updated_at = ?
+                   WHERE memo_id = ? AND followup_count > 0""",
+                (timestamp, timestamp, memo_id))
+            return result.rowcount == 1
+
+    def claim_open_loop_review(self, memo_id: str, *, at: datetime) -> bool:
+        """Record one model-facing review after a delivered follow-up.
+
+        A review is not an ordinary open-item surfacing: it must not consume
+        the three-context lifetime cap, but it still records ``last_context_at``
+        so the same delivered follow-up is not injected into every later turn.
+        """
+        timestamp = stamp(at)
+        with self.runtime.transaction() as connection:
+            row = connection.execute(
+                """SELECT last_context_at, last_followup_at, followup_count
+                   FROM agenda_open_loop_activity WHERE memo_id = ?""", (memo_id,)).fetchone()
+            if row is None or not row["last_followup_at"] or row["followup_count"] <= 0:
+                return False
+            if row["last_context_at"] == timestamp:
+                return True
+            if row["last_context_at"] is not None and row["last_context_at"] >= row["last_followup_at"]:
+                return False
+            connection.execute(
+                """UPDATE agenda_open_loop_activity
+                   SET last_context_at = ?, updated_at = ?
+                   WHERE memo_id = ?""", (timestamp, timestamp, memo_id))
+            return True
     def save_memo(self, memo: Memo, *, expected_revision: int, now: datetime) -> None:
         with self.runtime.transaction() as connection:
             if expected_revision == 0:

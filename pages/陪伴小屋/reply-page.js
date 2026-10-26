@@ -146,6 +146,11 @@ window.CompanionReplyPage = (() => {
       voice_primary_mention_keywords: "核心用户提及语音词",
       voice_primary_mention_probability: "核心用户提及概率",
       voice_primary_mention_prompt: "核心用户提及提示",
+      voice_enabled: "核心管理员可以在本轮消息中直接指定语音模型、音色或语种；该次回复会临时覆盖保存的语音绑定。",
+      voice_provider_id: "角色级 TTS 绑定，私聊与群聊共用；触发概率和冷却才按渠道分别覆盖。",
+      voice_zh_provider_id: "中文语音优先使用此扩展；留空则跟随通用 TTS 扩展。",
+      voice_ja_provider_id: "日语语音优先使用此扩展；留空则跟随通用 TTS 扩展。",
+      voice_en_provider_id: "英语语音优先使用此扩展；留空则跟随通用 TTS 扩展。",
     },
     helps: {
       enabled: "让一轮回复自然地分成多条消息。",
@@ -646,6 +651,11 @@ window.CompanionReplyPage = (() => {
       if (!value || typeof value !== "object" || Array.isArray(value)) throw error("invalid_response");
       return value;
     } finally { clearTimeout(timer); }
+  }
+
+  /* 旧配置的整段已退役；进入草稿时迁到句中，避免下拉框落空并在保存时被判非法。 */
+  function normalizeReplyDraft(draft) {
+    if (draft?.content_cleanup_scope === "all") draft.content_cleanup_scope = "middle";
   }
 
   /* 读取由工作台负责；这里只订阅它的结果，用来渲染预览与保存摘要。 */
@@ -1241,6 +1251,7 @@ window.CompanionReplyPage = (() => {
       order: pageSpec.order,
       endpoint: PREFIX + route,
       resetKey: "reset_to_inherit",
+      normalizeDraft: normalizeReplyDraft,
       /* TTS 扩展目录要等读取之后才知道，所以选项由函数现取。 */
       catalogs: {
         voice_provider_id: () => providerOptions("跟随 AstrBot"),
@@ -1253,12 +1264,6 @@ window.CompanionReplyPage = (() => {
       onStatus: adopt,
     });
     instance.mount();
-    /* 旧配置的“整段”不再出现在三档位置选项里；仅把它显示成“句中”，
-       用户下一次保存时自然迁移，避免下拉框出现空值。 */
-    if (instance.state?.draft?.content_cleanup_scope === "all") {
-      instance.state.draft.content_cleanup_scope = "middle";
-      instance.mount();
-    }
     if (options.expressionModule) setExpressionModule(options.expressionModule);
     if (options.view === "perception") setPerceptionModule(options.perceptionModule || "overview");
     if (options.view === "decision") setDecisionView(options.decisionView || activeDecisionView);
@@ -1272,7 +1277,8 @@ window.CompanionReplyPage = (() => {
   function providerOptions(fallback) {
     const options = {"": fallback};
     for (const item of state.status?.tts?.providers || []) {
-      if (typeof item?.id === "string" && item.id) options[item.id] = item.id;
+      if (typeof item?.id !== "string" || !item.id) continue;
+      options[item.id] = [item.id, item.model, item.voice].filter(Boolean).join(" · ");
     }
     return options;
   }

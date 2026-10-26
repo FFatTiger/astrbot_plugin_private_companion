@@ -274,16 +274,19 @@ class MultiHostWebAPI:
                         role["legacy_group_data_api"]))
                 if role["memory_api"] is None:
                     continue
+                source_target_id = getattr(self.controller, "role_source_target_id",
+                    lambda _role_id, fallback: fallback)(role["role_id"], target["target_id"])
                 view = TargetControllerView(self.controller, target["target_id"], role["role_id"])
+                role_view = TargetControllerView(self.controller, source_target_id, role["role_id"])
                 api = MemoryWebAPI(view)
                 routes.extend((role["memory_api"] + path.removeprefix(MEMORY_PREFIX), handler, methods, description)
                               for path, handler, methods, description in api.routes())
                 routes.extend((role["state_api"] + path.removeprefix(STATE_PREFIX), handler, methods, description)
-                              for path, handler, methods, description in StateWebAPI(view).routes())
+                              for path, handler, methods, description in StateWebAPI(role_view).routes())
                 routes.extend((role["reply_api"] + path.removeprefix(REPLY_PREFIX), handler, methods, description)
                               for path, handler, methods, description in ReplyWebAPI(view).routes())
                 routes.extend((role["model_api"] + path.removeprefix(MODEL_PREFIX), handler, methods, description)
-                              for path, handler, methods, description in ModelWebAPI(view).routes())
+                              for path, handler, methods, description in ModelWebAPI(role_view).routes())
                 routes.extend((role["perception_native_api"] + path.removeprefix(NATIVE_PERCEPTION_PREFIX),
                                handler, methods, description)
                               for path, handler, methods, description in NativePerceptionWebAPI(view).routes())
@@ -300,7 +303,7 @@ class MultiHostWebAPI:
                                handler, methods, description)
                               for path, handler, methods, description in QzoneWebAPI(view).routes())
                 routes.extend((role["life_api"] + path.removeprefix(LIFE_PREFIX), handler, methods, description)
-                              for path, handler, methods, description in LifeWebAPI(view).routes())
+                              for path, handler, methods, description in LifeWebAPI(role_view).routes())
                 routes.extend((role["relationships_api"] + path.removeprefix(RELATIONSHIP_PREFIX), handler, methods, description)
                               for path, handler, methods, description in RelationshipWebAPI(view).routes())
                 routes.extend((role["growth_api"] + path.removeprefix(GROWTH_PREFIX), handler, methods, description)

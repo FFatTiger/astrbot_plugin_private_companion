@@ -1,4 +1,4 @@
-"""One explicit opportunity, one supervised model decision, one durable delivery.
+﻿"""One explicit opportunity, one supervised model decision, one durable delivery.
 
 Trusted producers, including the conversation scheduler, supply the cause and
 current persona; interrupted model work is never silently replayed.
@@ -714,6 +714,27 @@ class ProactiveContacts:
             failure_code=receipt.failure_code if rejected else None,
             reset_failures=(receipt.status in ("delivered", "accepted")
                             or receipt.status == "not_sent" and not rejected))
+        if receipt.status == "delivered" and receipt.delivered_at is not None:
+            self._record_open_loop_receipt(request, receipt.delivered_at)
+
+    def _record_open_loop_receipt(self, request, delivered_at):
+        """Record the real send time only for a delivered open-loop follow-up."""
+        row = self.runtime.read_one("SELECT record_json FROM proactive_contacts WHERE contact_id = ?",
+                                    (request.source_ref,))
+        if row is None:
+            return
+        try:
+            origin = json.loads(row["record_json"]).get("automatic_origin") or {}
+            open_loop = origin.get("open_loop_event") or {}
+            memo_id = open_loop.get("memo_id")
+            if type(memo_id) is not str or not memo_id:
+                return
+            from companion_v2.agenda.service import AgendaService
+            AgendaService(self.runtime).repository.record_open_loop_followup_delivery(
+                memo_id, at=delivered_at)
+        except (TypeError, ValueError, KeyError):
+            # Delivery accounting must never make a confirmed platform receipt fail.
+            return
 
     @outcome
     def validate(self, spec, at):

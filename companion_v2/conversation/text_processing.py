@@ -178,13 +178,274 @@ def _strip_identity_anchors(text):
     return text
 
 
-def strip_internal_expression_protocol(text):
-    """Remove the legacy reaction metadata block before text can be shown or sent."""
+# Internal control tags are invisible protocol, not prose.  They may arrive as
+# a complete pair, an HTML-escaped pair, an orphan closing tag, or an unclosed
+# tail.  Keep the cleaner deliberately narrower than a generic tag stripper:
+# TTS still consumes its own wrapper, and sentinels consumed by downstream
+# delivery paths must survive an incomplete tail.
+_CONTROL_LITERAL_LT = r"(?:<|＜)"
+_CONTROL_LITERAL_GT = r"(?:>|＞)"
+_CONTROL_ESCAPED_LT = r"(?:&lt;|&#0*60;|&#x0*3c;)"
+_CONTROL_ESCAPED_GT = r"(?:&gt;|&#0*62;|&#x0*3e;)"
+_CONTROL_TAG_SPECS = (
+    ("pc_reaction_expression", True, ()),
+    ("pc_member_safety", True, ()),
+    ("personality_sync", True, ()),
+    ("tts", False, ("pc_tts",)),
+    ("thinking", False, ()),
+    ("timer", False, ()),
+    ("private_companion_context", False, ()),
+    ("core_memory", False, ()),
+    ("reference_data", False, ()),
+)
+_CONTROL_TAG_NAMES = tuple(
+    name for name, _truncate, aliases in _CONTROL_TAG_SPECS for name in (name, *aliases)
+)
+
+
+def _control_family_pattern(name, aliases):
+    """The tolerant name spelling accepted for one registered family."""
+    if name == "pc_reaction_expression":
+        return REACTION_EXPRESSION_TAG_NAME
+    if name == "tts":
+        return VOICE_TAG_NAME_PATTERN
+    return "|".join(re.escape(item) for item in (name, *aliases))
+
+
+_CONTROL_REGISTERED_PATTERN = "|".join(
+    _control_family_pattern(name, aliases) for name, _truncate, aliases in _CONTROL_TAG_SPECS
+)
+_CONTROL_NAMESPACE_PATTERN = r"(?:pc_[A-Za-z0-9_-]+|private_companion_[A-Za-z0-9_-]+)"
+_CONTROL_CANDIDATE_PATTERN = re.compile(
+    rf"(?:{_CONTROL_LITERAL_LT}|{_CONTROL_ESCAPED_LT})\s*/?\s*"
+    rf"(?:{_CONTROL_REGISTERED_PATTERN}|{_CONTROL_NAMESPACE_PATTERN})",
+    re.IGNORECASE,
+)
+_CONTROL_CODE_SPAN_PATTERN = re.compile(
+    r"(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\r\n]+`)", re.MULTILINE,
+)
+_CONTROL_CODE_MASK_HEAD = "\x01PCCS"
+_CONTROL_CODE_MASK_TAIL = "\x02"
+_CONTROL_CODE_MASK_ATTEMPTS = 4
+_CONTROL_PAIRED_PAYLOAD_LIMIT = 20000
+# Truncation must stop before a token another delivery stage still consumes.
+# Bare "[" is not enough: a JSON array inside an unfinished payload must not
+# be cut at the bracket and leak its tail.
+_CONTROL_SENTINEL_START = r"(?:\[\[|\[[A-Za-z]|<<|&&[A-Za-z_]|\x00|\x01PCCS)"
+_CONTROL_RULE_CACHE = {}
+
+
+def _control_patterns(names, *, truncate):
+    """Compile the four outbound leak shapes for one tag family."""
+    flags = re.IGNORECASE | re.DOTALL
+    literal_open = (
+        rf"(?<!<){_CONTROL_LITERAL_LT}\s*(?:{names})\b[^<>]*?(?<!/){_CONTROL_LITERAL_GT}"
+    )
+    literal_close = (
+        rf"{_CONTROL_LITERAL_LT}\s*/\s*(?:{names})\s*{_CONTROL_LITERAL_GT}"
+    )
+    escaped_open = (
+        rf"{_CONTROL_ESCAPED_LT}\s*(?:{names})\b[^<>]*?(?<!/){_CONTROL_ESCAPED_GT}"
+    )
+    escaped_close = (
+        rf"{_CONTROL_ESCAPED_LT}\s*/\s*(?:{names})\s*{_CONTROL_ESCAPED_GT}"
+    )
+    payload = rf"[\s\S]{{0,{_CONTROL_PAIRED_PAYLOAD_LIMIT}}}?"
+    stop_at_sentinel = rf"(?:(?!{_CONTROL_SENTINEL_START})[\s\S])*"
+    truncated = ()
+    if truncate:
+        truncated = (
+            re.compile(rf"{literal_open}{stop_at_sentinel}", flags),
+            re.compile(rf"{escaped_open}{stop_at_sentinel}", flags),
+        )
+    return {
+        "probe": re.compile(
+            rf"{literal_open}|{literal_close}|{escaped_open}|{escaped_close}", flags,
+        ),
+        "pairs": (
+            re.compile(rf"{literal_open}{payload}{literal_close}", flags),
+            re.compile(rf"{escaped_open}{payload}{escaped_close}", flags),
+        ),
+        "pair_probes": (
+            re.compile(literal_close, flags),
+            re.compile(escaped_close, flags),
+        ),
+        "truncated": truncated,
+        "bare_open": re.compile(
+            rf"(?:(?<!<){_CONTROL_LITERAL_LT}\s*(?:{names})\b"
+            rf"(?:(?!{_CONTROL_SENTINEL_START})[^<>])*$"
+            rf"|{_CONTROL_ESCAPED_LT}\s*(?:{names})\b"
+            rf"(?:(?!{_CONTROL_SENTINEL_START}|{_CONTROL_ESCAPED_GT})[^<>])*$)",
+            flags,
+        ) if truncate else None,
+        "orphan_closes": (
+            re.compile(literal_close, flags),
+            re.compile(escaped_close, flags),
+        ),
+        "any_open": re.compile(
+            rf"{_CONTROL_LITERAL_LT}\s*(?:{names})\b"
+            rf"(?![^<>]*?/\s*{_CONTROL_LITERAL_GT})"
+            rf"|{_CONTROL_ESCAPED_LT}\s*(?:{names})\b"
+            rf"(?![^<>]*?/\s*{_CONTROL_ESCAPED_GT})",
+            flags,
+        ),
+        "any_close": re.compile(rf"{literal_close}|{escaped_close}", flags),
+    }
+
+
+def _control_namespace_pattern(excluded):
+    """Namespace fallback for model-invented pc_* control tags."""
+    guarded = set(excluded)
+    families = []
+    for prefix in ("pc_", "private_companion_"):
+        guards = "".join(
+            rf"(?!{re.escape(item[len(prefix):])}(?![A-Za-z0-9_-]))"
+            for item in sorted(guarded)
+            if item.startswith(prefix) and len(item) > len(prefix)
+        )
+        families.append(rf"{re.escape(prefix)}{guards}[A-Za-z0-9_-]+")
+    return "(?:" + "|".join(families) + ")"
+
+
+def _control_rules(exclude, *, truncate):
+    key = (frozenset(exclude), bool(truncate))
+    cached = _CONTROL_RULE_CACHE.get(key)
+    if cached is not None:
+        return cached
+    rules = []
+    registered = set()
+    for name, allowed_truncate, aliases in _CONTROL_TAG_SPECS:
+        names = (name, *aliases)
+        registered.update(item.casefold() for item in names)
+        if any(item.casefold() in exclude for item in names):
+            continue
+        alternation = _control_family_pattern(name, aliases)
+        rules.append((name, _control_patterns(alternation, truncate=truncate and allowed_truncate)))
+    # Unknown pc_* / private_companion_* tags are model-invented control
+    # protocol too.  Registered families above stay authoritative; the fallback
+    # only sees names the registry did not claim.
+    fallback_names = tuple(sorted(registered))
+    rules.append(("namespace", _control_patterns(
+        _control_namespace_pattern(fallback_names), truncate=truncate,
+    )))
+    result = tuple(rules)
+    if len(_CONTROL_RULE_CACHE) >= 8:
+        _CONTROL_RULE_CACHE.clear()
+    _CONTROL_RULE_CACHE[key] = result
+    return result
+
+
+def _mask_control_code_spans(value):
+    spans = [match.group(0) for match in _CONTROL_CODE_SPAN_PATTERN.finditer(value)]
+    if not spans:
+        return value, None
+    for base in range(_CONTROL_CODE_MASK_ATTEMPTS):
+        head = f"{_CONTROL_CODE_MASK_HEAD}{base}x"
+        tokens = [f"{head}{index}{_CONTROL_CODE_MASK_TAIL}" for index in range(len(spans))]
+        if any(token in value for token in tokens):
+            continue
+        state = {"next": 0}
+
+        def collect(_match, _tokens=tokens):
+            token = _tokens[state["next"]]
+            state["next"] += 1
+            return token
+
+        masked = _CONTROL_CODE_SPAN_PATTERN.sub(collect, value)
+        restore = re.compile(rf"{re.escape(head)}(\d+){re.escape(_CONTROL_CODE_MASK_TAIL)}")
+        return masked, (restore, spans)
+    return value, None
+
+
+def _restore_control_code_spans(value, restore):
+    if restore is None:
+        return value
+    pattern, spans = restore
+
+    def replace(match):
+        index = int(match.group(1))
+        return spans[index] if 0 <= index < len(spans) else match.group(0)
+
+    return pattern.sub(replace, value)
+
+
+def _drop_excess_control_closes(segment, patterns):
+    """Delete only closing tags that clearly outnumber their openers."""
+    open_count = len(patterns["any_open"].findall(segment))
+    closes = list(patterns["any_close"].finditer(segment))
+    excess = len(closes) - open_count
+    if excess <= 0:
+        return segment
+    chunks, cursor = [], 0
+    for index, match in enumerate(closes):
+        if index < len(closes) - excess:
+            continue
+        chunks.append(segment[cursor:match.start()])
+        cursor = match.end()
+    chunks.append(segment[cursor:])
+    return "".join(chunks)
+
+
+def _may_have_control_pair(segment, patterns):
+    """Whether any open tag can reach a later close within the payload cap."""
+    opens = [match.end() for match in patterns["any_open"].finditer(segment)]
+    if not opens:
+        return False
+    index = 0
+    for close in patterns["any_close"].finditer(segment):
+        while index < len(opens) and opens[index] <= close.start():
+            index += 1
+        if index and close.start() - opens[index - 1] <= _CONTROL_PAIRED_PAYLOAD_LIMIT:
+            return True
+    return False
+
+
+def _clean_control_segment(segment, rules, *, truncate):
+    for _pass in range(2):
+        before = segment
+        for _name, patterns in rules:
+            if patterns["probe"].search(segment) is None:
+                continue
+            if _may_have_control_pair(segment, patterns):
+                for pair, close_probe in zip(patterns["pairs"], patterns["pair_probes"]):
+                    if close_probe.search(segment) is not None:
+                        segment = pair.sub("", segment)
+            # With any closing tag present, never truncate: an oversized or
+            # malformed pair must not silently consume the user's prose.
+            if truncate and patterns["truncated"] and patterns["any_close"].search(segment) is None:
+                for pattern in patterns["truncated"]:
+                    segment = pattern.sub("", segment)
+            if patterns["bare_open"] is not None:
+                segment = patterns["bare_open"].sub("", segment)
+            segment = _drop_excess_control_closes(segment, patterns)
+        if segment == before:
+            break
+    return segment
+
+
+def strip_paired_control_blocks(text, *, exclude=("tts",), preserve_code_spans=True, truncate=True):
+    """Remove paired plugin control tags without eating downstream sentinels.
+
+    Complete and escaped pairs, excess orphan closers, and truncate-authorized
+    incomplete tails are removed.  Markdown code examples stay intact.  The
+    function is intentionally stateless; the streaming adapter uses
+    :class:`InternalExpressionProtocolFilter` to rejoin split tags.
+    """
     if type(text) is not str:
         return text
-    text = _REACTION_EXPRESSION_BLOCK.sub("", text)
-    text = _REACTION_EXPRESSION_TAG.sub("", text)
-    return _REACTION_EXPRESSION_BARE_TAG.sub("", text)
+    if not text or _CONTROL_CANDIDATE_PATTERN.search(text) is None:
+        return text
+    excluded = frozenset(str(item or "").casefold() for item in (exclude or ()))
+    rules = _control_rules(excluded, truncate=truncate)
+    masked, restore = (_mask_control_code_spans(text) if preserve_code_spans else (text, None))
+    return _restore_control_code_spans(
+        _clean_control_segment(masked, rules, truncate=truncate), restore,
+    )
+
+
+def strip_internal_expression_protocol(text):
+    """Remove internal control blocks before text can be shown or sent."""
+    return strip_paired_control_blocks(text)
 
 
 def _partial_protocol_match(pattern, text):
@@ -210,10 +471,10 @@ class InternalExpressionProtocolFilter:
         while buffer:
             if self._inside_block:
                 closing = _partial_protocol_match(_REACTION_EXPRESSION_CLOSE_PROTOCOL, buffer)
-                if closing is None:
-                    break
-                if closing.partial:
-                    self._pending = buffer[closing.start():]
+                if closing is None or closing.partial:
+                    # Keep the payload too: an unfinished block may contain a
+                    # delivery sentinel that must be recovered by finish().
+                    self._pending = buffer
                     break
                 buffer = buffer[closing.end():]
                 self._inside_block = False
@@ -236,10 +497,14 @@ class InternalExpressionProtocolFilter:
         return "".join(visible)
 
     def finish(self):
-        """Discard an incomplete protocol tail; it must never reach the user."""
+        """End the stream, preserving only sentinels trapped in a broken tail."""
+        pending = self._pending
         self._pending = ""
         self._inside_block = False
-        return ""
+        if not pending:
+            return ""
+        match = re.search(_CONTROL_SENTINEL_START, pending)
+        return pending[match.start():] if match is not None else ""
 
 
 @dataclass(frozen=True)

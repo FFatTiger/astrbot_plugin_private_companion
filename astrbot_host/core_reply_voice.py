@@ -246,8 +246,15 @@ async def prepare_core_reply_voice_message(
         records = []
         for chunk in chunks:
             await authorize()
-            audio = await renderer(context, chunk, provider_id=policy.provider_for_language(),
-                                   timeout_seconds=policy.timeout_seconds)
+            render_options = {"provider_id": policy.provider_for_language(),
+                              "timeout_seconds": policy.timeout_seconds}
+            model_override = getattr(policy, "_model_override", "")
+            voice_override = getattr(policy, "_voice_override", "")
+            if model_override:
+                render_options["model_override"] = model_override
+            if voice_override:
+                render_options["voice_override"] = voice_override
+            audio = await renderer(context, chunk, **render_options)
             audio_data = audio.get("data") if isinstance(audio, dict) and audio.get("type") == "record" else None
             file_value = audio_data.get("file") if isinstance(audio_data, dict) else None
             if not isinstance(file_value, str) or not file_value.startswith("base64://"):

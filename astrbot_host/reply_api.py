@@ -43,24 +43,8 @@ class ReplyWebAPI:
                  "Read this window's withdrawn messages within the configured bound")]
 
     def _tts_catalog(self):
-        try:
-            providers = tuple(self.controller.context.get_all_tts_providers())
-        except Exception:
-            return {"state": "unavailable", "providers": []}
-        entries = {}
-        for provider in providers:
-            try:
-                metadata = provider.meta()
-                identifier = metadata.id
-            except Exception:
-                continue
-            if type(identifier) is str and identifier.strip() and len(identifier) <= 128:
-                item = {"id": identifier}
-                model = getattr(metadata, "model", None)
-                if type(model) is str and model.strip():
-                    item["model"] = model.strip()
-                entries[identifier] = item
-        return {"state": "ready", "providers": [entries[identifier] for identifier in sorted(entries)]}
+        from .voice import tts_provider_catalog
+        return tts_provider_catalog(self.controller.context)
 
     async def _run(self, action):
         from .web_api import outcome_response

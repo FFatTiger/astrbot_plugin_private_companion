@@ -7,6 +7,7 @@ from types import SimpleNamespace as NS
 import unittest
 from unittest.mock import AsyncMock, Mock
 
+from companion_v2.execution.models import TaskError
 from companion_v2.foundation.outcome import Outcome
 from companion_v2.conversation.private_debounce import Policy
 from companion_v2.conversation.voice_reply import VoiceReplyPolicy
@@ -526,6 +527,52 @@ class MainCoreReplyTests(unittest.IsolatedAsyncioTestCase):
             release.set()
             await topology.close()
         self.assertFalse(topology._pending)
+
+    async def test_hot_reload_new_instance_adopts_in_flight_core_reply(self):
+        event = CoreReplyEvent()
+        event.get_result = lambda: NS(result_content_type=NS(name="LLM_RESULT"))
+        target = NS(key="target", target_id="target")
+        prepared = {
+            "context": object(),
+            "instruction": "Use this companion persona.",
+            "target_id": "target",
+            "channel": "private",
+            "event_id": "in-flight-event",
+            "event_ref": "in-flight-event",
+            "origin_key": "origin",
+        }
+        old_authorize = AsyncMock(return_value=Outcome.failed(
+            "host_not_claimed", "the native event is outside the active configured targets"))
+        on_denied = Mock()
+        ENTRY.prepare_core_reply_event(
+            event, prepared, authorize=old_authorize, on_denied=on_denied, owner=object())
+        ENTRY.activate_core_reply_delivery_guard(event)
+
+        with self.assertRaises(TaskError):
+            await event.send("stale host reply")
+        self.assertEqual(event.sent, [])
+        on_denied.assert_called_once()
+
+        new_authorize = AsyncMock(return_value=Outcome.success(True))
+        plugin = ENTRY.PrivateCompanionV2StagingPlugin.__new__(ENTRY.PrivateCompanionV2StagingPlugin)
+        plugin.staging = NS(
+            now=lambda: None,
+            target_for_event=lambda _event: target,
+            authorize_core_reply=new_authorize,
+            session=NS(),
+        )
+
+        await plugin.guard_companion_core_delivery(event)
+        state = event.get_extra(ENTRY.CORE_REPLY_CONTEXT_EXTRA)
+        self.assertIs(state["owner"], plugin._core_reply_owner_token())
+        self.assertFalse(state["denial_notified"])
+
+        await event.send("recovered core reply")
+
+        new_authorize.assert_awaited_once()
+        self.assertEqual(new_authorize.await_args.args[:2], (event, target))
+        self.assertEqual(event.sent, ["recovered core reply"])
+        self.assertEqual((state["send_attempts"], state["send_returns"], state["send_unknown"]), (1, 1, 0))
 
 
 if __name__ == "__main__":

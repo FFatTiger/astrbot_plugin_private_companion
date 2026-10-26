@@ -1071,12 +1071,36 @@ function renderShell(){
   if(nav){
     /* 导航保留同一批按钮，切页时只更新选中态，键盘焦点与悬停不被重绘抹掉。 */
     if(!nav.querySelector('[data-shell-section]'))nav.innerHTML=shell?.railHTML()||'';
+    let activeNavLink=null;
     nav.querySelectorAll('[data-shell-section]').forEach(link=>{
       const active=link.dataset.shellSection===shell?.section;
       link.setAttribute('aria-pressed',String(active));
-      if(active)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');
+      if(active){activeNavLink=link;link.setAttribute('aria-current','page');}
+      else link.removeAttribute('aria-current');
     });
     window.CompanionPageMotion?.syncNavigation(nav);
+    /* 手机端导航是一条横向滚动带，直接打开某个分区时当前项可能在屏幕外。
+       只在选中分区真正变化时把当前项带到可见范围；数据刷新造成的重复绘制
+       不会打断用户手动横滑查看其它入口。 */
+    const navSelectionKey=String(shell?.section||'home');
+    if(nav.dataset.selectionKey!==navSelectionKey){
+      nav.dataset.selectionKey=navSelectionKey;
+      requestAnimationFrame(()=>{
+        if(!nav.isConnected||nav.dataset.selectionKey!==navSelectionKey)return;
+        if(nav.scrollWidth<=nav.clientWidth+1){nav.scrollLeft=0;return;}
+        let left=0;
+        if(activeNavLink?.isConnected){
+          const navRect=nav.getBoundingClientRect(),linkRect=activeNavLink.getBoundingClientRect();
+          if(linkRect.left>=navRect.left+8&&linkRect.right<=navRect.right-8)return;
+          left=Math.max(0,activeNavLink.offsetLeft-(nav.clientWidth-activeNavLink.offsetWidth)/2);
+        }
+        const behavior=state.reduceMotion||matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth';
+        if(Math.abs(nav.scrollLeft-left)>1){
+          if(typeof nav.scrollTo==='function')nav.scrollTo({left,behavior});
+          else nav.scrollLeft=left;
+        }
+      });
+    }
   }
   renderHomeEnvironment();
   renderStageBar();

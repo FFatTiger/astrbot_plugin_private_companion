@@ -1,4 +1,4 @@
-"""QQ Official account, route and AstrBot-session adaptation."""
+﻿"""QQ Official account, route and AstrBot-session adaptation."""
 
 from copy import deepcopy
 from dataclasses import replace
@@ -293,6 +293,11 @@ class OfficialMultiHostTests(MultiFixture, unittest.IsolatedAsyncioTestCase):
         )
         self.controller = self.make_controller(self.config)
 
+    async def test_blank_shared_provider_follows_astrbot_current_default(self):
+        self.config["model"]["provider_id"] = ""
+        self.controller.refresh_settings()
+        self.assertEqual(self.controller.settings.common.provider_id, "native-model")
+        await self.start_host()
     async def test_official_account_directory_reports_adapter_family_for_ui_labels(self):
         accounts = self.controller.session_topology.accounts()
         official = next(row for row in accounts if row["platform_id"] == ACCOUNT)

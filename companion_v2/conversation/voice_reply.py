@@ -50,7 +50,7 @@ def requested_voice_language(input_text):
 
     for language, name in _TURN_LANGUAGE_NAMES.items():
         chinese_request = re.search(
-            rf"(?:请|麻烦|这次|这回|本次|接下来)?\s*(?:用|以)\s*{name}\s*(?:语音)?\s*(?:跟我|对我|给我)?\s*(?:回复|回答|答复|说|讲|朗读|念|读)(?:一句|一段|一下)?",
+            rf"(?:请|麻烦|这次|这回|本次|接下来)?\s*(?:用|以)\s*{name}\s*(?:语音)?\s*[，,、\s]*(?:跟我|对我|给我)?\s*(?:回复|回答|答复|说|讲|朗读|念|读)(?:一句|一段|一下)?",
             text, re.I,
         ) or re.search(
             rf"(?:请|麻烦)?\s*{name}\s*(?:语音)?\s*(?:回复|回答|答复|朗读|念|读)", text, re.I,
@@ -227,7 +227,8 @@ class VoiceReplyPolicy:
         return prompt
 
     def provider_for_language(self):
-        return getattr(self, self.language + "_provider_id") or self.provider_id
+        return (getattr(self, "_provider_override", "")
+                or getattr(self, self.language + "_provider_id") or self.provider_id)
 
     def chance(self, kind):
         override = self.group_probability if kind == "group" else self.private_probability
@@ -244,6 +245,15 @@ class VoiceReplyPolicy:
     def primary_mention_words(self):
         return tuple(word.strip().casefold() for word in re.split(r"[,，;；\n]+", self.primary_mention_keywords)
                      if word.strip())
+
+
+def with_voice_override(policy, *, provider_id="", model="", voice=""):
+    """Attach a per-turn provider override without changing persisted fields."""
+    policy = replace(policy)
+    object.__setattr__(policy, "_provider_override", str(provider_id or ""))
+    object.__setattr__(policy, "_model_override", str(model or ""))
+    object.__setattr__(policy, "_voice_override", str(voice or ""))
+    return policy
 
 
 def capability_instruction(policy):

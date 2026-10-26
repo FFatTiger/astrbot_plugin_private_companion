@@ -968,8 +968,15 @@ window.CompanionWorkbench = (() => {
          写长名 `memory.enabled`（后端 `_normalize_patch` 按 field_id 查表，
          而它自己的测试就断言长名）。声明的函数把草稿名翻成网线上的名字。 */
       outbound = null,
+      /* 旧枚举值在进入表单前归一到当前选项，避免已保存的数据被误判为非法。 */
+      normalizeDraft = null,
     } = spec;
     const wireName = outbound || (name => name);
+    const draftFrom = (settings, status) => {
+      const draft = {...settings};
+      if (normalizeDraft) normalizeDraft(draft, status);
+      return draft;
+    };
     /* 读取侧与发送侧的令牌字段名可以不同：配置分区是 `edit_token` 收发同名，
        记忆分区读 `edit_token`、发 `expected_edit_token`。只声明一个的话，
        总有一侧拼错——读取静默落空（invalid_response），或保存被后端拒掉。 */
@@ -1709,8 +1716,8 @@ window.CompanionWorkbench = (() => {
       if (action === "reconcile") { void refresh(); return; }
       if (action === "reset") {
         if (state.stale) { void refresh({discardDraft: true}); return; }
-        state.draft = {...state.status.settings};
         state.base = {...state.status.settings};
+        state.draft = draftFrom(state.status.settings, state.status);
         state.conflicts = {};
         resets_ = [];
         state.notice = "已恢复为当前已保存配置。";
@@ -2182,7 +2189,7 @@ window.CompanionWorkbench = (() => {
         state.status = value;
         state.container = nextContainer;
         state.base = {...value.settings};
-        state.draft = {...value.settings};
+        state.draft = draftFrom(value.settings, value);
         state.conflicts = {};
         if (keepDraft) {
           for (const [name, draftValue] of Object.entries(previousDraft)) {
@@ -2344,7 +2351,7 @@ window.CompanionWorkbench = (() => {
           }
           state.status = fresh;
           state.container = buildContainer(fresh);
-          state.draft = {...fresh.settings};
+          state.draft = draftFrom(fresh.settings, fresh);
           state.base = {...fresh.settings};
           state.stale = false;
           state.conflicts = {};
@@ -2488,7 +2495,7 @@ window.CompanionWorkbench = (() => {
 
     function discard() {
       if (state.busy) return {error: '正在保存，请等待保存结果后再切换。'};
-      state.draft = state.base ? {...state.base} : null;
+      state.draft = state.base ? draftFrom(state.base, state.status) : null;
       resets_ = [];
       state.conflicts = {}; state.stale = false;
       // An unanswered request stays in sessionStorage for later reconciliation.

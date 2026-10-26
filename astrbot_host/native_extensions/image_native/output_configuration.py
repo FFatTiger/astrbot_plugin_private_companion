@@ -334,7 +334,10 @@ def save_configuration(plugin, revision, changes):
     if not callable(saver):
         raise NativeImageError("configuration_store_unavailable")
     try:
-        plugin.config["native_v2"] = {**original, "enabled": candidate["enabled"],
+        # ``native_v2.enabled`` is the lifecycle/config-availability flag.  Do
+        # not overload it with the output feature switch; a disabled output
+        # must still leave the extension and its editor loaded.
+        plugin.config["native_v2"] = {**original, "enabled": True,
                                       "backend": candidate["backend"], "output": candidate}
         saver()
     except Exception as exc:
@@ -342,11 +345,13 @@ def save_configuration(plugin, revision, changes):
         raise NativeImageError("configuration_save_failed") from exc
     if provider:
         provider.owner.backend = backend
-        provider._closed = not candidate["enabled"]
         provider.wait_budget_seconds = 1800
-    elif candidate["enabled"]:
+    else:
         from .bootstrap import build_provider
         from ... import main
-        plugin._native_v2_provider = build_provider(plugin, version=main.PLUGIN_VERSION)
+        provider = build_provider(plugin, version=main.PLUGIN_VERSION)
+        plugin._native_v2_provider = provider
+        if provider is None:
+            raise NativeImageError("image_provider_unavailable")
     plugin._native_v2_mode = candidate["enabled"]
     return public_configuration(plugin)

@@ -259,6 +259,26 @@ class SinglePageTests(PageRequests, unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await configure())["data"]["code"], "model_request_invalid")
         self.assertEqual(self.native.provider.client.state.calls, [])
 
+    async def test_model_status_projection_runs_off_the_event_loop(self):
+        (await self.controller.initialize_profile()).unwrap()
+        import threading
+        import astrbot_host.model_api as model_api
+        routes = {path: handler for path, handler, _, _ in self.native.registered_web_apis}
+        status = routes[PREFIX + "/model"]
+        main_thread = threading.get_ident()
+        workers = []
+        original = model_api.ModelManagement.status
+
+        def tracked(manager, *args, **kwargs):
+            workers.append(threading.get_ident())
+            return original(manager, *args, **kwargs)
+
+        with patch.object(model_api.ModelManagement, "status", new=tracked), \
+                patch("astrbot_host.model_api.request", NS(username="admin", query={})):
+            response = await status()
+        self.assertEqual(response["status"], "ok", response)
+        self.assertTrue(workers)
+        self.assertNotIn(main_thread, workers)
     async def test_setup_reads_pinned_identity_without_starting_the_host(self):
         (await self.controller.initialize_profile()).unwrap()
         before = self.controller.status()["session_state"]

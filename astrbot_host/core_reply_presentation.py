@@ -346,4 +346,6 @@ async def strip_internal_expression_stream(generator):
                 derive = getattr(chunk, "derive", None)
                 chunk = derive(output) if callable(derive) else MessageChain(chain=output)
             yield chunk
-    protocol.finish()
+    trailing = protocol.finish()
+    if trailing:
+        yield trailing

@@ -423,7 +423,8 @@ class ModelWebAPI:
         except Exception:
             return outcome_response(Outcome.failed("model_catalog_unavailable", "AstrBot provider list is unavailable"))
 
-    def _authorized(self, *, layer="role"):
+    def _authorized(self, *, layer="role", include_status=False, authorize=True,
+                    session=None, runtime=None):
         controller = self.controller
         username = request.username
         if type(username) is not str or not username.strip() or username.startswith("api_key:"):
@@ -435,12 +436,15 @@ class ModelWebAPI:
             raise TaskError("model_request_invalid", "model routes do not accept target overrides")
         if controller._terminated:
             raise TaskError("staging_host_terminated", "plugin is stopped")
-        session = controller.session or controller.last_session
-        if session is None or controller.runtime is None:
+        session = session if session is not None else (controller.session or controller.last_session)
+        runtime = runtime if runtime is not None else controller.runtime
+        if session is None or runtime is None:
             raise TaskError("staging_not_initialized", "load the V2 profile first")
-        operator = dashboard_operator(controller.runtime, username, at=controller.now())
+        operator = dashboard_operator(runtime, username, at=controller.now())
         manager = ModelManagement(session.application, session.profile.target)
-        status = require(manager.status(operator, layer=layer))
+        status = require(manager.status(operator, layer=layer)) if include_status else None
+        if authorize and not include_status:
+            require(manager.authorize(operator))
         return session, operator, manager, status
 
     @staticmethod
@@ -461,10 +465,25 @@ class ModelWebAPI:
                     raise TaskError("model_configuration_host_managed",
                                     "普通回复模型由 AstrBot 当前会话管理；此处只保存对话附加提示。")
             layer = data.get("layer", "role") if data is not None else request.query.get("layer", "role")
-            async with self.controller._control_lock:
-                _session, operator, manager, status = self._authorized(layer=layer)
-                result = (Outcome.success(status) if action == "status" else manager.maintenance(operator)
-                          if action == "maintenance" else manager.configure(operator, {**data, "layer": layer}))
+            # Capture the lifecycle-bound references under the control lock, but
+            # never run synchronous SQLite/projection work on the event loop.
+            # StorageRuntime already serialises its own read/write transactions.
+            controller = self.controller
+            async with controller._control_lock:
+                session = controller.session or controller.last_session
+                runtime = controller.runtime
+                if controller._terminated:
+                    raise TaskError("staging_host_terminated", "plugin is stopped")
+                if session is None or runtime is None:
+                    raise TaskError("staging_not_initialized", "load the V2 profile first")
+            _session, operator, manager, _status = await asyncio.to_thread(
+                self._authorized, layer=layer, authorize=False, session=session, runtime=runtime)
+            if action == "status":
+                result = await asyncio.to_thread(manager.status, operator, layer=layer)
+            elif action == "maintenance":
+                result = await asyncio.to_thread(manager.maintenance, operator)
+            else:
+                result = await asyncio.to_thread(manager.configure, operator, {**data, "layer": layer})
             if action in {"status", "configure"} and result.is_success:
                 result = Outcome.success(project_core_reply_configuration(result.unwrap()))
             if action == "maintenance" and result.is_success:
@@ -475,8 +494,9 @@ class ModelWebAPI:
                 if isinstance(memory_source, dict):
                     memory_source["linkage"] = await read_external_memory_summary(
                         self.controller, _session.profile.target)
-                async with self.controller._control_lock:
-                    self._authorized(layer=layer)
+                # External reads can take time; revalidate before returning the
+                # diagnostics rather than trusting the earlier authorization.
+                await asyncio.to_thread(manager.authorize, operator)
                 result = Outcome.success(payload)
             return self._response(result)
         except TaskError as error:
@@ -565,7 +585,7 @@ class ModelWebAPI:
             if type(provider_id) is not str or not provider_id or len(provider_id) > 128:
                 raise ValueError("invalid provider id")
             async with self.controller._control_lock:
-                _session, _operator, _manager, status = self._authorized()
+                _session, _operator, _manager, status = self._authorized(include_status=True)
                 if provider_id not in {item["id"] for item in status["providers"]}:
                     raise TaskError("model_provider_unavailable", "provider has no V2 adapter")
                 base = getattr(self.controller, "controller", self.controller)

@@ -8,6 +8,30 @@
 window.CompanionConfigEditors = (() => {
   const PREFIX = "/astrbot_plugin_private_companion/";
 
+  /* 前端选择器只展示当前规范值；历史版本写进数据库的别名仍在极少数窗口里，
+     读回时必须先归一，否则 valid() 会把它们判成非法，用户改别的字段也存不进去。
+     这两张表与后端 rest_gate.MODE_ALIASES / proactive.configuration.INTENSITY_ALIASES
+     保持一致；新增别名时两边一起改。 */
+  const REST_REPLY_MODE_ALIASES = Object.freeze({
+    model: "llm", "模型": "llm", llm_judge: "llm", "llm-judge": "llm",
+  });
+  const PROACTIVE_INTENSITY_ALIASES = Object.freeze({
+    "": "off", manual: "off", none: "off", default: "off", standard: "balanced",
+    active: "high_private", private: "high_private", group: "high_group",
+    online: "live", "直播": "live", "高频": "live",
+  });
+  const normalizedChoice = (value, aliases) => {
+    const text = String(value ?? "").trim().toLowerCase();
+    return Object.hasOwn(aliases, text) ? aliases[text] : value;
+  };
+  const normalizeLifeDraft = draft => {
+    draft.rest_reply_mode = normalizedChoice(draft.rest_reply_mode, REST_REPLY_MODE_ALIASES);
+  };
+  const normalizeContactDraft = draft => {
+    draft.proactive_intensity_preset = normalizedChoice(
+      draft.proactive_intensity_preset, PROACTIVE_INTENSITY_ALIASES);
+  };
+
   /* 主动联系支持四层历史数据；公共入口只编辑全局默认，个人覆盖在私聊用户页。
      174 个字段平铺成一张卡没法用，所以按「一条链一段」拆成 24 段：
      总闸 → 节奏与额度 → 强度与连发 → 免打扰 → 重复抑制 → 开口判定，
@@ -912,6 +936,9 @@ window.CompanionConfigEditors = (() => {
       },
       choices: {rest_reply_mode: {probability: "概率判定", llm: "模型判定"},
                 dream_afterglow_mode: {auto: "自动", "轻": "轻", "标准": "标准", "明显": "明显"}},
+      /* 旧版曾把 llm 写成 model / 模型 / llm_judge；后端写入仍接受这些别名，
+         但下拉只保留规范值。先归一草稿，才能通过 valid() 并把规范值写回。 */
+      normalizeDraft: normalizeLifeDraft,
       /* 两个时刻字段用时间控件。注册表里它们是 TEXT，内核的 valid() 对 TEXT
          只判「是不是字符串」，所以 HH:MM 的形状由下面的 audit 兜住。
          时区也是 TEXT，但必须声明成单行——内核默认把 TEXT 画成 textarea。 */
@@ -1463,6 +1490,9 @@ window.CompanionConfigEditors = (() => {
                                       moderate: "黄色 · 较重", severe: "橙色 · 严重",
                                       extreme: "红色 · 特别严重"},
       },
+      /* 旧版强度档位使用 manual / standard / active / group / online 等写法；
+         它们仍是后端接受的别名，但选项只列规范档位。读回时归一后再校验。 */
+      normalizeDraft: normalizeContactDraft,
       /* 时刻用时间控件（值仍是字符串）；时区、时间点、清单这类短文本声明成单行，
          否则内核按 TEXT 默认画成多行框。 */
       inputs: {
@@ -1770,7 +1800,7 @@ window.CompanionConfigEditors = (() => {
           sections, order:sections.flatMap(section => section.fields || [])};
       }
       if (view) {
-        for (const key of ["title", "note", "scopeNote", "navigationLimit", "segmentedChoices", "onStatus", "presentation", "sectionTabPrefix", "initialSection", "query", "requestSection", "savePath", "resetKey"]) {
+        for (const key of ["title", "note", "scopeNote", "navigationLimit", "segmentedChoices", "onStatus", "presentation", "sectionTabPrefix", "initialSection", "query", "requestSection", "savePath", "resetKey", "normalizeDraft"]) {
           if (Object.hasOwn(view, key)) current = {...current, [key]:view[key]};
         }
         for (const key of ["labels", "helps", "rows", "inputs", "catalogs"]) {
@@ -1789,6 +1819,9 @@ window.CompanionConfigEditors = (() => {
       /* 枚举选项必须转交内核：注册表里这些字段是 TEXT，
          取值合法性只有内核的 valid() 知道，漏传就会被当成任意文本放过。 */
       choices: current.choices || {},
+      /* 旧枚举值在进入表单前按分区归一；只改草稿、不改 base，
+         因此归一后的值仍算未保存改动，会在下一次保存时写回规范值。 */
+      normalizeDraft: current.normalizeDraft || null,
       order: current.order,
       /* 卡片右上角的生效范围文案默认由内核按继承链推断；四层组（主动联系偏好，
          链里多一层关系）必须自己声明，否则会被说成「角色共享」而漏掉关系层。 */

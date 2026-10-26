@@ -15,6 +15,7 @@ from companion_v2.execution.models import TaskError, digest
 from .multi_settings import MultiHostSettings
 from .native import remember_session_settings
 from .settings import HostControlError
+from .bootstrap_provider import resolve_bootstrap_provider, text_provider_catalog
 
 
 PREFIX = "/astrbot_plugin_private_companion/accounts"
@@ -49,44 +50,42 @@ class AccountSessionWebAPI:
             raise TaskError("account_config_invalid", "query fields are not allowed")
 
     def _model_providers(self):
-        """Return loaded AstrBot providers that can start the V2 host.
-
-        Account/session setup must not depend on the role-scoped model page:
-        that page intentionally appears only after a runtime exists.  This
-        small read-only catalog is the bootstrap surface for first startup.
-        """
+        """Return loaded AstrBot providers that can start the V2 host."""
         context = getattr(self.controller, "context", None)
         expected_type = getattr(getattr(self.controller, "native_types", None), "provider", None)
-        if context is None or expected_type is None:
+        if context is None:
             return []
-        found = []
-        try:
-            inventory = list(context.get_all_providers() or [])
-        except Exception:
-            return []
-        for provider in inventory:
-            try:
-                if not isinstance(provider, expected_type):
-                    continue
-                meta = provider.meta() if callable(getattr(provider, "meta", None)) else None
-                identifier = str(getattr(meta, "id", "") or getattr(provider, "id", "") or "").strip()
-                if not identifier:
-                    continue
-                name = str(getattr(meta, "name", "") or getattr(provider, "name", "") or identifier).strip()
-                found.append({"id": identifier, "name": (name or identifier)[:120]})
-            except (AttributeError, TypeError, ValueError):
-                continue
-        return sorted({item["id"]: item for item in found}.values(),
-                      key=lambda item: (item["name"].lower(), item["id"]))
+        return text_provider_catalog(context, expected_type)
 
     def _configured_provider_id(self):
         config = getattr(self.controller, "config", {})
         section = config.get("model", {}) if isinstance(config, dict) else {}
         return str(section.get("provider_id", "")) if isinstance(section, dict) else ""
 
+    def _model_selection(self):
+        context = getattr(self.controller, "context", None)
+        expected_type = getattr(getattr(self.controller, "native_types", None), "provider", None)
+        if context is None:
+            return None
+        return resolve_bootstrap_provider(context, expected_type, self._configured_provider_id())
+
     def _model_view(self):
-        return {"provider_id": self._configured_provider_id(),
-                "providers": self._model_providers()}
+        configured = self._configured_provider_id()
+        context = getattr(self.controller, "context", None)
+        expected_type = getattr(getattr(self.controller, "native_types", None), "provider", None)
+        selection = (resolve_bootstrap_provider(context, expected_type, configured)
+                     if context is not None else None)
+        providers = self._model_providers()
+        if selection is not None and selection.provider_id and not any(
+                item["id"] == selection.provider_id for item in providers):
+            providers.append({"id": selection.provider_id, "name": selection.name or selection.provider_id})
+        effective_id = selection.provider_id if selection is not None else ""
+        source = selection.source if selection is not None else "unavailable"
+        if configured and source == "fallback":
+            # A saved provider is a reviewed choice; never switch it silently.
+            effective_id, source = configured, "unavailable"
+        return {"provider_id": effective_id, "provider_source": source,
+                "configured_provider_id": configured, "providers": providers}
 
     def _view(self):
         controller = self.controller
@@ -420,7 +419,7 @@ class AccountSessionWebAPI:
             provider_id = body["provider_id"].strip()
             if not provider_id or len(provider_id) > 512:
                 raise TaskError("account_config_invalid", "the shared model provider id is invalid")
-            available = {item["id"] for item in self._model_providers()}
+            available = {item["id"] for item in self._model_view()["providers"]}
             expected_type = getattr(getattr(self.controller, "native_types", None), "provider", None)
             provider = (self.controller.context.get_provider_by_id(provider_id)
                         if getattr(self.controller, "context", None) is not None else None)

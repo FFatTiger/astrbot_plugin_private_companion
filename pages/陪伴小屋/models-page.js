@@ -3,6 +3,8 @@
 window.CompanionModelsPage = (() => {
   const PREFIX = "/astrbot_plugin_private_companion/";
   const routing = ["provider", "fallback", "max_output_tokens"];
+  const TASK_CONFIG_TIMEOUT_MS = 30000;
+  const TASK_CONFIG_RETRY_TIMEOUT_MS = 30000;
   const fields = ["provider", "fallback", "prompt", "max_output_tokens", "timeout_seconds", "replacement_rules", "fallback_on_refusal", "refusal_terms", "replacement_scope"];
   const fieldLabel = { provider: "主模型提供方", fallback: "备用模型提供方", prompt: "附加提示词",
     max_output_tokens: "输出上限", timeout_seconds: "请求超时", replacement_rules: "替换规则",
@@ -35,7 +37,7 @@ window.CompanionModelsPage = (() => {
     model_provider_unavailable: "所选 AstrBot 模型未加载或暂不可用于 V2。", model_capability_mismatch: "所选模型提供方不支持这项任务。", model_output_limit: "输出上限超过所选模型提供方能力。",
     model_catalog_unavailable: "无法读取已加载的 AstrBot 文本模型提供方。",
     model_fallback_duplicate: "备用模型提供方必须与主模型提供方不同。", core_access_required: "当前账号没有管理权限。", dashboard_identity_required: "请从已登录的 AstrBot 管理界面打开小屋。",
-    staging_not_initialized: "角色数据尚未就绪。请先在「账号与会话」选择共享启动模型并完成准备启动，再回来配置各任务路由。", staging_host_terminated: "插件已停止，请重新打开插件。", bridge_timeout: "连接超时，请核对原保存结果。",
+    staging_not_initialized: "角色数据尚未就绪。请先在「账号与会话」完成角色映射并准备启动；共享启动模型会自动跟随 AstrBot 当前模型，也可在账号页固定。", staging_host_terminated: "插件已停止，请重新打开插件。", bridge_timeout: "连接超时，请核对原保存结果。",
     model_route_invalid: "替换规则未通过校验：请检查规则默认模型提供方、匹配方式与时段。",
     model_refused: "所选模型提供方拒绝了这次请求。",
     model_probe_timeout: "测试超时，结果未知。", model_probe_failed: "模型提供方未返回可确认结果。",
@@ -134,6 +136,7 @@ window.CompanionModelsPage = (() => {
   const visible = s => snapshot(s).filter(task => shown(s, task));
   const selected = s => s.selection.filter(kind => taskOf(s, kind) && !coreReply(taskOf(s, kind)));
   const pendingCount = s => snapshot(s).reduce((count, task) => { const draft = s.drafts.get(task.kind); return count + (draft && !draft.pending && dirty(task, draft) ? 1 : 0); }, 0);
+  const pendingSaveCount = s => snapshot(s).reduce((count, task) => count + (s.drafts.get(task.kind)?.pending ? 1 : 0), 0);
   function readPending(kind) { try { const p = JSON.parse(sessionStorage.getItem(storageKey(kind)));
     if (!p || p.kind !== kind || typeof p.operation_key !== "string" || typeof p.edit_token !== "string" || !p.changes || !Array.isArray(p.reset)) return null;
     if (p.layer === undefined) p.layer = "window";
@@ -203,7 +206,7 @@ window.CompanionModelsPage = (() => {
     }
     return {wrapped: null, value: response};
   };
-  async function api(method, endpoint, body, timeout = 15000) { let timer;
+  async function api(method, endpoint, body, timeout = 30000) { let timer;
     try { const bridge = window.CompanionProduct.bridgeNow() || await window.CompanionProduct.bridgeFor();
       const response = await Promise.race([method === "GET" ? bridge.apiGet(endpoint, body) : bridge.apiPost(endpoint, body), new Promise((_, reject) => { timer = setTimeout(() => reject(failure("bridge_timeout")), timeout); })]);
       const {wrapped, value} = responseContent(response);
@@ -214,6 +217,17 @@ window.CompanionModelsPage = (() => {
       if (!value || typeof value !== "object" || Array.isArray(value)) throw failure("invalid_response");
       return value;
     } finally { clearTimeout(timer); } }
+  const isBridgeTimeout = err => (err?.code || err?.message) === "bridge_timeout";
+  async function configureTask(payload) {
+    // The host makes configure idempotent by operation_key. A bridge timeout
+    // is therefore an unknown result, not a failed write: re-send that exact
+    // operation once before asking the user to reconcile it manually.
+    try { return await api("POST", path + "/configure", payload, TASK_CONFIG_TIMEOUT_MS); }
+    catch (err) {
+      if (!isBridgeTimeout(err)) throw err;
+      return api("POST", path + "/configure", payload, TASK_CONFIG_RETRY_TIMEOUT_MS);
+    }
+  }
   function validateStatus(data) { if (!Array.isArray(data.tasks) || !Array.isArray(data.providers) || data.tasks.some(task =>
     typeof task.kind !== "string" || typeof task.edit_token !== "string" || task.edit_token.length !== 64
     || !task.fields || routing.some(name => !task.fields[name]) || routing.some(name => !Object.hasOwn(task.fields[name], "value")))) throw failure("invalid_response"); return data; }
@@ -284,11 +298,13 @@ window.CompanionModelsPage = (() => {
       <select data-model-assign aria-label="批量指派模型提供方" ${s.busy || s.loading || s.denied ? "disabled" : ""}><option value="">批量指派模型提供方…</option>${(s.status?.providers || []).map(provider => `<option value="${esc(provider.id)}">${esc(provider.id)}</option>`).join("")}</select>
       <button type="button" class="button small" data-model-action="inherit" ${s.busy || s.loading || s.denied ? "disabled" : ""}>恢复跟随上级</button>
       <button type="button" class="button small" data-model-action="clear-selection">取消选择</button></div>` : ""}`; }
-  function queue(s) { const count = pendingCount(s); if (!count) return "";
+  function queue(s) { const count = pendingCount(s), pending = pendingSaveCount(s); if (!count && !pending) return "";
+    const status = [count ? `<b>${count}</b> 项改动待保存` : "",
+      pending ? `<b>${pending}</b> 项保存结果待核对` : ""].filter(Boolean).join(" · ");
     return `<div class="model-queue ${s.busy ? "busy" : ""}" role="status">
-      <span><b>${count}</b> 项改动待保存 · 保存前不影响正在进行的任务</span>
-      <button type="button" class="button primary small" data-model-action="save-all" ${s.busy || s.loading ? "disabled" : ""}>全部保存</button>
-      <button type="button" class="button small" data-model-action="discard-all" ${s.busy || s.loading ? "disabled" : ""}>全部放弃</button></div>`; }
+      <span>${status}${count ? " · 保存前不影响正在进行的任务" : " · 可重试原操作，服务端会按操作键去重"}</span>
+      <button type="button" class="button primary small" data-model-action="save-all" ${s.busy || s.loading ? "disabled" : ""}>${pending ? (count ? "核对并保存" : "核对保存") : "全部保存"}</button>
+      ${count ? `<button type="button" class="button small" data-model-action="discard-all" ${s.busy || s.loading ? "disabled" : ""}>全部放弃</button>` : ""}</div>`; }
   /* Provider 的显示名：`id · 模型名`。
      只写 id 时，同一个 AstrBot 上挂两个同类型 Provider（很常见：一个便宜一个强）
      在下拉里是两行一模一样的字，选错只能靠试。模型名才是区分它们的信息。
@@ -315,7 +331,8 @@ window.CompanionModelsPage = (() => {
   }
   /* Design: precise config uses one card per task (sc.fn), not a table. */
   function coreReplyCard(s, task) {
-    const draft = s.drafts.get(task.kind), locked = s.loading || s.busy || s.denied || draft.pending;
+    const draft = s.drafts.get(task.kind), locked = s.loading || s.busy || s.denied;
+    const fieldLocked = locked || !!draft.pending;
     return `<article class="model-fncard${s.expanded === task.kind ? " open" : ""}" data-fncard="${esc(task.kind)}">
       <div class="model-sc-tp"><div class="model-eb">对话<span class="st"><span class="model-tag g">AstrBot 核心</span></span></div>
         <div class="model-ti">${icon(ICONS.reply)}<b>对话回复</b></div><p class="model-ds">${esc(task.routing_note || "普通回复采用 AstrBot 当前会话模型。")}</p></div>
@@ -323,19 +340,19 @@ window.CompanionModelsPage = (() => {
         ${conflictNotice(task, draft)}
         ${draft.pending ? '<div class="model-alert">上次保存结果未确认，请核对原保存。</div>' : ""}
         <label class="model-fd dash"><span class="model-cap">对话附加提示 <em>直接注入核心回复 · 最多 8000 字</em></span>
-          <textarea rows="5" maxlength="8000" data-model-field="prompt" data-model-kind="${esc(task.kind)}" ${locked ? "disabled" : ""}>${esc(effective(task, draft, "prompt"))}</textarea></label>
-        <div class="model-inh"><label><input type="checkbox" data-model-inherit="prompt" data-model-kind="${esc(task.kind)}" ${draft.inherited.prompt ? "checked" : ""} ${locked ? "disabled" : ""}>附加提示跟随上级</label></div>
+          <textarea rows="5" maxlength="8000" data-model-field="prompt" data-model-kind="${esc(task.kind)}" ${fieldLocked ? "disabled" : ""}>${esc(effective(task, draft, "prompt"))}</textarea></label>
+        <div class="model-inh"><label><input type="checkbox" data-model-inherit="prompt" data-model-kind="${esc(task.kind)}" ${draft.inherited.prompt ? "checked" : ""} ${fieldLocked ? "disabled" : ""}>附加提示跟随上级</label></div>
       </div><div class="model-sc-rf"><div class="r"><b>模型与呈现</b><span>AstrBot 当前会话的模型、工具往返、流式、分段和插件装饰</span></div>
         <div class="r"><b>提示组成</b><span>在「治理与维护 → 任务提示词」查看 V2 附加层与背景规则；人格与历史在 AstrBot 管理。</span></div></div>
       <div class="model-sc-ft"><code>${esc(task.kind)}</code><span class="model-grow"></span>
         ${draft.stale && !draft.pending ? `<button type="button" class="button small" data-model-action="rebase" data-model-kind="${esc(task.kind)}">已核对，保留草稿</button>` : ""}
-        ${draft.pending ? `<button type="button" class="button small" data-model-action="retry" data-model-kind="${esc(task.kind)}" ${s.busy ? "disabled" : ""}>核对原保存结果</button>` : ""}
-        <button type="button" class="button small" data-model-action="discard" data-model-kind="${esc(task.kind)}" ${locked ? "disabled" : ""}>放弃</button>
-        <button type="button" class="button small primary" data-model-action="save-one" data-model-kind="${esc(task.kind)}" ${locked || draft.stale || !dirty(task, draft) ? "disabled" : ""}>保存</button>
+        <button type="button" class="button small" data-model-action="discard" data-model-kind="${esc(task.kind)}" ${locked || draft.pending ? "disabled" : ""}>放弃</button>
+        <button type="button" class="button small primary" data-model-action="save-one" data-model-kind="${esc(task.kind)}" ${locked || (!draft.pending && (draft.stale || !dirty(task, draft))) ? "disabled" : ""}>${draft.pending ? "核对保存" : "保存"}</button>
       </div></article>`;
   }
   function fnCard(s, task) { const info = taskName(task.kind), draft = s.drafts.get(task.kind), locked = s.loading || s.busy || s.denied;
     if (coreReply(task)) return coreReplyCard(s, task);
+    const fieldLocked = locked || !!draft.pending;
     const picked = s.selection.includes(task.kind), open = s.expanded === task.kind, waiting = dirty(task, draft) && !draft?.pending;
     const limit = limitFor(s, task, draft);
     const main = providerFor(task, draft), fallback = effective(task, draft, "fallback");
@@ -355,19 +372,19 @@ window.CompanionModelsPage = (() => {
         ${conflictNotice(task, draft)}
         ${draft.pending ? '<div class="model-alert">上次保存结果未确认。请核对原操作，避免重复提交。</div>' : ""}
         <label class="model-fd"><span class="model-cap">主模型提供方 <em>上级默认 ${esc(task.fields.provider.inherited_value || "未设置")}</em></span>
-          <span class="model-msel"><i style="background:${pillColor(main)}"></i><select data-model-field="provider" data-model-kind="${esc(task.kind)}" aria-label="${esc(info.label)} 主模型提供方" ${locked || draft.pending ? "disabled" : ""}>${providerOptions(s, task, draft, "provider")}</select></span></label>
+          <span class="model-msel"><i style="background:${pillColor(main)}"></i><select data-model-field="provider" data-model-kind="${esc(task.kind)}" aria-label="${esc(info.label)} 主模型提供方" ${fieldLocked ? "disabled" : ""}>${providerOptions(s, task, draft, "provider")}</select></span></label>
         <label class="model-fd"><span class="model-cap">备用模型提供方 <em>主模型失败、超时或拒答时尝试一次</em></span>
-          <span class="model-msel"><i style="background:${pillColor(fallback)}"></i><select data-model-field="fallback" data-model-kind="${esc(task.kind)}" aria-label="${esc(info.label)} 备用模型提供方" ${locked || draft.pending ? "disabled" : ""}>${providerOptions(s, task, draft, "fallback")}</select></span></label>
+          <span class="model-msel"><i style="background:${pillColor(fallback)}"></i><select data-model-field="fallback" data-model-kind="${esc(task.kind)}" aria-label="${esc(info.label)} 备用模型提供方" ${fieldLocked ? "disabled" : ""}>${providerOptions(s, task, draft, "fallback")}</select></span></label>
         <div class="model-duo">
           <label class="model-fd"><span class="model-cap">请求超时</span>
-            <span class="model-unit"><input type="number" min="1" max="600" step="1" data-model-field="timeout_seconds" data-model-kind="${esc(task.kind)}" value="${esc(effective(task, draft, "timeout_seconds"))}" ${locked || draft.pending ? "disabled" : ""}><i>秒</i></span></label>
+            <span class="model-unit"><input type="number" min="1" max="600" step="1" data-model-field="timeout_seconds" data-model-kind="${esc(task.kind)}" value="${esc(effective(task, draft, "timeout_seconds"))}" ${fieldLocked ? "disabled" : ""}><i>秒</i></span></label>
           <label class="model-fd"><span class="model-cap">单次输出上限</span>
-            <span class="model-unit"><input type="number" min="1" max="${limit}" step="1" data-model-field="max_output_tokens" data-model-kind="${esc(task.kind)}" value="${esc(effective(task, draft, "max_output_tokens"))}" ${locked || draft.pending ? "disabled" : ""}><i>令牌</i></span></label>
+            <span class="model-unit"><input type="number" min="1" max="${limit}" step="1" data-model-field="max_output_tokens" data-model-kind="${esc(task.kind)}" value="${esc(effective(task, draft, "max_output_tokens"))}" ${fieldLocked ? "disabled" : ""}><i>令牌</i></span></label>
         </div>
         <label class="model-fd dash"><span class="model-cap">任务附加提示词 <em>最多 8000 字</em></span>
-          <textarea rows="3" maxlength="8000" data-model-field="prompt" data-model-kind="${esc(task.kind)}" ${locked || draft.pending ? "disabled" : ""}>${esc(draft.inherited.prompt ? task.fields.prompt.inherited_value : draft.values.prompt)}</textarea></label>
+          <textarea rows="3" maxlength="8000" data-model-field="prompt" data-model-kind="${esc(task.kind)}" ${fieldLocked ? "disabled" : ""}>${esc(draft.inherited.prompt ? task.fields.prompt.inherited_value : draft.values.prompt)}</textarea></label>
         <div class="model-inh"><span class="lab">未单独设置时跟随上级</span>
-          ${fields.map(name => `<label><input type="checkbox" data-model-inherit="${name}" data-model-kind="${esc(task.kind)}" ${draft.inherited[name] ? "checked" : ""} ${locked || draft.pending ? "disabled" : ""}>${esc(fieldLabel[name])}</label>`).join("")}</div>
+          ${fields.map(name => `<label><input type="checkbox" data-model-inherit="${name}" data-model-kind="${esc(task.kind)}" ${draft.inherited[name] ? "checked" : ""} ${fieldLocked ? "disabled" : ""}>${esc(fieldLabel[name])}</label>`).join("")}</div>
       </div>
       <div class="model-sc-rf">
         <div class="r"><b>来源</b><span>${sourceCell(s, task, draft)}</span></div>
@@ -379,9 +396,8 @@ window.CompanionModelsPage = (() => {
         <button type="button" class="button small" data-provider-test="${esc(main)}" ${!main || testing ? "disabled" : ""}>测试</button>
         <span class="model-grow"></span>
         ${draft.stale && !draft.pending ? `<button type="button" class="button small" data-model-action="rebase" data-model-kind="${esc(task.kind)}">已核对，保留草稿</button>` : ""}
-        ${draft.pending ? `<button type="button" class="button small" data-model-action="retry" data-model-kind="${esc(task.kind)}" ${s.busy ? "disabled" : ""}>核对原保存结果</button>` : ""}
-        <button type="button" class="button small" data-model-action="discard" data-model-kind="${esc(task.kind)}" ${locked ? "disabled" : ""}>放弃</button>
-        <button type="button" class="button small primary" data-model-action="save-one" data-model-kind="${esc(task.kind)}" ${locked || draft.stale || !dirty(task, draft) ? "disabled" : ""}>保存</button>
+        <button type="button" class="button small" data-model-action="discard" data-model-kind="${esc(task.kind)}" ${locked || draft.pending ? "disabled" : ""}>放弃</button>
+        <button type="button" class="button small primary" data-model-action="save-one" data-model-kind="${esc(task.kind)}" ${locked || (!draft.pending && (draft.stale || !dirty(task, draft))) ? "disabled" : ""}>${draft.pending ? "核对保存" : "保存"}</button>
       </div>
     </article>`; }
   function taskCards(s) { const rows = visible(s); if (!rows.length) return '<p class="model-empty">没有匹配的任务。</p>';
@@ -400,17 +416,19 @@ window.CompanionModelsPage = (() => {
            return `<li><button type="button" data-model-open="${esc(task.kind)}" aria-label="编辑 ${esc(info.label)} 的模型配置">${esc(info.label)}</button></li>`; }).join("") || '<li class="model-empty">还没有任务走这个模型提供方。</li>'}</ul>
          ${capable.length > routed.length ? `<p class="model-provider-note">还有 ${capable.length - routed.length} 项能力相符的任务由其他模型提供方承担。</p>` : ""}</article>`; }).filter(Boolean);
     return panels.length ? `<div class="model-providers">${panels.join("")}</div>` : '<p class="model-empty">没有匹配的任务。</p>'; }
-  function body(s) { if (!s.status) return '<p class="model-empty">角色就绪后显示可用模型任务。</p>';
+  function body(s) { if (!s.status) return s.bad
+    ? `<div class="model-empty" role="status"><p>任务配置尚未读取成功，请重新读取。</p><button type="button" class="button primary small" data-model-action="refresh" ${s.loading || s.busy ? "disabled" : ""}>重新读取</button></div>`
+    : '<p class="model-empty">角色就绪后显示可用模型任务。</p>';
     if (!snapshot(s).length) return '<p class="model-empty">当前没有可用的模型任务。</p>';
     return s.view === "providers" ? providerView(s) : taskCards(s); }
   function syncInput(kind) { const s = state; if (!root || !s) return;
     const slot = root.querySelector(".model-queue-slot"); if (slot) slot.innerHTML = queue(s);
     const task = taskOf(s, kind), draft = s.drafts.get(kind);
     const save = [...root.querySelectorAll('[data-model-action="save-one"]')].find(button => button.dataset.modelKind === kind);
-    if (save && task && draft) save.disabled = draft.stale || draft.pending || !dirty(task, draft); }
+    if (save && task && draft) { save.disabled = !draft.pending && (draft.stale || !dirty(task, draft)); save.textContent = draft.pending ? "核对保存" : "保存"; } }
   /* ---------- functional actions ---------- */
   async function refresh() { const s = state, ticket = version; if (!s || s.loading || s.busy) return; s.loading = true; s.notice = "正在读取任务配置…"; render();
-    try { const data = await api("GET", path, {layer: s.layer || "role"}); if (!current(ticket, s)) return; setStatus(s, data); s.bad = false; s.denied = false; s.notice = "已读取当前任务配置。"; }
+    try { const data = await api("GET", path, {layer: s.layer || "role"}, TASK_CONFIG_TIMEOUT_MS); if (!current(ticket, s)) return; setStatus(s, data); s.bad = false; s.denied = false; s.notice = "已读取当前任务配置。"; }
     catch (err) { if (!current(ticket, s)) return;
       /* 失败后的页面只能显示错误与重试入口，不能把上一次的任务路由、Provider
          和可编辑草稿继续当成当前真实配置。未提交草稿和待核对保存仍保留，
@@ -421,10 +439,10 @@ window.CompanionModelsPage = (() => {
       for (const draft of s.drafts.values()) {
         if (draft && (draft.touched || draft.pending)) draft.stale = true;
       }
-      s.bad = true; s.denied = true; s.notice = fail(err, "无法读取任务配置，请重新读取状态。"); }
+      s.bad = true; s.denied = false; s.notice = fail(err, "无法读取任务配置，请点击重新读取。"); }
     finally { s.loading = false; if (current(ticket, s)) render(); } }
   async function reloadConflict(s, ticket) {
-    const data = await api("GET", path, {layer: s.layer || "role"});
+    const data = await api("GET", path, {layer: s.layer || "role"}, TASK_CONFIG_TIMEOUT_MS);
     if (!current(ticket, s)) return false;
     setStatus(s, data); s.denied = false;
     const conflict = snapshot(s).find(task => s.drafts.get(task.kind)?.stale && !s.drafts.get(task.kind)?.pending);
@@ -445,53 +463,72 @@ window.CompanionModelsPage = (() => {
     } catch (err) { if (current(ticket, s)) { s.bad = true; s.notice = fail(err, "未能读取最新配置，请重新读取后再核对。"); } }
     finally { s.busy = false; if (current(ticket, s)) render(); }
   }
-  async function saveTasks(s, kinds) { if (s.busy || s.loading || s.denied) return; const unsaved = kinds.filter(kind => { const task = taskOf(s, kind), draft = s.drafts.get(kind);
-    return task && draft && !draft.stale && !draft.pending && dirty(task, draft); });
-    if (!unsaved.length) { s.bad = true; s.notice = "这些任务没有待保存的改动。"; render(); return; }
-    const ticket = version; s.busy = true; s.bad = false; s.notice = `正在保存 ${unsaved.length} 项任务路由…`; render();
-    const failed = []; let saved = 0, conflict = false, reread = false;
-    for (const kind of unsaved) { if (ticket !== version) return;
+  async function saveTasks(s, kinds) {
+    if (s.busy || s.loading) return;
+    if (s.denied) { s.bad = true; s.notice = "当前尚未读取到任务配置，请先点击重新读取。"; render(); return; }
+    const entries = kinds.map(kind => ({kind, task: taskOf(s, kind), draft: s.drafts.get(kind)}))
+      .filter(item => item.task && item.draft);
+    const pending = entries.filter(item => item.draft.pending);
+    const unsaved = entries.filter(item => !item.draft.pending && !item.draft.stale && dirty(item.task, item.draft));
+    const stale = entries.filter(item => !item.draft.pending && item.draft.stale);
+    if (!pending.length && !unsaved.length) {
+      s.bad = true;
+      s.notice = stale.length ? `${stale.length} 项草稿已过期，请核对最新配置后再保存。`
+        : "这些任务没有待保存的改动。";
+      render(); return;
+    }
+    const ticket = version; s.busy = true; s.bad = false;
+    s.notice = pending.length && !unsaved.length ? `正在核对 ${pending.length} 项原保存结果…`
+      : `正在保存 ${pending.length + unsaved.length} 项任务路由…`;
+    render();
+    const failed = []; let saved = 0, confirmed = 0, conflict = false, layerChanged = false;
+    for (const kind of pending.concat(unsaved).map(item => item.kind)) {
+      if (ticket !== version) return;
       const task = taskOf(s, kind), draft = s.drafts.get(kind); if (!task || !draft) continue;
-      const patch = patchFor(task, draft);
-      if (!validatePatch(task, patch)) { failed.push(`${taskName(kind).label}：字段校验未通过`); continue; }
-      draft.pending = { kind, layer: draft.layer, operation_key: crypto.randomUUID(), edit_token: draft.token, ...patch }; storePending(kind, draft.pending); render();
-      try { const result = await api("POST", path + "/configure", draft.pending);
+      let payload = draft.pending;
+      if (!payload) {
+        const patch = patchFor(task, draft);
+        if (!validatePatch(task, patch)) { failed.push(`${taskName(kind).label}：字段校验未通过`); continue; }
+        payload = {kind, layer: draft.layer, operation_key: crypto.randomUUID(), edit_token: draft.token, ...patch};
+        draft.pending = payload; storePending(kind, payload); render();
+      }
+      try { const result = await configureTask(payload);
         if (ticket !== version) return;
         if (result?.task?.kind !== kind || typeof result.replayed !== "boolean") throw failure("invalid_response");
-        storePending(kind, null); const index = s.status.tasks.findIndex(t => t.kind === kind); if (index >= 0) s.status.tasks[index] = result.task;
-        s.drafts.set(kind, newDraft(result.task)); saved++; }
-      catch (err) { if (ticket !== version) return;
+        storePending(kind, null); draft.pending = null;
+        if (result.task.configuration_layer && result.task.configuration_layer !== s.layer) {
+          layerChanged = true;
+        } else {
+          const index = s.status.tasks.findIndex(t => t.kind === kind); if (index >= 0) s.status.tasks[index] = result.task;
+          s.drafts.set(kind, newDraft(result.task));
+        }
+        saved++; if (result.replayed) confirmed++;
+      } catch (err) { if (ticket !== version) return;
         if (err.confirmed) { storePending(kind, null); draft.pending = null;
           if ((err.code || err.message) === "configuration_revision_conflict") { draft.stale = true; conflict = true; } }
         failed.push(`${taskName(kind).label}：${fail(err, "保存未通过")}`); }
-      render(); }
+      render();
+    }
     if (ticket !== version) return;
-    if (conflict) { try { reread = await reloadConflict(s, ticket); } catch { /* Keep the draft locked until a successful read. */ } }
+    if (conflict) { try { await reloadConflict(s, ticket); } catch { /* Keep the draft locked until a successful read. */ } }
     if (ticket !== version) return;
+    if (layerChanged) { s.busy = false; await refresh(); if (!s.bad) s.notice = "当前作用域已重新读取，请核对保留的草稿。"; return; }
     s.busy = false; s.bad = failed.length > 0;
-    const recovery = conflict ? (reread ? "已读取最新配置，草稿仍保留；有冲突的字段已标出，其他改动可继续保存。" : "暂未读到最新配置，草稿已保留，请重新读取后核对。") : "改动仍保留，可修改后继续保存。";
-    s.notice = failed.length ? `已保存 ${saved} 项；${failed.length} 项未通过：${failed.join("；")} ${recovery}`
-      : `已保存 ${saved} 项。下一次启动的任务会采用当前配置。`;
+    const leftPending = kinds.reduce((count, kind) => count + (s.drafts.get(kind)?.pending ? 1 : 0), 0);
+    const recovery = leftPending
+      ? `其中 ${leftPending} 项保存结果仍待核对；可再次点击全部保存复用原操作键重试。`
+      : conflict ? "有冲突的字段已标出，请核对后继续保存。"
+      : "改动仍保留，可修改后继续保存。";
+    if (failed.length) {
+      s.notice = `已保存 ${saved} 项；${failed.length} 项未通过：${failed.join("；")} ${recovery}`;
+    } else {
+      s.notice = confirmed && saved === confirmed
+        ? `原保存已确认（${confirmed} 项）。下一次任务会采用当前配置。`
+        : `已保存 ${saved} 项。下一次启动的任务会采用当前配置。`;
+      s.bad = false;
+    }
     render(); }
-  async function retry(s, kind) { const task = taskOf(s, kind), draft = s.drafts.get(kind); if (!draft?.pending || s.busy) return;
-    const ticket = version; s.busy = true; s.notice = "正在核对原保存结果…"; render();
-    try { const result = await api("POST", path + "/configure", draft.pending); if (!current(ticket, s)) return;
-      if (result?.task?.kind !== kind || typeof result.replayed !== "boolean") throw failure("invalid_response");
-      if (result.task.configuration_layer && result.task.configuration_layer !== s.layer) {
-        storePending(kind, null); draft.pending = null; s.busy = false; await refresh();
-        s.notice = result.replayed ? "原保存已确认。当前作用域已重新读取。" : "已保存。当前作用域已重新读取。"; return;
-      }
-      storePending(kind, null); const index = s.status.tasks.findIndex(t => t.kind === kind); if (index >= 0) s.status.tasks[index] = result.task;
-      s.drafts.set(kind, newDraft(result.task)); s.bad = false; s.notice = result.replayed ? "原保存已确认。下一次任务会采用当前配置。" : "已保存。下一次任务会采用当前配置。"; }
-    catch (err) { if (!current(ticket, s)) return; s.bad = true;
-      if (err.confirmed) { storePending(kind, null); draft.pending = null; s.notice = fail(err, "保存未通过，请核对字段。");
-        if ((err.code || err.message) === "configuration_revision_conflict") {
-          draft.stale = true;
-          try { if (await reloadConflict(s, ticket)) s.notice = "已读取最新配置并保留草稿，请核对标出的字段后继续保存。"; }
-          catch { s.notice = "未能读取最新配置，草稿已保留，请重新读取后核对。"; }
-        } }
-      else s.notice = "保存结果尚未确认。请核对原保存结果后继续编辑。"; }
-    finally { s.busy = false; if (current(ticket, s)) render(); } }
+  async function retry(s, kind) { return saveTasks(s, [kind]); }
   function assign(s, providerId) { const kinds = selected(s); if (!providerId || !kinds.length) return;
     const skipped = []; let changed = 0;
     for (const kind of kinds) { const task = taskOf(s, kind), draft = s.drafts.get(kind); if (!task || !draft || draft.pending || draft.stale) continue;
@@ -601,7 +638,7 @@ window.CompanionModelsPage = (() => {
     if (action === "save-one") { saveTasks(s, [kind]); return; }
     if (action === "discard") { s.drafts.set(kind, newDraft(taskOf(s, kind))); s.notice = "草稿已放弃。"; s.bad = false; render(); }
     if (action === "rebase") { rebase(s, kind); return; }
-    if (action === "retry") retry(s, kind); }
+    if (action === "retry") { retry(s, kind); return; } }
   /* ---------- voice model ---------- */
   const voiceCurrent = v => v.data.languages.find(l => l.k === v.ui.lang) || v.data.languages[0];
   const voiceBinding = (v, lang) => v.draft.bindings[lang.k] ?? "";
@@ -837,8 +874,10 @@ window.CompanionModelsPage = (() => {
     const bound = v.data.languages.filter(item => voiceBinding(v, item)).length;
     const missing = binding && !loaded;
     const shared = binding ? v.data.languages.filter(item => item.k !== lang.k && voiceBinding(v, item) === binding) : [];
+    const providerLabel = item => [item?.id, item?.model, item?.voice].filter(Boolean).join(" · ");
     const dot = item => { const b = voiceBinding(v, item); return !b ? "var(--m-line2)" : v.data.providers.some(p => p.id === b) ? "var(--m-green)" : "var(--m-red)"; };
-    const sub = item => { const b = voiceBinding(v, item); return b ? esc(b) + (v.data.providers.some(p => p.id === b) ? " · 已加载" : " · 未加载") : "跟随当前会话的语音服务"; };
+    const sub = item => { const b = voiceBinding(v, item); const provider = v.data.providers.find(p => p.id === b);
+      return b ? esc(provider ? providerLabel(provider) : b) + (provider ? " · 已加载" : " · 未加载") : "跟随当前会话的语音服务"; };
     const test = v.lastTest;
     return `<div class="model-voice">
       <div class="model-card"><div class="model-phead"><div class="model-grow"><span class="model-eb">合成后端</span><h3>语音模型</h3></div>
@@ -853,7 +892,7 @@ window.CompanionModelsPage = (() => {
           <button type="button" class="button small" data-voice-unbind ${v.busy || v.loading || v.pending ? "disabled" : ""}>解除${shared.map(item => item.n).join("、")}绑定</button></div>` : ""}
         <div class="model-vbar"><label class="model-fd"><span class="model-cap">${esc(lang.n)} 语音服务 <em>连接、凭据和声音由 AstrBot 语音配置管理</em></span>
           <select data-voice-provider ${v.busy || v.loading || v.pending ? "disabled" : ""}><option value="">跟随 AstrBot 当前会话的语音服务</option>
-            ${v.data.providers.map(p => `<option value="${esc(p.id)}" ${p.id === binding ? "selected" : ""}>${esc(p.id)}</option>`).join("")}
+            ${v.data.providers.map(p => `<option value="${esc(p.id)}" ${p.id === binding ? "selected" : ""}>${esc(providerLabel(p))}</option>`).join("")}
             ${missing ? `<option value="${esc(binding)}" selected>${esc(binding)} · 未加载</option>` : ""}</select></label></div>
         <div class="model-vfoot"><span class="model-sample">合成样句：${esc(VOICE_SAMPLES[lang.k] || "")}</span>
           <span class="model-res">${v.testing ? '<span class="model-sp"></span>测试中'

@@ -320,6 +320,11 @@ class ModelManagement:
             action="configuration.write" if write else "configuration.read",
             observed_at=self.app.now(), core_only=True))
 
+    @outcome
+    def authorize(self, operator, *, write=False):
+        """Validate Dashboard access without building the full task projection."""
+        return self._authorize(operator, write=write)
+
     def _profile(self, kind):
         if type(kind) is not str or kind not in self.app.router.profiles:
             raise TaskError("model_task_unavailable", "select a registered model task")

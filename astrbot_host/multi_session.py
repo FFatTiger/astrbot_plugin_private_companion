@@ -993,7 +993,16 @@ class MultiHostSession:
                         common_settings = self.settings.common
                         configured_voice_policy = (common_settings.voice_reply_policy
                                                    if common_settings.voice_reply_enabled else None)
-                    if configured_voice_policy is not None:
+                    admin_override = None
+                    if self._actor_is_core(context):
+                        from .voice import admin_voice_override, tts_provider_catalog
+                        admin_override = admin_voice_override(
+                            configured_voice_policy, captured.text,
+                            tts_provider_catalog(self.bridge.context))
+                    if admin_override is not None:
+                        configured_voice_policy = configured_voice_policy or admin_override
+                        voice_policy = admin_override
+                    elif configured_voice_policy is not None:
                         candidate = voice_policy_for_turn(configured_voice_policy, captured.text)
                         primary_mention = self._core_user_mention_matches(
                             event, context, candidate, captured.text, captured.at)
@@ -1060,6 +1069,16 @@ class MultiHostSession:
             finally:
                 if not prepared_ok and presence is not None and typing_context is not None:
                     presence.finish_native_reply(typing_context, typing_turn)
+
+    def _actor_is_core(self, context):
+        try:
+            subject = context.actor.subject
+            row = self.runtime.read_one(
+                "SELECT tier FROM subject_access_tiers WHERE subject_kind = ? AND subject_id = ?",
+                (subject.kind.value, subject.subject_id))
+            return bool(row and row["tier"] == AuthorizationTier.CORE.value)
+        except Exception:
+            return False
 
     def _core_user_mention_matches(self, event, context, policy, text, at):
         words = policy.primary_mention_words()

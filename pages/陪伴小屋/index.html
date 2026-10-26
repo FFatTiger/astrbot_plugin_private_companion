@@ -85,7 +85,7 @@
   <link rel="stylesheet" href="output-page.css?v=image-route-config-20261012">
   <link rel="stylesheet" href="decision-page.css?v=reply-decision-split-20261001">
   <link rel="stylesheet" href="action-page.css?v=action-workspace-20261007">
-  <link rel="stylesheet" href="home.css?v=agenda-scroll-20261014">
+  <link rel="stylesheet" href="home.css?v=mobile-ergonomics-20261027">
   <link rel="stylesheet" href="models-page.css?v=image-model-name-20261026">
   <link rel="stylesheet" href="product-page.css?v=no-host-state-20260929">
   <link rel="stylesheet" href="native-extension-panel.css?v=mobile-mihome-controls-20261026">
@@ -102,7 +102,7 @@
   <link rel="stylesheet" href="entrance.css?v=cottage-title-in-scene-20261005-r1">
   <!-- 外壳布局：小屋常驻 + 左栏 + 右栏 + 下方面板。必须在 styles.css 之后，
        它覆盖旧的固定定位左栏与顶栏栅格。 -->
-  <link rel="stylesheet" href="shell.css?v=config-experience-20261017">
+  <link rel="stylesheet" href="shell.css?v=mobile-ergonomics-20261027">
   <link rel="stylesheet" href="self-page.css?v=self-profile-avatar-20261014">
   <link rel="stylesheet" href="theme-skins.css?v=theme-material-20261001">
   <link rel="stylesheet" href="page-motion.css?v=page-interactions-20261011">
@@ -164,15 +164,15 @@
   <template data-workspace-bundle="host"><script src="workspace-bundles/host.js?v=shared-role-merge-20261026"></script></template>
   <template data-workspace-bundle="life"><script src="workspace-bundles/life.js?v=workspace-lazy-20261012"></script></template>
   <template data-workspace-bundle="relationships"><script src="workspace-bundles/relationships.js?v=workspace-lazy-20261012"></script></template>
-  <template data-workspace-bundle="identity"><script src="workspace-bundles/identity.js?v=group-directory-dedupe-20261026"></script></template>
+  <template data-workspace-bundle="identity"><script src="workspace-bundles/identity.js?v=tts-provider-picker-20261027"></script></template>
   <template data-workspace-bundle="persona"><script src="workspace-bundles/persona.js?v=workspace-lazy-20261012"></script></template>
   <script defer src="home-sidebar.js?v=planning-feedback-20261019"></script>
-  <script defer src="product-page.js?v=shared-model-bootstrap-20261026"></script>
+  <script defer src="product-page.js?v=shared-role-source-20261027"></script>
   <script defer src="confirmation-dialog.js?v=consolidated-20261024-r1"></script>
   <script defer src="native-extension-management.js?v=mobile-mihome-controls-20261026"></script>
   <script defer src="native-extension-panel.js?v=mobile-mihome-controls-20261026"></script>
   <script defer src="self-relationship.js?v=core-user-profile-20261007"></script>
-  <script defer src="home-environment.js?v=role-time-auto-light-20261004"></script>
+  <script defer src="home-environment.js?v=mobile-clock-20261027"></script>
   <!-- 设置与迁移工作区：依赖 product-page.js 的桥接与错误翻译。 -->
   <script defer src="migration-config-review.js?v=consolidated-20261024-r1"></script>
   <script defer src="migration-config-table.js?v=migration-guided-20261025"></script>
@@ -202,20 +202,20 @@
   <script defer src="calendar-editor.js?v=schedule-workspace-20261003-r2"></script>
   <script defer src="state-editor.js?v=typing-lifecycle-20261018"></script>
   <script defer src="state-page.js?v=state-feedback-20261019"></script>
-  <script defer src="reply-page.js?v=prompt-style-mode-20261016"></script>
+  <script defer src="reply-page.js?v=tts-provider-picker-20261027"></script>
   <script defer src="host-options-page.js?v=forward-intake-settings-20261004"></script>
   <!-- 工作台内核必须先于使用它的编辑器加载（config-editor / expression-page
        都依赖 CompanionWorkbench）。 -->
-  <script defer src="workbench-page.js?v=voice-quote-delete-20261025"></script>
+  <script defer src="workbench-page.js?v=normalize-draft-20261027"></script>
   <!-- 忆忆策略位于忆忆页的独立视图。 -->
   <script defer src="memory-settings-section.js?v=memory-config-ownership-20261001"></script>
-  <script defer src="config-editor.js?v=image-policy-20261026"></script>
+  <script defer src="config-editor.js?v=legacy-enum-normalize-20261027"></script>
   <script defer src="output-page.js?v=image-model-name-20261026"></script>
   <script defer src="role-profile-draft.js?v=consolidated-20261024-r1"></script>
   <script defer src="role-profile-migration.js?v=migration-ui-20261015"></script>
   <script defer src="decision-page.js?v=role-wakeup-shared-20261013"></script>
   <script defer src="expression-page.js?v=expression-completion-20261008"></script>
-  <script defer src="models-page.js?v=shared-model-bootstrap-20261026"></script>
+  <script defer src="models-page.js?v=tts-provider-picker-20261027"></script>
   <script defer src="image-materials-page.js?v=reference-usage-persistence-20261007"></script>
   <script defer src="maintenance-page.js?v=meal-topics-auto-dates-20261025"></script>
   <script defer src="appearance-page.js?v=appearance-workbench-20261008"></script>
@@ -224,7 +224,7 @@
   <script defer src="backup-page.js?v=data-subpages-20261008-r2"></script>
   <script defer src="storage-page.js?v=data-subpages-20261008-r2"></script>
   <script defer src="understanding-page.js?v=understanding-figma-layout-20261007"></script>
-  <script defer src="app.js?v=mobile-mihome-controls-20261026"></script>
+  <script defer src="app.js?v=mobile-nav-scroll-20261027"></script>
 </head>
 <body>
   <!-- 启动幕：首屏闸门（tokens.css 的 data-room-ready）在体素包解析完之前

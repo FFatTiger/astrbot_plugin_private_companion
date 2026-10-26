@@ -358,11 +358,20 @@ window.CompanionProduct = (() => {
     }
   }
   const target = () => catalog?.targets.find(item => item.target_id === selected.target_id);
+  const targetPreference = item => [
+    item.scope_kind === "private" ? 1 : 0,
+    item.scope_kind === "private" && item.participant_id && item.participant_id !== "*" ? 1 : 0,
+    item.display_name ? 1 : 0,
+  ];
+  const prefersTarget = (candidate, current) => {
+    const left = targetPreference(candidate), right = targetPreference(current);
+    return left.some((value, index) => value !== right[index] && value > right[index]);
+  };
   const roleChoices = () => {
     const choices = new Map();
     for (const item of catalog?.targets || []) for (const persona of item.roles || []) {
       const previous = choices.get(persona.role_id);
-      if (!previous || item.scope_kind === "private" && previous.target.scope_kind !== "private") {
+      if (!previous || prefersTarget(item, previous.target)) {
         choices.set(persona.role_id, {target:item, role:persona});
       }
     }
@@ -371,14 +380,15 @@ window.CompanionProduct = (() => {
   };
   const roleTarget = () => {
     const current = target();
-    if (current?.scope_kind === "private" && current.roles.some(item => item.role_id === selected.role_id)) return current;
+    if (current?.scope_kind === "private" && current.participant_id !== "*"
+        && current.roles.some(item => item.role_id === selected.role_id)) return current;
     return roleChoices().find(item => item.role.role_id === selected.role_id)?.target || null;
   };
   const role = () => {
     const current = target()?.roles.find(item => item.role_id === selected.role_id);
     const owner = roleTarget()?.roles.find(item => item.role_id === selected.role_id);
-    if (!current) return owner;
-    if (target()?.scope_kind !== "group" || !owner || owner === current) return current;
+    if (!owner) return current;
+    if (target()?.scope_kind !== "group" || owner === current) return owner;
     return {...owner, reply_api:current.reply_api || owner.reply_api,
       group_memory_api:current.group_memory_api || null};
   };

@@ -5,9 +5,13 @@ from datetime import timedelta
 from types import SimpleNamespace as NS
 from unittest.mock import patch
 
-from astrbot_host.image_access import IMAGE_CAPABILITIES, ensure_image_access
+from astrbot_host.image_access import GROUP_IMAGE_CAPABILITIES, IMAGE_CAPABILITIES, ensure_image_access
 from companion_v2.capabilities import CapabilityAuthorizationState, CapabilityPackageDescriptor
 from companion_v2.capabilities.repositories import CapabilityRepository
+from companion_v2.configuration.models import ConfigLayer, ConfigTarget
+from companion_v2.conversation.media.output_settings import (
+    GROUP as IMAGE_OUTPUT_GROUP, ImageOutputConfigurationOwner, configuration_fields,
+)
 from companion_v2.foundation.refs import ScopeKind
 from companion_v2.identity_policy.models import AuthorizationTier
 from companion_v2.identity_policy.repository import PersistentIdentityDirectory
@@ -45,6 +49,20 @@ class ImageAccessTests(G6Fixture):
     def records(self):
         return tuple(tuple(tuple(row) for row in self.runtime.read_all("SELECT * FROM " + table, ()))
                      for table in ("capability_role_selections", "capability_authorizations"))
+
+    def group_context(self, **changes):
+        scope = replace(self.scope, kind=ScopeKind.GROUP, native_scope_id="group-1",
+                        session_id="group-1", conversation_id="group-conversation", **changes)
+        return NS(scope=scope, actor=self.context.actor, role_binding=self.context.role_binding)
+
+    def set_image_output(self, **changes):
+        target = ConfigTarget(self.scope.installation_id, ConfigLayer.ROLE, self.role,
+                              bot_id=self.scope.bot_id)
+        fields = configuration_fields()
+        owner = ImageOutputConfigurationOwner(self.runtime)
+        owner.write(target, fields,
+            changes={IMAGE_OUTPUT_GROUP + "." + name: value for name, value in changes.items()},
+            reset=(), expected_revision=owner.read(target, fields).revision, observed_at=self.clock.now())
 
     def test_missing_installation_can_be_repaired_after_native_start(self):
         self.ensure()
@@ -91,11 +109,48 @@ class ImageAccessTests(G6Fixture):
         self.ensure()
         self.assertEqual(self.records(), ((), ()))
 
-    def test_group_does_not_inherit_private_defaults(self):
+    def test_group_uses_its_own_policy_gated_defaults_without_private_inheritance(self):
         self.install_image()
-        self.ensure(NS(scope=replace(self.scope, kind=ScopeKind.GROUP),
-                       actor=self.context.actor, role_binding=self.context.role_binding))
-        self.assertEqual(self.records(), ((), ()))
+        group = self.group_context()
+        self.ensure(group)
+        for capability in GROUP_IMAGE_CAPABILITIES:
+            self.assertEqual(self.consent(capability, context=group).unwrap().state,
+                             CapabilityAuthorizationState.ACTIVE)
+        self.assertEqual(self.consent("image.mask_edit", context=group).failure.code,
+                         "capability_consent_missing")
+        self.assertEqual(self.consent().failure.code, "capability_consent_missing")
+        before = self.records()
+        self.ensure(group)
+        self.assertEqual(self.records(), before)
+
+    def test_group_policy_denials_do_not_provision_image_consent(self):
+        self.install_image()
+        group = self.group_context()
+        self.set_image_output(group_enabled=False)
+        self.ensure(group)
+        self.assertEqual(self.consent("image.generate", context=group).failure.code,
+                         "capability_consent_missing")
+        self.set_image_output(group_enabled=True, request_permission="core_only")
+        self.ensure(group)
+        for capability in GROUP_IMAGE_CAPABILITIES:
+            self.assertEqual(self.consent(capability, context=group).failure.code,
+                             "capability_consent_missing")
+
+    def test_group_revocation_survives_repeat_and_does_not_touch_private(self):
+        self.install_image()
+        group = self.group_context()
+        self.ensure(group)
+        result = self.capabilities.set_authorization(extension_id="image",
+            capability_id="image.generate", subject=group.actor.subject, scope=group.scope,
+            state=CapabilityAuthorizationState.REVOKED, expected_revision=1,
+            observed_at=self.clock.now()).unwrap()
+        self.assertEqual(result.state, CapabilityAuthorizationState.REVOKED)
+        self.ensure(group)
+        self.assertEqual(self.consent("image.generate", context=group).failure.code,
+                         "capability_consent_revoked")
+        self.assertEqual(self.consent("image.edit", context=group).unwrap().state,
+                         CapabilityAuthorizationState.ACTIVE)
+        self.assertEqual(self.consent().failure.code, "capability_consent_missing")
 
     def test_new_conversation_keeps_revocation_without_implicit_cross_scope_access(self):
         self.install_image()

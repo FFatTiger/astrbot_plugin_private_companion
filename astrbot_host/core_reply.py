@@ -89,6 +89,7 @@ def prepare_core_reply_event(
     on_reply_end: Callable[[], Any] | None = None,
     prepare_send: PrepareSend | None = None,
     media_submit: Callable | None = None,
+    owner: Any = None,
 ) -> None:
     """Attach reply authorization and guard final delivery on this event."""
     state = event.get_extra(CORE_REPLY_CONTEXT_EXTRA)
@@ -334,6 +335,7 @@ def prepare_core_reply_event(
         on_reply_end=on_reply_end,
         prepare_send=prepare_send,
         media_submit=media_submit,
+        owner=owner,
         delivery_guard_active=False,
         denial_notified=False,
         send_attempts=0,
@@ -362,6 +364,69 @@ def prepare_core_reply_event(
     prepare_core_reply_voice(event)
     if isinstance(prepared, Mapping) and prepared.get("reaction_reply_enabled"):
         event.set_extra("enable_streaming", False)
+
+
+def adopt_core_reply_event(
+    event: Any,
+    *,
+    owner: Any,
+    prepared: Any = None,
+    authorize: Authorize,
+    on_denied: OnDenied | None = None,
+    on_sent: OnSent | None = None,
+    on_delivery: OnDelivery | None = None,
+    on_reply_end: Callable[[], Any] | None = None,
+    prepare_send: PrepareSend | None = None,
+    media_submit: Callable | None = None,
+) -> bool:
+    """Move an in-flight reply guard to the current plugin instance.
+
+    The original send wrappers stay in place because they resolve callbacks
+    through ``state`` on every call.  Replacing those callbacks lets a newly
+    loaded host re-authenticate the same native event without replaying an
+    already attempted platform send.
+    """
+    state = event.get_extra(CORE_REPLY_CONTEXT_EXTRA)
+    if (not isinstance(state, dict) or "_original_send" not in state
+            or "_send_wrapper" not in state):
+        return False
+    if prepared is None:
+        prepared = state.get("prepared")
+    if not isinstance(prepared, Mapping):
+        return False
+    changed_owner = state.get("owner") is not owner
+    if changed_owner:
+        old_task, old_callback = state.pop("_presence_owner_task", None), state.pop("_presence_task_done", None)
+        if old_task is not None and old_callback is not None:
+            old_task.remove_done_callback(old_callback)
+        # A previous host may have denied before reaching the platform.  A
+        # clean authorization from the new host can safely recover that send;
+        # unknown or already-attempted sends stay fenced by guarded_send.
+        if not state.get("send_unknown") and not state.get("send_attempts"):
+            state["denial_notified"] = False
+            state["_presence_finished"] = False
+            state.pop("_text_presentation", None)
+            state.pop("_text_presentation_removed", None)
+    state.update(
+        prepared=prepared,
+        owner=owner,
+        authorize=authorize,
+        on_denied=on_denied,
+        on_sent=on_sent,
+        on_delivery=on_delivery,
+        on_reply_end=on_reply_end,
+        prepare_send=prepare_send,
+        media_submit=media_submit,
+    )
+    if changed_owner and on_reply_end is not None:
+        task = asyncio.current_task()
+        if task is not None:
+            def reply_task_done(_task):
+                if event.get_extra(CORE_REPLY_CONTEXT_EXTRA) is state:
+                    finish_core_reply_presence(event, force=True)
+            state["_presence_owner_task"], state["_presence_task_done"] = task, reply_task_done
+            task.add_done_callback(reply_task_done)
+    return True
 
 
 def activate_core_reply_delivery_guard(event: Any) -> None:

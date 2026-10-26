@@ -52,7 +52,7 @@
     host_mappings_required: "请先绑定至少一个 Bot 账号与人格。",
     host_group_delivery_invalid: "群聊发送设置无效，请检查插件的群聊设置。",
     host_capabilities_invalid: "角色能力设置无效，请检查插件的能力配置。",
-    host_provider_required: "请先在本页保存共享启动模型。",
+    host_provider_required: "AstrBot 暂无可用的文本模型；请先在 AstrBot 模型配置中启用 Provider。",
     host_provider_changed: "模型连接在准备期间发生变化，请刷新状态后重试。",
     host_target_unavailable: "目标窗口不在当前配置中，请刷新并核对角色映射。",
     host_terminated: "插件正在停止或已停止，请重新加载插件后重试。",
@@ -1278,6 +1278,8 @@
     }
     const providers = Array.isArray(modelConfig?.providers) ? modelConfig.providers : [];
     const current = String(modelConfig?.provider_id || "");
+    const configured = String(modelConfig?.configured_provider_id || "");
+    const source = String(modelConfig?.provider_source || "");
     const previous = select.value;
     select.innerHTML = `<option value="">请选择已加载的文本模型</option>${providers.map(provider =>
       `<option value="${escapeHTML(provider.id)}">${escapeHTML(provider.name || provider.id)}（${escapeHTML(provider.id)}）</option>`).join("")}`;
@@ -1286,11 +1288,18 @@
     select.value = desired;
     select.disabled = busy || modelSaving || !providers.length;
     save.disabled = busy || modelSaving || !providers.length || !select.value;
+    save.textContent = source === "auto" ? "固定启动模型" : "保存启动模型";
     if (!providers.length) {
       note.textContent = "AstrBot 没有读取到已加载的文本模型。请先在 AstrBot 模型配置中添加并启用一个 Provider。";
       note.dataset.kind = "error";
     } else if (!current) {
       note.textContent = "尚未选择插件启动模型。先在这里保存，角色映射才能准备启动；启动后再到「模型与连接」细调任务路由。";
+      note.dataset.kind = "info";
+    } else if (source === "fallback") {
+      note.textContent = "已保存的启动模型不可用，已自动改用 AstrBot 当前模型。";
+      note.dataset.kind = "info";
+    } else if (source === "auto") {
+      note.textContent = "已自动跟随 AstrBot 当前模型；无需手动保存，可直接准备并启动。";
       note.dataset.kind = "info";
     } else if (!providers.some(item => item.id === current)) {
       note.textContent = `已保存的启动模型 ${current} 当前不可用，请重新选择。`;
@@ -1766,7 +1775,7 @@
       if (result.startup_error) {
         const modelPending = ["host_provider_required", "host_provider_unavailable"].includes(result.startup_error);
         const message = modelPending
-          ? "角色映射已经保存。请在本页上方「共享启动模型」选择一个已加载的文本模型并保存，再点「准备并启动」。"
+          ? "角色映射已经保存。共享启动模型会自动跟随 AstrBot 当前模型；如无可用模型，请先在 AstrBot 模型配置中启用 Provider，再点「准备并启动」。"
           : `运行未启动：${failureMessage(result.startup_error)}`;
         notice(`角色映射已保存。${message}`, modelPending ? "info" : "error");
         return;
@@ -1809,7 +1818,7 @@
     if (start) {
       start.hidden = !isEnabled() || isAccepting();
       start.disabled = busy || start.hidden || !hasProvider;
-      start.title = hasProvider ? "" : "请先保存共享启动模型";
+      start.title = hasProvider ? "" : "AstrBot 暂无可用的文本模型";
     }
     if (typeof renderSharedModel === "function") renderSharedModel();
   }

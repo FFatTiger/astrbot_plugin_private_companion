@@ -53,7 +53,7 @@
     rule_mode: {words: "词列表", regex: "正则表达式", sentences: "按句子", paragraphs: "按段落"},
     part_gap_mode: {fixed: "固定", random: "随机", log: "按文本长度"},
     content_cleanup_mode: {words: "按清理词", regex: "按正则"},
-    content_cleanup_scope: {all: "整段回复", trailing: "仅句尾"},
+    content_cleanup_scope: {leading: "句首", middle: "句中", trailing: "句尾"},
     voice_trigger_mode: {always: "每轮", request: "按请求", adaptive: "模型择句"},
     voice_generation_mode: {plain: "朗读正文", model_tag: "模型语音标签"},
     voice_segment_mode: {each: "每一段", first: "仅首段", last: "仅末段"},
@@ -62,6 +62,18 @@
     voice_language: {zh: "中文", ja: "日语", en: "英语"},
     voice_foreign_text_mode: {original: "原文", translation: "中文译文", bilingual: "双语"},
     image_position: {after_text: "文字后", before_text: "文字前"},
+  };
+  /* 主回复页已经停用「整段回复」，并把旧值 all 视为句中去重。
+     成员页复用同一份回复设置，历史值读回时也要先归一，否则下拉框会
+     多出一个原始英文选项，甚至在下一次修改其他字段时把旧值继续写回。 */
+  const normalizeReplyField = (name, value) => name === "content_cleanup_scope"
+    && String(value ?? "").trim().toLowerCase() === "all" ? "middle" : value;
+  const normalizeReplyDraft = draft => {
+    if (draft && Object.hasOwn(draft, "content_cleanup_scope")) {
+      draft.content_cleanup_scope = normalizeReplyField(
+        "content_cleanup_scope", draft.content_cleanup_scope);
+    }
+    return draft;
   };
   const contactPurposeGroups = [
     ["关系", [["affection", "想念与亲近"], ["care", "情绪关怀"], ["play", "轻松互动"],
@@ -226,13 +238,20 @@
     if (replaceSnapshot) state.sections = {};
     state.sectionErrors = result.section_errors && typeof result.section_errors === "object"
       ? {...result.section_errors} : {};
+    state.tts = result.tts && typeof result.tts === "object" ? result.tts : state.tts || null;
     for (const [section, value] of Object.entries(result.sections || {})) {
       const retained = {};
       if (preserve) for (const [field, draft] of Object.entries(state.drafts[section] || {})) {
         if (state.dirty.has(section + "." + field)) retained[field] = draft;
       }
       state.sections[section] = value;
-      state.drafts[section] = {...value.settings, ...retained};
+      const draft = {...value.settings, ...retained};
+      if (section === "reply") normalizeReplyDraft(draft);
+      state.drafts[section] = draft;
+      if (section === "reply"
+          && draft.content_cleanup_scope !== value.settings.content_cleanup_scope) {
+        state.dirty.add("reply.content_cleanup_scope");
+      }
     }
     for (const section of Object.keys(state.sectionErrors)) delete state.sections[section];
     if (!preserve) { state.dirty.clear(); state.resetToRole.clear(); state.contactResetToInherit.clear(); }
@@ -1009,7 +1028,15 @@
     const wrapper = element("div", undefined, "member-reply-field");
     if (provenance.explicit) wrapper.dataset.explicit = "true";
     const label = name === "voice_probability" ? "语音触发概率（0–1）" : replyLabels[name] || name;
-    wrapper.append(field(state, "reply", name, label, {rows}));
+    const providerFields = new Set(["voice_provider_id", "voice_zh_provider_id",
+      "voice_ja_provider_id", "voice_en_provider_id"]);
+    const tts = Array.isArray(state.tts?.providers) ? state.tts.providers : [];
+    const providerChoices = providerFields.has(name) && tts.length ? {
+      "": name === "voice_provider_id" ? "跟随角色默认" : "使用通用扩展",
+      ...Object.fromEntries(tts.filter(item => item && typeof item.id === "string" && item.id).map(item =>
+        [item.id, [item.id, item.model, item.voice].filter(Boolean).join(" · ")])),
+    } : null;
+    wrapper.append(field(state, "reply", name, label, {rows, choices: providerChoices}));
     const source = element("small", provenance.explicit ? "此用户覆盖" : "跟随角色默认", "member-reply-source");
     wrapper.append(source);
     if (provenance.explicit) {
@@ -1019,7 +1046,7 @@
       reset.setAttribute("aria-label", `恢复${label}的角色默认值`);
       reset.addEventListener("click", () => {
         if (state.pendingSave) return;
-        state.drafts.reply[name] = inherited;
+        state.drafts.reply[name] = normalizeReplyField(name, inherited);
         state.resetToRole.add(name);
         state.dirty.add("reply." + name);
         state.pendingSave = null;
@@ -1305,7 +1332,14 @@
             }
           }
           for (const section of submittedSections) {
-            if (state.sections[section]) state.drafts[section] = {...state.sections[section].settings};
+            if (!state.sections[section]) continue;
+            const draft = {...state.sections[section].settings};
+            if (section === "reply") normalizeReplyDraft(draft);
+            state.drafts[section] = draft;
+            if (section === "reply"
+                && draft.content_cleanup_scope !== state.sections[section].settings.content_cleanup_scope) {
+              state.dirty.add("reply.content_cleanup_scope");
+            }
           }
           state.pendingSave = null;
           notify(state, state.dirty.size ? "可读取分区已保存；未读取分区的草稿仍保留。"

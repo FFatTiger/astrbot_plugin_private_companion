@@ -143,7 +143,7 @@ function status(changes = {}, token = TOKEN) {
     provenance: Object.fromEntries(Object.keys(settings).map(name =>
       [name, {layer: 'window', explicit: true, revision: 1}])),
     fields: FIELDS, recent: [], participation_recent: [], participation_limit: 80,
-    tts: {state: 'ready', providers: [{id: 'tts-a'}, {id: 'tts-b'}]},
+    tts: {state: 'ready', providers: [{id: 'tts-a', model: 's2.1-pro-free', voice: '高木さん'}, {id: 'tts-b'}]},
   };
 }
 
@@ -277,6 +277,31 @@ test('the settings section reads and saves through the reply route family', asyn
   await drains();
   assert.equal(instance.state.base.max_segments, 6);
   assert.equal(harnessed.store.size, 0);
+});
+
+test('legacy all cleanup scope migrates to middle before validation', async () => {
+  const harnessed = harness();
+  harnessed.page.mount(harnessed.root, {view: 'expression'});
+  await drains();
+  harnessed.requests[0].resolve(status({content_cleanup_scope: 'all'}));
+  await drains();
+  const instance = live(harnessed);
+  const field = instance.state.container.fields.content_cleanup_scope;
+  assert.equal(instance.state.base.content_cleanup_scope, 'all');
+  assert.equal(instance.state.draft.content_cleanup_scope, 'middle');
+  assert.equal(harnessed.workbench.valid(field, instance.state.draft.content_cleanup_scope), true);
+  assert.equal(instance.dirty(), true, 'the legacy value remains as a pending migration');
+
+  const saving = instance.save(false);
+  await drains();
+  assert.deepEqual(plain(harnessed.requests[1].body.changes), {content_cleanup_scope: 'middle'});
+  harnessed.requests[1].resolve({result: {operation_id: 'cleanup-scope', replayed: false},
+    status: status({content_cleanup_scope: 'middle'}, 'b'.repeat(64))});
+  await saving;
+  await drains();
+  assert.equal(instance.state.base.content_cleanup_scope, 'middle');
+  assert.equal(instance.state.draft.content_cleanup_scope, 'middle');
+  harnessed.page.unmount();
 });
 
 test('prompt style offers free, guided, and constraint modes and saves the role preference', async () => {
@@ -864,6 +889,7 @@ test('the TTS provider catalog comes from the read result, not a page-local list
   const entries = item.catalog();
   assert.equal(entries[''], '跟随 AstrBot');
   assert.deepEqual(Object.keys(entries).filter(Boolean).sort(), ['tts-a', 'tts-b']);
+  assert.equal(entries['tts-a'], 'tts-a · s2.1-pro-free · 高木さん');
   const zh = live(harnessed).state.container.fields.voice_zh_provider_id.catalog();
   assert.equal(zh[''], '使用通用扩展');
 });

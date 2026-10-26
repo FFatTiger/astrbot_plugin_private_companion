@@ -920,6 +920,43 @@ test("私聊回复默认继承角色，字段可即时展开并单独覆盖或�
   assert.deepEqual(JSON.parse(JSON.stringify(written.body.sections.reply.reset_to_inherit)), ["style_prompt"]);
 });
 
+test("旧整段清理范围在成员回复页归一为句中并随保存写回", async () => {
+  const fields = {
+    content_cleanup_enabled: {kind: "boolean"}, content_cleanup_mode: {kind: "text"},
+    content_cleanup_scope: {kind: "text"}, content_cleanup_words: {kind: "text"},
+  };
+  const reply = {edit_token: "reply-edit-1", scope: "window", fields,
+    editable_fields: ["content_cleanup_scope"],
+    settings: {content_cleanup_enabled: true, content_cleanup_mode: "words",
+      content_cleanup_scope: "all", content_cleanup_words: "嗯"},
+    inherited_settings: {content_cleanup_enabled: true, content_cleanup_mode: "words",
+      content_cleanup_scope: "middle", content_cleanup_words: "嗯"},
+    provenance: {content_cleanup_enabled: {layer: "window", explicit: true},
+      content_cleanup_mode: {layer: "window", explicit: true},
+      content_cleanup_scope: {layer: "window", explicit: true},
+      content_cleanup_words: {layer: "window", explicit: true}}};
+  const h = harness({persons: [person("subject-1", "阿澈")],
+    authorizations: {"subject-1": status("subject-1", [])},
+    memberSettings: {"subject-1": {sections: {reply}}}, post: request => ({sections: {reply: {
+      ...reply, edit_token: "reply-edit-2",
+      settings: {...reply.settings, ...request.body.sections.reply.changes},
+    }}})});
+  const detail = await open(h, "阿澈", "回复微调");
+  await h.settle();
+  const scope = inputByName(detail, "content_cleanup_scope");
+  assert.ok(scope, "清理范围应在开启文字清理后出现");
+  assert.deepEqual(scope.children.map(option => option.value), ["leading", "middle", "trailing"]);
+  assert.equal(scope.children.find(option => option.selected)?.value, "middle",
+    "已停用的 all 应显示为规范值 middle，而不是多出一个原始英文选项");
+  const save = findControl(detail, "保存回复设置");
+  assert.equal(save.disabled, false, "归一后的差异应可直接保存回规范值");
+  save.handlers.click();
+  await h.send(request => request.method === "POST");
+  const written = h.requests.find(request => request.method === "POST");
+  assert.deepEqual(JSON.parse(JSON.stringify(written.body.sections.reply.changes)),
+    {content_cleanup_scope: "middle"});
+});
+
 test("私聊回复配置读取失败时显示未确认状态并禁用保存", async () => {
   const h = harness({persons: [person("subject-1", "阿澈")],
     authorizations: {"subject-1": status("subject-1", [])},

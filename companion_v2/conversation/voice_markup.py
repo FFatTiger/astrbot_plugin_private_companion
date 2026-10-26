@@ -4,8 +4,8 @@ import re
 
 
 VOICE_TAG_NAME_PATTERN = r"(?:p[\s._-]*c{1,2}[\s._-]*tts|tts)"
-VOICE_PROTOCOL_LT = r"(?:<|&lt;|&#0*60;|&#x0*3c;)"
-VOICE_PROTOCOL_GT = r"(?:>|&gt;|&#0*62;|&#x0*3e;)"
+VOICE_PROTOCOL_LT = r"(?:<|＜|&lt;|&#0*60;|&#x0*3c;)"
+VOICE_PROTOCOL_GT = r"(?:>|＞|&gt;|&#0*62;|&#x0*3e;)"
 
 
 def canonical_voice_tag(name):

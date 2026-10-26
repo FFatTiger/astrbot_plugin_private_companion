@@ -21,6 +21,7 @@ from companion_v2.proactive.scheduling import DIAGNOSTIC_ENVIRONMENT_VARIANTS
 from companion_v2.sources.privacy import redact_text
 
 from .binding_store import PendingBinding, binding_path, read_binding, write_binding
+from .bootstrap_provider import resolve_bootstrap_provider, text_provider_catalog
 from .identity_derivation import derive_bot_id, derive_role_id
 from .management_identity import dashboard_operator
 from .persona_catalog import available_personas
@@ -263,26 +264,28 @@ class SetupWebAPI:
         return getter()
 
     def _model_providers(self) -> list[dict]:
-        context = self.controller.context
-        providers = []
-        try:
-            inventory = list(context.get_all_providers() or [])
-        except Exception:
-            return providers
-        for provider in inventory:
-            try:
-                meta = provider.meta() if callable(getattr(provider, "meta", None)) else None
-                identifier = str(getattr(meta, "id", "") or getattr(provider, "id", "") or "").strip()
-                if not identifier:
-                    continue
-                name = str(getattr(meta, "name", "") or getattr(provider, "name", "") or identifier)
-                expected_type = getattr(getattr(self.controller, "native_types", None), "provider", None)
-                if expected_type is not None and isinstance(provider, expected_type):
-                    providers.append({"id": identifier, "name": name[:120]})
-            except (AttributeError, TypeError, ValueError):
-                continue
-        return sorted({item["id"]: item for item in providers}.values(),
-                      key=lambda item: (item["name"].lower(), item["id"]))
+        context = getattr(self.controller, "context", None)
+        expected_type = getattr(getattr(self.controller, "native_types", None), "provider", None)
+        return text_provider_catalog(context, expected_type) if context is not None else []
+
+    def _configured_provider_id(self) -> str:
+        config = getattr(self.controller, "config", {})
+        section = config.get("model", {}) if isinstance(config, dict) else {}
+        return str(section.get("provider_id", "")) if isinstance(section, dict) else ""
+
+    def _model_selection(self):
+        context = getattr(self.controller, "context", None)
+        expected_type = getattr(getattr(self.controller, "native_types", None), "provider", None)
+        return (resolve_bootstrap_provider(context, expected_type, self._configured_provider_id())
+                if context is not None else None)
+
+    def _model_catalog(self):
+        selection = self._model_selection()
+        providers = self._model_providers()
+        if selection is not None and selection.provider_id and not any(
+                item["id"] == selection.provider_id for item in providers):
+            providers.append({"id": selection.provider_id, "name": selection.name or selection.provider_id})
+        return providers
 
     def _configured_provider_id(self) -> str:
         config = getattr(self.controller, "config", {})
@@ -299,13 +302,17 @@ class SetupWebAPI:
                              or getattr(self.controller, "last_session", None)))
         completed = list(state["completed"])
         skipped = list(state["skipped"])
+        selection = self._model_selection()
+        selection_id = (selection.provider_id
+                        if selection is not None and selection.source in ("auto", "configured")
+                        else "")
         if not confirmed:
             step = "binding"
         elif state["ready"]:
             step = "complete"
         elif "model" not in completed and "model" not in skipped:
             step = "model"
-        elif not self._configured_provider_id():
+        elif not selection_id:
             step = "model"
         else:
             step = next((name for name in SETUP_STEPS if name not in completed and name not in skipped),
@@ -313,8 +320,10 @@ class SetupWebAPI:
         return {"step": step,
                 "binding": binding, "binding_confirmed": confirmed, "prepared": prepared,
                 "completed": completed, "skipped": skipped,
-                "model": {"provider_id": self._configured_provider_id(),
-                          "providers": self._model_providers()},
+                "model": {"provider_id": selection_id or self._configured_provider_id(),
+                          "provider_source": (selection.source if selection_id and selection is not None
+                                              else "unavailable"),
+                          "providers": self._model_catalog()},
                 "proactive_test": state["proactive_test"], "ready": state["ready"],
                 "settings_error": getattr(getattr(self.controller, "settings_error", None), "code", None),
                 "host": status}

@@ -1,4 +1,4 @@
-"""Shared-installation lifecycle and explicit native multi-target admission."""
+﻿"""Shared-installation lifecycle and explicit native multi-target admission."""
 
 import asyncio
 from dataclasses import asdict, replace
@@ -26,6 +26,7 @@ from companion_v2.proactive.search_settings import SearchSettingsStore
 from .multi_authority import HOST_ID, MANIFEST, MultiAuthority
 from .multi_session import MultiHostSession, persona_conversation
 from .multi_settings import MultiHostSettings
+from .bootstrap_provider import resolve_bootstrap_provider
 from .group_settings import GroupTarget
 from .native import installed_native_types
 from .backup_api import apply_staged_restore
@@ -99,6 +100,16 @@ class AstrBotMultiController:
 
     def _resolve_settings(self, config):
         settings = MultiHostSettings.parse(config)
+        # AstrBot already has a deterministic current/default text provider.
+        # Use it as the shared host's read-only bootstrap default so account
+        # mapping works without a redundant save on a second configuration
+        # screen. An explicitly saved provider still wins.
+        bootstrap = resolve_bootstrap_provider(
+            self.context, getattr(self.native_types, "provider", None), settings.common.provider_id)
+        if (not settings.common.provider_id and bootstrap.source == "auto"
+                and bootstrap.provider_id):
+            settings = replace(settings, common=replace(
+                settings.common, provider_id=bootstrap.provider_id))
         shared_root = self.data_root / "installations" / settings.installation_key
         legacy = config.get("staging", {}) if isinstance(config, dict) else {}
         legacy_id = legacy.get("profile_id") if isinstance(legacy, dict) else None
@@ -111,11 +122,42 @@ class AstrBotMultiController:
                         legacy_root, True)
         return settings, shared_root, False
 
+    def role_source_target_id(self, role_id, fallback_target_id):
+        """Resolve one stable private window as the role-level data source.
+
+        State, life, model and the other role APIs are owned by the role, not by
+        whichever window happens to be in the URL.  A wildcard template is only
+        a route factory and must never become the source of role-level data.
+        """
+        settings = self.settings
+        if settings is None:
+            return fallback_target_id
+        fallback = settings.target(fallback_target_id)
+        if getattr(fallback, "participant_id", None) != "*":
+            return fallback_target_id
+        candidates = [target for target in settings.targets if target.participant_id != "*"
+                      and any(mapping.bot_id == target.bot_id and mapping.role_id == role_id
+                              for mapping in settings.personas)]
+        if not candidates:
+            return fallback_target_id
+        return sorted(candidates, key=lambda target: target.target_id)[0].target_id
+
     def _settings(self):
         if self._terminated:
             raise TaskError("host_terminated", "the shared host is stopping or terminated")
         if self.settings_error is not None:
             raise self.settings_error
+        if self.settings is not None and not self.settings.common.provider_id:
+            # Provider loading can finish after plugin construction. Resolve
+            # again at first use so a blank reviewed setting follows AstrBot's
+            # current model instead of failing the mapping-to-start flow.
+            bootstrap = resolve_bootstrap_provider(
+                self.context, getattr(self.native_types, "provider", None), "")
+            if bootstrap.source == "auto" and bootstrap.provider_id:
+                self.settings = replace(self.settings, common=replace(
+                    self.settings.common, provider_id=bootstrap.provider_id))
+                if self.authority is not None:
+                    self.authority.settings = self.settings
         self.settings.require_ready()
         return self.settings
 
@@ -730,7 +772,8 @@ class AstrBotMultiController:
                     raise TaskError("host_storage_changed", "stop and reload before changing the active V2 data installation")
                 opened_here = self.runtime is None
                 if self.runtime is None and (root / StorageRuntime.DATABASE_FILENAME).is_file():
-                    self.runtime = StorageRuntime.open(data_root=root, installation_id=settings.installation_id)
+                    self.runtime = await asyncio.to_thread(
+                        StorageRuntime.open, data_root=root, installation_id=settings.installation_id)
                     storage = self.config.get("storage", {}) if isinstance(self.config, dict) else {}
                     self.runtime.backup_directory = selected_backup_directory(
                         root, storage.get("backup_path", "") if isinstance(storage, dict) else "",

@@ -6,7 +6,7 @@ import json
 import logging
 
 from companion_v2.execution.models import TaskContext, TaskError, digest, encode, require, stamp
-from companion_v2.foundation.refs import AudienceRef, ScopeRef, SubjectKind, SubjectRef
+from companion_v2.foundation.refs import AudienceRef, ReferenceValidationError, ScopeRef, SubjectKind, SubjectRef
 from companion_v2.identity_policy.models import AuthenticatedHostPrincipal, AuthorizationTier, GrantState
 from companion_v2.identity_policy.personas import ConversationRoute, PersonaBinding, PersonaDirectory, SelectorKind
 from companion_v2.identity_policy.repository import PersistentIdentityDirectory
@@ -434,14 +434,28 @@ class MultiAuthority:
             raise TaskError("host_context_unavailable", "the private conversation no longer belongs to this account mapping")
         self._scope(resolved_target, scope, role)
         actor = self.actor(resolved_target, scope.native_scope_id)
-        binding = require(self.personas.resolve(scope, observed_at=self.now())).binding
+        resolution = require(self.personas.resolve(scope, observed_at=self.now()))
+        binding = resolution.binding
         if binding.role != role:
             if self.settings.canonical_role_id(binding.role.subject_id) != role.subject_id:
                 raise TaskError("host_persona_binding_changed", "the private persona binding changed")
             # Existing runtime bindings may still carry the pre-merge role id.
-            # Read through the canonical shared role; the next provision_scope
-            # persists that migration when the window receives a message.
-            binding = replace(binding, role=role)
+            # Persist the shared role before returning the context: management
+            # APIs re-resolve the binding and compare it with TaskContext, so a
+            # read-only substitute would make every legacy window look changed.
+            selected = resolution.selected
+            try:
+                self.personas.set_binding(
+                    replace(selected, role=role, revision=selected.revision + 1),
+                    expected_revision=selected.revision, observed_at=self.now())
+            except ReferenceValidationError:
+                latest = self.personas.binding(selected.binding_id)
+                if latest is None or latest.role != role:
+                    raise TaskError("host_persona_binding_changed", "the private persona binding changed") from None
+            binding = require(self.personas.resolve(scope, observed_at=self.now())).binding
+            if binding.role != role:
+                raise TaskError("host_persona_binding_changed", "the private persona binding changed")
+            self.write(self.context_key(target, role_id), scope.document())
         return TaskContext(actor, binding, AudienceRef(scope, (actor.subject,)))
 
     def authorize_delivery(self, target_id, expires_at):

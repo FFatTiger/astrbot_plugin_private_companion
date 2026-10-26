@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import replace as replace_dataclass
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,7 @@ from .astrbot_host.conversation_reset import install_native_reset_marker
 from .astrbot_host.core_reply import (
     CORE_REPLY_CONTEXT_EXTRA,
     activate_core_reply_delivery_guard,
+    adopt_core_reply_event,
     inject_core_reply_prompt,
     prepare_core_reply_event,
     restore_core_reply_event,
@@ -54,8 +56,8 @@ from .astrbot_host.core_reply_segmentation import (
     prepare_core_reply_streaming_boundary,
 )
 from .astrbot_host.core_reply_tracking import (
-    activate_core_reply_tracking, finish_core_reply_tracking, mark_core_reply_inflight,
-    observe_core_group_participation, prepare_core_reply_tracking,
+    activate_core_reply_tracking, adopt_core_reply_tracking, finish_core_reply_tracking,
+    mark_core_reply_inflight, observe_core_group_participation, prepare_core_reply_tracking,
 )
 from .astrbot_host.core_reply_telemetry import (
     finish_core_reply_telemetry, observe_core_agent_begin, observe_core_agent_done,
@@ -131,6 +133,7 @@ class PrivateCompanionV2StagingPlugin(Star):
         try:
             super().__init__(context, config)
             self._host_start_task = None
+            self._core_reply_owner = object()
             self._startup_failure_key = None
             self._startup_failure_at = 0.0
             self._session_settings_warm_task = None
@@ -489,6 +492,107 @@ class PrivateCompanionV2StagingPlugin(Star):
         else:
             logger.warning("[CompanionV2] 绑定命令未被受理")
 
+    def _core_reply_owner_token(self):
+        token = getattr(self, "_core_reply_owner", None)
+        if token is None:
+            token = object()
+            self._core_reply_owner = token
+        return token
+
+    def _core_reply_delivery_callbacks(self, event, prepared, *, target):
+        event_ref = prepared.get("event_ref")
+        origin_key = prepared.get("origin_key")
+        channel = prepared.get("channel")
+
+        async def authorize_core_send(current):
+            return await self.staging.authorize_core_reply(event, target, current)
+
+        def note_core_send_denied(current, error):
+            reason = getattr(error, "code", type(error).__name__)
+            self._record_no_reply(event, "core_reply_send_denied", origin_key=origin_key,
+                                  channel=channel, event_ref=event_ref, stage="delivery",
+                                  turn=event_ref, code=reason)
+            logger.warning("[CompanionV2] 核心回复发送前复核失败 event_ref=%s code=%s",
+                           event_ref, reason)
+
+        def observe_core_send(current, text):
+            observer = getattr(getattr(self.staging, "session", None), "core_reply_observations", None)
+            if observer is not None:
+                observer.output(current, text, state="send_returned")
+
+        def observe_core_delivery(stage):
+            if stage == "finished":
+                finish_core_reply_telemetry(event)
+            else:
+                observe_core_reply_delivery(event, stage)
+
+        def finish_core_reply_end():
+            from .astrbot_host.core_reply_presence import observe_native_reply_presence
+            application = getattr(getattr(self.staging, "session", None), "application", None)
+            observe_native_reply_presence(application, prepared, "finished")
+
+        async def prepare_core_voice(current, message, authorize, segment_index, segment_count):
+            from .astrbot_host.core_reply_voice import prepare_core_reply_voice_message
+            from .astrbot_host.core_reply_reaction_delivery import prepare_core_reaction_message
+            from .astrbot_host.core_reply_outbound import prepare_core_reply_outbound_message
+            session = getattr(self.staging, "session", None)
+            message = await prepare_core_reaction_message(
+                event, message, authorize=authorize,
+                segment_index=segment_index, segment_count=segment_count)
+            message = await prepare_core_reply_voice_message(
+                event, current, message,
+                renderer=getattr(session, "voice", None),
+                delivery=getattr(session, "voice_delivery", None),
+                authorize=authorize,
+                segment_index=segment_index,
+                segment_count=segment_count,
+            )
+            return prepare_core_reply_outbound_message(
+                event, current, message, segment_index=segment_index)
+
+        observer = getattr(getattr(self.staging, "session", None), "core_reply_observations", None)
+        return {
+            "authorize": authorize_core_send,
+            "on_denied": note_core_send_denied,
+            "on_sent": observe_core_send,
+            "on_delivery": observe_core_delivery,
+            "on_reply_end": finish_core_reply_end,
+            "prepare_send": prepare_core_voice,
+            "media_submit": getattr(observer, "submit", None),
+        }
+
+    def _adopt_core_reply_delivery(self, event) -> bool:
+        """Rebind an in-flight reply after AstrBot replaces this plugin instance."""
+        state = event.get_extra(CORE_REPLY_CONTEXT_EXTRA)
+        if not isinstance(state, dict):
+            return False
+        prepared = state.get("prepared")
+        if not isinstance(prepared, Mapping):
+            return False
+        try:
+            target = self.staging.target_for_event(event)
+        except Exception:
+            target = None
+        owner = self._core_reply_owner_token()
+        changed_owner = state.get("owner") is not owner
+        callbacks = self._core_reply_delivery_callbacks(event, prepared, target=target)
+        if not adopt_core_reply_event(event, owner=owner, prepared=prepared, **callbacks):
+            return False
+        if prepared.get("channel") == "group":
+            try:
+                application = getattr(getattr(self.staging, "session", None), "application", None)
+                participation = getattr(getattr(application, "tools", None), "group_participation", None)
+                admission = getattr(participation, "admission", None)
+                observer = getattr(getattr(self.staging, "session", None), "core_reply_observations", None)
+                if admission is not None:
+                    adopt_core_reply_tracking(
+                        event, admission=admission, now=self.staging.now,
+                        submit=getattr(observer, "submit", None), prepared=prepared,
+                        reopen=changed_owner)
+            except Exception:
+                logger.warning("[CompanionV2] 核心群回复跟踪接管失败", exc_info=True)
+        return True
+
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE | filter.EventMessageType.GROUP_MESSAGE,
                                priority=COMPANION_INTAKE_PRIORITY)
     async def receive_companion_message(self, event: AstrMessageEvent):
@@ -782,52 +886,9 @@ class PrivateCompanionV2StagingPlugin(Star):
                 self._observe_core_phase(prepared, "completed")
             return
 
-        async def authorize_core_send(current):
-            return await self.staging.authorize_core_reply(event, target, current)
-
-        def note_core_send_denied(current, error):
-            reason = getattr(error, "code", type(error).__name__)
-            self._record_no_reply(event, "core_reply_send_denied", origin_key=origin_key,
-                                  channel=channel, event_ref=event_ref, stage="delivery",
-                                  turn=event_ref, code=reason)
-            logger.warning("[CompanionV2] 核心回复发送前复核失败 event_ref=%s code=%s",
-                           event_ref, reason)
-
-        def observe_core_send(current, text):
-            observer = getattr(getattr(self.staging, "session", None), "core_reply_observations", None)
-            if observer is not None:
-                observer.output(current, text, state="send_returned")
-
-        def observe_core_delivery(stage):
-            if stage == "finished":
-                finish_core_reply_telemetry(event)
-            else:
-                observe_core_reply_delivery(event, stage)
-
-        async def prepare_core_voice(current, message, authorize, segment_index, segment_count):
-            from .astrbot_host.core_reply_voice import prepare_core_reply_voice_message
-            from .astrbot_host.core_reply_reaction_delivery import prepare_core_reaction_message
-            from .astrbot_host.core_reply_outbound import prepare_core_reply_outbound_message
-            session = getattr(self.staging, "session", None)
-            message = await prepare_core_reaction_message(
-                event, message, authorize=authorize,
-                segment_index=segment_index, segment_count=segment_count)
-            message = await prepare_core_reply_voice_message(
-                event, current, message,
-                renderer=getattr(session, "voice", None),
-                delivery=getattr(session, "voice_delivery", None),
-                authorize=authorize,
-                segment_index=segment_index,
-                segment_count=segment_count,
-            )
-            return prepare_core_reply_outbound_message(
-                event, current, message, segment_index=segment_index)
-
-        observer = getattr(getattr(self.staging, "session", None), "core_reply_observations", None)
-        prepare_core_reply_event(event, prepared, authorize=authorize_core_send,
-                                 on_denied=note_core_send_denied, on_sent=observe_core_send,
-                                 on_delivery=observe_core_delivery, prepare_send=prepare_core_voice,
-                                 media_submit=getattr(observer, "submit", None))
+        prepare_core_reply_event(
+            event, prepared, owner=self._core_reply_owner_token(),
+            **self._core_reply_delivery_callbacks(event, prepared, target=target))
         observer = getattr(getattr(self.staging, "session", None), "core_reply_observations", None)
         media = getattr(observer, "media", None)
         if callable(media):
@@ -888,6 +949,7 @@ class PrivateCompanionV2StagingPlugin(Star):
         if not isinstance(state, dict):
             prepare_native_host_request(self.staging, event, req)
             return
+        self._adopt_core_reply_delivery(event)
         prepared = state.get("prepared")
         try:
             with measure_core_preparation(event, "request_authorization", now=self.staging.now):
@@ -1023,13 +1085,16 @@ class PrivateCompanionV2StagingPlugin(Star):
             getter = getattr(event, "get_result", None)
             result = getter() if callable(getter) else None
             chain = getattr(result, "chain", None) if result is not None else None
-            from companion_v2.expression.reply_intent import extract_reply_intent
+            from companion_v2.conversation.text_processing import strip_internal_expression_protocol
             for part in chain or ():
                 text = getattr(part, "text", None)
-                if isinstance(text, str) and "pc_reaction_expression" in text:
-                    part.text = extract_reply_intent(text)[0]
+                if isinstance(text, str):
+                    cleaned = strip_internal_expression_protocol(text)
+                    if cleaned != text:
+                        part.text = cleaned
         except Exception:
             pass
+        self._adopt_core_reply_delivery(event)
         activate_core_reply_delivery_guard(event)
         activate_core_reply_tracking(event)
         activate_core_reply_segmentation(event)

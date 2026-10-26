@@ -19,15 +19,17 @@ logger = logging.getLogger(__name__)
 
 IMAGE_EXTENSION = "image"
 IMAGE_CAPABILITIES = ("image.generate", "image.edit", "image.mask_edit")
+GROUP_IMAGE_CAPABILITIES = ("image.generate", "image.edit")
 
 
 def ensure_image_access(runtime: StorageRuntime, context: TaskContext, *, observed_at: datetime) -> None:
-    """只补缺失的私聊默认值；暂停、角色关闭和已有授权决定均保留。
+    """补齐原生生图能力在当前已验证会话中的独立授权记录。
 
-    上下文必须由宿主完成身份与角色核验后传入，不能从单角色 profile 猜测。
-    群聊继续使用独立授权，本函数也不签发屏幕等其他能力的权限。
+    私聊沿用原有默认值；群聊只在角色生图配置明确允许当前发言人时，
+    为该群聊窗口签发 ``image.generate`` / ``image.edit``。群聊授权与私聊
+    完全隔离，且本函数不签发屏幕等其他能力的权限。
     """
-    if context.scope.kind is not ScopeKind.PRIVATE:
+    if context.scope.kind not in (ScopeKind.PRIVATE, ScopeKind.GROUP):
         return
     try:
         with runtime.transaction():
@@ -39,6 +41,13 @@ def ensure_image_access(runtime: StorageRuntime, context: TaskContext, *, observ
 def _ensure_image_access(runtime, context, observed_at):
     repository = CapabilityRepository(runtime)
     role, scope, subject = context.role_binding.role, context.scope, context.actor.subject
+    capabilities = IMAGE_CAPABILITIES
+    if scope.kind is ScopeKind.GROUP:
+        from companion_v2.conversation.media.output_settings import effective_settings, image_request_denial
+        denial = image_request_denial(runtime, context, effective_settings(runtime, context))
+        if denial is not None:
+            return
+        capabilities = GROUP_IMAGE_CAPABILITIES
     projected = repository.projection(extension_id=IMAGE_EXTENSION, role=role, scope=scope)
     if not projected.is_success:
         return
@@ -55,7 +64,7 @@ def _ensure_image_access(runtime, context, observed_at):
         if not result.is_success:
             logger.warning("[CompanionV2] 生图能力角色启用失败 code=%s", result.failure.code)
             return
-    for capability in IMAGE_CAPABILITIES:
+    for capability in capabilities:
         consent = repository.consent(extension_id=IMAGE_EXTENSION, capability_id=capability,
                                      subject=subject, scope=scope)
         if consent.is_success or consent.failure.code != "capability_consent_missing":
@@ -72,7 +81,7 @@ def _ensure_image_access(runtime, context, observed_at):
             logger.warning("[CompanionV2] 生图能力授权失败 capability=%s code=%s",
                            capability, result.failure.code)
     if any(repository.authorize(extension_id=IMAGE_EXTENSION, capability_id=capability,
-                                subject=subject, scope=scope).is_success for capability in IMAGE_CAPABILITIES):
+                                subject=subject, scope=scope).is_success for capability in capabilities):
         _ensure_invocation_grant(runtime, context, observed_at)
 
 

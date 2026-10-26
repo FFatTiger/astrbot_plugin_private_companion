@@ -1,4 +1,4 @@
-"""Account edits synchronize private targets without widening group access."""
+﻿"""Account edits synchronize private targets without widening group access."""
 
 from copy import deepcopy
 import json
@@ -209,6 +209,11 @@ class SharedModelProviderBootstrapTests(unittest.IsolatedAsyncioTestCase):
         with patch("astrbot_host.account_session_api.request", request):
             return await self.api.save_model_provider()
 
+    def test_blank_config_uses_astrbot_current_provider_automatically(self):
+        view = self.api._model_view()
+        self.assertEqual(view["provider_id"], "provider-a")
+        self.assertEqual(view["provider_source"], "auto")
+        self.assertEqual(view["configured_provider_id"], "")
     async def test_shared_provider_can_be_selected_before_role_runtime_exists(self):
         result = await self.call(provider_id="provider-a")
         self.assertEqual(result["status"], "ok", result)

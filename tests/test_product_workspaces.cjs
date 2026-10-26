@@ -46,6 +46,10 @@ async function harness(savedTheme = null, extensions = [], options = {}) {
           group_memory_api: "/" + HOST + "/" + groupMemoryApi,
           reply_api: "/" + HOST + "/targets/first/roles/synthetic-role/reply"} : privateRole]}],
   };
+  if (options.wildcardFirstTarget) {
+    catalog.targets.unshift({...privateTarget, target_id: "wildcard", participant_id: "*",
+      display_name: "", roles: [privateRole]});
+  }
   if (options.multipleRoles) {
     const extra = {...privateRole, role_id: "another-role", role_name: "夜航",
       persona_ids: ["夜航"], state_api: "/" + HOST + "/targets/first/roles/another-role/state"};
@@ -368,6 +372,18 @@ test("the cottage selects a role without asking for a conversation target", asyn
   assert.match(h.stageRole.innerHTML, /<option[^>]*>夜航<\/option>/);
   assert.doesNotMatch(h.stageRole.innerHTML, /会话对象|product-target|data-product-refresh|账号与会话/);
   assert.equal(h.product.roleChoices().length, 2);
+});
+
+test("a shared role prefers its concrete private window over a wildcard template", async () => {
+  const h = await harness(null, [], {wildcardFirstTarget: true});
+  const choices = h.product.roleChoices();
+  assert.equal(choices.length, 1);
+  assert.equal(choices[0].target.target_id, "first");
+  assert.equal(h.product.target().target_id, "first");
+  await h.product.choose("wildcard", "synthetic-role");
+  assert.equal(h.product.target().target_id, "wildcard");
+  assert.equal(h.product.roleTarget().target_id, "first");
+  assert.match(h.product.role().state_api, /\/targets\/first\//);
 });
 
 test("the role cottage selector is inside the room and the outer status bar is absent", () => {

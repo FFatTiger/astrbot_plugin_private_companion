@@ -687,6 +687,9 @@ class AcquaintanceWebAPI:
                 editor = PrivateMemberSettings(session.application, context)
                 result = (editor.configure(operator, {key: command[key] for key in ("operation_key", "sections")})
                           if write else editor.status(operator))
+                if not write and result.is_success and isinstance(result.value, dict):
+                    from .voice import tts_provider_catalog
+                    result.value["tts"] = tts_provider_catalog(self.controller.context)
                 return outcome_response(result)
         except TaskError as error:
             return outcome_response(Outcome.failed(error.code, str(error)))

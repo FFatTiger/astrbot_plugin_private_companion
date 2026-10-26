@@ -318,7 +318,7 @@ class MultiHostTests(MultiFixture, unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.controller.settings_error)
         self.assertTrue(self.controller.status()["accepting"])
 
-    async def test_reviewed_persona_mapping_saves_before_a_model_is_selected(self):
+    async def test_reviewed_persona_mapping_uses_astrbot_current_provider_when_blank(self):
         candidate = multi_config()
         candidate["model"]["provider_id"] = ""
         unconfigured = deepcopy(candidate)
@@ -334,11 +334,12 @@ class MultiHostTests(MultiFixture, unittest.IsolatedAsyncioTestCase):
         result = await self.controller.apply_bindings(candidate)
 
         self.assertTrue(result["saved"], result)
-        self.assertFalse(result["started"], result)
-        self.assertTrue(result["requires_initialize"], result)
-        self.assertEqual(result["startup_error"], "host_provider_required")
+        self.assertTrue(result["started"], result)
+        self.assertEqual(self.controller.settings.common.provider_id, "native-model")
+        self.assertEqual(self.controller.config["model"]["provider_id"], "")
         self.assertEqual(self.controller.config["multi_host"]["personas"], candidate["multi_host"]["personas"])
-        self.assertIsNone(self.controller.runtime)
+        self.assertIsNotNone(self.controller.runtime)
+        self.assertTrue(self.controller.status()["accepting"])
         self.assertIsNone(self.controller.settings_error)
 
     async def test_reviewed_persona_mapping_saves_when_selected_model_is_unavailable(self):
@@ -1113,6 +1114,22 @@ class MultiHostTests(MultiFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.failure.code, "authorization_revoked",
                          "必需能力被收回是真故障，不能跟着一起放行")
 
+    async def test_role_level_api_source_skips_wildcard_templates(self):
+        config = multi_config()
+        config["multi_host"]["targets"] = [
+            {"target_id": "wild", "platform_id": "qq-main", "account_id": "100",
+             "bot_id": "bot-a", "participant_id": "*"},
+            {"target_id": "exact", "platform_id": "qq-second", "account_id": "101",
+             "bot_id": "bot-b", "participant_id": "200"},
+        ]
+        config["multi_host"]["personas"] = [
+            {"bot_id": "bot-a", "persona_id": "original", "role_id": "role-shared"},
+            {"bot_id": "bot-b", "persona_id": "original", "role_id": "role-shared"},
+        ]
+        controller = self.make_controller(config)
+        self.assertEqual(controller.role_source_target_id("role-shared", "wild"), "exact")
+        self.assertEqual(controller.role_source_target_id("role-shared", "exact"), "exact")
+
     async def test_context_follows_legacy_role_id_after_shared_persona_merge(self):
         config = multi_config()
         config["multi_host"]["personas"] = [
@@ -1146,6 +1163,10 @@ class MultiHostTests(MultiFixture, unittest.IsolatedAsyncioTestCase):
         context = controller.authority.context(target.target_id, canonical_role)
         self.assertEqual(context.role_binding.role.subject_id, canonical_role)
         self.assertEqual(context.scope.key, scope.key)
+        resolved = controller.authority.identities.resolve_role(
+            context.scope, observed_at=self.clock.now())
+        self.assertTrue(resolved.is_success, resolved.failure)
+        self.assertEqual(resolved.unwrap(), context.role_binding)
 
 
 class MultiHostVideoTests(MultiFixture, unittest.IsolatedAsyncioTestCase):
