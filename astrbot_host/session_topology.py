@@ -331,6 +331,10 @@ class SessionTopology:
         key = digest([platform_id, login, event.unified_msg_origin])
         row = {"unified_msg_origin": event.unified_msg_origin, "account_id": login,
                "conversation_id": cid, "last_seen_at": controller.now().isoformat()}
+        sender = getattr(message, "sender", None)
+        nickname = getattr(sender, "nickname", None)
+        if isinstance(nickname, str) and nickname.strip():
+            row["display_name"] = nickname.strip()[:128]
         if kind == "group":
             group = getattr(message, "group", None)
             group_name = getattr(group, "group_name", None)
@@ -502,7 +506,8 @@ class SessionTopology:
             result.append({**account, "session_key": session_key,
                 "target_id": binding["target_id"] if binding else session_key,
                 "scope_kind": kind, peer_field: peer, "unified_msg_origin": umo,
-                **({"display_name": observed_name, "group_name": observed_name} if kind == "group" and observed_name else {}),
+                **({"display_name": observed_name} if observed_name else {}),
+                **({"group_name": observed_name} if kind == "group" and observed_name else {}),
                 "conversation_id": "", "managed": False, "native": True,
                 "details_available": False, "persona_id": "", "persona_override": "",
                 "persona_source": "unresolved",
@@ -574,7 +579,8 @@ class SessionTopology:
                        "persona_ids": [selected]}] if role else [])
             result.append({**account, "session_key": key, "target_id": binding["target_id"] if binding else key,
                 "scope_kind": kind, "group_id" if kind == "group" else "participant_id": peer,
-                **({"display_name": native_name, "group_name": native_name} if kind == "group" and native_name else {}),
+                **({"display_name": native_name} if native_name else {}),
+                **({"group_name": native_name} if kind == "group" and native_name else {}),
                 "unified_msg_origin": umo, "conversation_id": cid,
                 "managed": binding is not None and (not self.controller._multi_host or role is not None),
                 "native": True, "details_available": True,

@@ -143,6 +143,10 @@
   const accountApi = "accounts";
   const TOPOLOGY_SESSION_PAGE_SIZE = 5;
   const TOPOLOGY_PIN_STORAGE_KEY = "astrbot_plugin_private_companion.topology.pinned_sessions";
+  /* One stable colour per AstrBot account keeps two account chains legible. */
+  const TOPOLOGY_ACCOUNT_COLORS = Object.freeze([
+    "#5964d8", "#2f9488", "#c8792f", "#a45bb7", "#c05462", "#3d84c7", "#7b9438",
+  ]);
   let topologyPinnedSessions = readPinnedTopologySessions();
 
   function readPinnedTopologySessions() {
@@ -174,11 +178,15 @@
   };
   const platformLabel = value => ({qq:"QQ · OneBot",default:"QQ · OneBot",aiocqhttp:"QQ · OneBot",onebot:"QQ · OneBot",qq_official:"QQ 官方机器人",qq_official_webhook:"QQ 官方机器人（Webhook）"})[value] || "当前平台";
   const nativeId = value => String(value ?? "").trim();
+  const numericId = value => /^\d+$/.test(nativeId(value)) ? nativeId(value) : "";
   const topologyScope = (target) => {
-    const kind = target?.scope_kind === "group" || target?.group_id ? "群" : "私聊";
+    const kind = target?.scope_kind === "group" || target?.group_id ? "群聊" : "私聊";
     const id = nativeId(target.group_id || target.participant_id);
     const name = groupDisplayName(target) || (kind === "私聊" ? String(target.display_name || "").trim() : "");
-    return `${kind} ${name ? name + (id ? `（${id}）` : "") : id || "当前对象"}`;
+    // Numeric OneBot ids are useful beside a nickname; opaque QQ Official
+    // openids are shown only when no human-readable window name is available.
+    const suffix = numericId(id) || (name ? "" : id);
+    return `${kind} ${name ? name + (suffix ? `（${suffix}）` : "") : suffix || "当前对象"}`;
   };
   const accountChoiceLabel = item => {
     const id = nativeId(item.account_id || item.account);
@@ -254,6 +262,7 @@
       const key = accountKey(target);
       if (!accounts.has(key)) accounts.set(key, {key, platform_id: target.platform_id || "",
         account_id: target.account_id || "", bot_id: target.bot_id || "", account_name: target.account_name || "",
+        color: TOPOLOGY_ACCOUNT_COLORS[accounts.size % TOPOLOGY_ACCOUNT_COLORS.length],
         roleKeys: new Set(), personaKeys: new Set(), sessionKeys: new Set()});
       return accounts.get(key);
     };
@@ -308,7 +317,8 @@
       const sessionKey = ["session", displayValue(target.session_key || target.target_id, `${target.scope_kind || "target"}-${targetIndex}`)].join(":");
       const session = {key: sessionKey, targetId: displayValue(target.target_id, `窗口 ${targetIndex + 1}`),
         label: topologyScope(target), scopeKind: target.scope_kind === "group" || target.group_id ? "group" : "private",
-        accountKey: account.key, accountLabel: accountChoiceLabel(account), personaKeys: persona ? [persona.key] : [],
+        accountKey: account.key, accountColor: account.color,
+        accountLabel: accountChoiceLabel(account), personaKeys: persona ? [persona.key] : [],
         roleKey: mapping?.roleKey || "",
         roleId: mapping?.roleId || "", registered: Boolean(mapping) && target.managed === true && !bindingsDirty,
         draft: Boolean(mapping) && bindingsDirty,
@@ -475,6 +485,8 @@
     }
     button.append(head, meta, detail);
     button.style.setProperty("--node-index", String(index));
+    const accountColor = kind === "account" ? item.color : kind === "session" ? item.accountColor : "";
+    if (accountColor) button.style.setProperty("--account-color", accountColor);
     wireTopologyControl(button, item, kind);
     return button;
   }
@@ -611,12 +623,15 @@
       if (right <= left || bottom <= top) return null;
       return {left, right, top, bottom, width: right - left, height: bottom - top};
     };
+    const accountColors = new Map((data.accounts || []).map(account => [account.key, account.color]));
     const connections = [];
     data.personas.forEach((persona) => {
-      persona.accountKeys.forEach((key) => connections.push([key, persona.key]));
+      persona.accountKeys.forEach((key) => connections.push({sourceKey: key, targetKey: persona.key,
+        accountKey: key}));
     });
     data.sessions.forEach((session) => {
-      session.personaKeys.forEach(key => connections.push([key, session.key]));
+      session.personaKeys.forEach(key => connections.push({sourceKey: key, targetKey: session.key,
+        accountKey: session.accountKey}));
     });
     const port = (from, to) => {
       const horizontalRight = to.left >= from.right - 4;
@@ -630,7 +645,7 @@
       return [[from.left - canvasRect.left + from.width / 2, from.top - canvasRect.top],
         [to.left - canvasRect.left + to.width / 2, to.bottom - canvasRect.top], true];
     };
-    connections.forEach(([sourceKey, targetKey], lineIndex) => {
+    connections.forEach(({sourceKey, targetKey, accountKey}, lineIndex) => {
       const source = find(sourceKey);
       const target = find(targetKey);
       if (!source || !target) return;
@@ -651,6 +666,8 @@
         path.style.setProperty("--line-delay", `${Math.min(lineIndex * 48, 240)}ms`);
         svg.append(path);
       }
+      path.style.setProperty("--topology-account-color",
+        accountColors.get(accountKey) || "var(--accent)");
       retained.add(path);
       path.setAttribute("d", vertical
         ? `M ${start[0]} ${start[1]} C ${start[0]} ${start[1] + distance}, ${end[0]} ${end[1] - distance}, ${end[0]} ${end[1]}`
@@ -680,6 +697,7 @@
     topologyHover = null;
     const hasTopology = data.accounts.length > 0 || data.roles.length > 0 || data.sessions.length > 0;
     mode.textContent = "账号与会话链路";
+    mode.title = hasTopology ? "连线与账号卡片的侧边色条对应不同 AstrBot 账号" : "";
     mode.dataset.state = hasTopology ? "ready" : "empty";
     counts.textContent = hasTopology
       ? `${data.accounts.length} 个账号 · ${data.roles.filter(role => role.mapped).length} 个角色 · ${data.sessions.length} 个窗口`
