@@ -3729,9 +3729,11 @@ window.CompanionSetup = (() => {
       } else if (action === "prepare") {
         await api("POST", "/prepare", {});
       } else if (action === "save-model") {
-        await api("POST", "/model", {provider_id: modelDraft});
+        const saved = await api("POST", "/model", {provider_id: modelDraft});
         modelTaskDrafts = {};
-        notice = "已初始化模型；任务路由可直接选择 AstrBot 当前已加载的 Provider。";
+        notice = saved?.restart_required || saved?.data?.restart_required
+          ? "模型已保存；当前宿主仍在运行，重载插件后使用新模型。"
+          : "已初始化模型；任务路由可直接选择 AstrBot 当前已加载的 Provider。";
       } else if (action.startsWith("save-task:")) {
         await saveModelTask(action.slice("save-task:".length));
       } else if (action === "generate-profile") {

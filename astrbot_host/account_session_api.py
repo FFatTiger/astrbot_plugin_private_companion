@@ -455,18 +455,25 @@ class AccountSessionWebAPI:
                 refresh()
             prepared = False
             initialization_error = None
+            restart_required = False
             if getattr(self.controller, "settings_error", None) is None:
                 try:
                     initialized = await self.controller.initialize_profile()
                     failure = getattr(initialized, "failure", None)
                     if failure is None:
                         prepared = True
+                    elif getattr(failure, "code", "") == "host_must_stop":
+                        # Editing the bootstrap provider while the host is
+                        # already serving is valid; apply it on the next reload.
+                        prepared = True
+                        restart_required = True
                     else:
                         initialization_error = getattr(failure, "code", "host_initialization_failed")
                 except Exception as error:
                     initialization_error = getattr(error, "code", "host_initialization_failed")
             return {"status": "ok", "data": {**self._view(), "saved": True,
                 "provider_id": provider_id, "prepared": prepared,
+                "restart_required": restart_required,
                 "initialization_error": initialization_error,
                 "status": self.controller.status()}}
         except TaskError as error:

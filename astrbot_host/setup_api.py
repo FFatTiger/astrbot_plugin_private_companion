@@ -520,7 +520,14 @@ class SetupWebAPI:
                 raise TaskError(settings_error.code, str(settings_error))
             initialized = await self.controller.initialize_profile()
             if initialized.failure is not None:
-                raise TaskError(initialized.failure.code, initialized.failure.reason)
+                if initialized.failure.code != "host_must_stop":
+                    raise TaskError(initialized.failure.code, initialized.failure.reason)
+                # The setup guide can be reopened while the shared host is
+                # already running. The provider is saved and the current host
+                # keeps serving; it will use the new selection after reload.
+                return self._response(Outcome.success({"provider_id": provider_id,
+                    "prepared": True, "restart_required": True,
+                    "status": self._status_document()}))
             return self._response(Outcome.success({"provider_id": provider_id,
                 "prepared": True, "status": self._status_document()}))
         except TaskError as error:

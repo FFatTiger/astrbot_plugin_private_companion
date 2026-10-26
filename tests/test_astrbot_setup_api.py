@@ -567,6 +567,14 @@ class AstrBotSetupFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.message_calls(), [])
         self.assertEqual(self.native.provider.client.state.calls, [])
 
+    async def test_model_can_be_saved_while_the_shared_host_is_running(self):
+        await self.enter_model_step()
+        with patch.object(self.controller, "initialize_profile",
+                          AsyncMock(return_value=Outcome.failed("host_must_stop", "host is running"))):
+            result = await self.call("model", {"provider_id": "native-model"})
+        self.assertEqual(result["status"], "ok", result)
+        self.assertTrue(result["data"].get("restart_required"))
+
     async def test_model_selection_rejects_unloaded_provider_without_saving(self):
         await self.enter_model_step()
 
