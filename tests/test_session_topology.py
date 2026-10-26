@@ -468,6 +468,7 @@ class SharedTopologyBindingTests(GroupFixture, unittest.IsolatedAsyncioTestCase)
 
         self.assertEqual({row["account_id"]: row["bot_id"] for row in accounts},
                          {"100": "registered-main", "101": "registered-second"})
+        self.assertEqual({row["platform_name"] for row in accounts}, {"aiocqhttp"})
         settings = replace(self.controller.settings, targets=(), group_targets=(),
                            account_bindings=(HostAccount("qq-main", "100", "settings-main"),
                                              HostAccount("qq-second", "101", "settings-second")))

@@ -120,12 +120,27 @@ class MultiHostSettings:
     group_targets: tuple[GroupTarget, ...] = ()
     group_delivery_mode: str = "onebot_group"
     window_links: tuple[WindowLink, ...] = ()
+    _role_aliases: tuple[tuple[str, str], ...] = field(default=(), compare=False, repr=False)
     _legacy_group_delivery_shape: bool = field(default=False, compare=False, repr=False)
     _storage_installation_id: str | None = field(default=None, compare=False, repr=False)
 
     @property
     def all_targets(self):
         return self.targets + self.group_targets
+
+    @property
+    def role_aliases(self):
+        return dict(self._role_aliases)
+
+    def canonical_role_id(self, role_id):
+        """Follow role ids that were merged into a shared AstrBot persona role."""
+        value = str(role_id or "")
+        aliases = self.role_aliases
+        seen = set()
+        while value in aliases and value not in seen:
+            seen.add(value)
+            value = aliases[value]
+        return value
 
     @property
     def alias_target_ids(self):
@@ -172,6 +187,7 @@ class MultiHostSettings:
             data["common"].pop(field)
         if not self.group_targets:
             data.pop("group_targets")  # Preserve already initialized private-only installations.
+        data.pop("_role_aliases")
         data.pop("_legacy_group_delivery_shape")
         data.pop("_storage_installation_id")
         if self._legacy_group_delivery_shape:
@@ -295,11 +311,23 @@ class MultiHostSettings:
                 or not REQUIRED_CAPABILITIES.issubset(capabilities) or not set(capabilities).issubset(ALLOWED_CAPABILITIES)):
             raise HostControlError("host_capabilities_invalid", "configure registered non-core capabilities including reply prerequisites")
         window_links = _parse_window_links(section.get("window_links"), targets)
-        personas = _shared_persona_roles(tuple(personas))
+        raw_personas = tuple(personas)
+        canonical_personas = _shared_persona_roles(raw_personas)
+        aliases_by_old = {}
+        for raw, canonical in zip(raw_personas, canonical_personas):
+            if not raw.role_id or not canonical.role_id:
+                continue
+            aliases_by_old.setdefault(raw.role_id, set()).add(canonical.role_id)
+        role_aliases = tuple(sorted(
+            (old_role, next(iter(destinations)))
+            for old_role, destinations in aliases_by_old.items()
+            if len(destinations) == 1 and old_role not in destinations
+        ))
         return cls(enabled, key, tuple(sorted(targets, key=lambda t: t.target_id)),
-                   tuple(sorted(personas, key=lambda p: (p.bot_id, p.persona_id))), account_bindings, tuple(sorted(capabilities)),
-                   common, groups, "onebot_group", window_links,
-                   legacy_group_delivery_shape or raw_group_mode == "preview")
+                   tuple(sorted(canonical_personas, key=lambda p: (p.bot_id, p.persona_id))), account_bindings,
+                   tuple(sorted(capabilities)), common, groups, "onebot_group", window_links,
+                   _role_aliases=role_aliases,
+                   _legacy_group_delivery_shape=legacy_group_delivery_shape or raw_group_mode == "preview")
 
     def require_ready(self):
         if not self.enabled:

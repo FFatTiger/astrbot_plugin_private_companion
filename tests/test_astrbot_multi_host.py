@@ -14,6 +14,7 @@ from astrbot.core.message.components import Video
 from astrbot_host.media_components import private_components
 from astrbot_host.video.loader import load_native_video
 from companion_v2.execution.models import TaskError, stamp
+from companion_v2.foundation.refs import ScopeRef, SubjectKind, SubjectRef
 from companion_v2.memory.models import AtomRef, owner_key
 from companion_v2.adapters.astrbot.staging import NativeAdapterTypes
 from tests.multi_host_support import MultiFixture, multi_config
@@ -84,6 +85,19 @@ class MultiSettingsTests(unittest.TestCase):
         ]
         parsed = MultiHostSettings.parse(config)
         self.assertEqual({mapping.role_id for mapping in parsed.personas}, {"星缘", "小星"})
+
+    def test_shared_persona_merge_keeps_legacy_role_aliases_for_runtime_reads(self):
+        config = multi_config()
+        config["multi_host"]["personas"] = [
+            {"bot_id": "bot-a", "persona_id": "星缘-私聊", "role_id": "role-bot-a-generated"},
+            {"bot_id": "bot-b", "persona_id": "星缘-私聊", "role_id": "role-bot-b-generated"},
+        ]
+        parsed = MultiHostSettings.parse(config)
+        canonical = {mapping.role_id for mapping in parsed.personas}
+        self.assertEqual(len(canonical), 1)
+        canonical_role = next(iter(canonical))
+        for old_role in ("role-bot-a-generated", "role-bot-b-generated"):
+            self.assertEqual(parsed.canonical_role_id(old_role), canonical_role)
 
     def test_existing_manifest_accepts_one_shared_role_after_upgrade(self):
         from astrbot_host.multi_authority import MultiAuthority
@@ -1098,6 +1112,40 @@ class MultiHostTests(MultiFixture, unittest.IsolatedAsyncioTestCase):
         result = await self.controller.initialize_profile()
         self.assertEqual(result.failure.code, "authorization_revoked",
                          "必需能力被收回是真故障，不能跟着一起放行")
+
+    async def test_context_follows_legacy_role_id_after_shared_persona_merge(self):
+        config = multi_config()
+        config["multi_host"]["personas"] = [
+            {"bot_id": "bot-a", "persona_id": "original", "role_id": "role-bot-a-generated"},
+            {"bot_id": "bot-b", "persona_id": "original", "role_id": "role-bot-b-generated"},
+        ]
+        controller = self.make_controller(config)
+        initialized = await controller.initialize_profile()
+        self.assertTrue(initialized.is_success, initialized.failure)
+        canonical_roles = {item.role_id for item in controller.settings.personas}
+        self.assertEqual(len(canonical_roles), 1)
+        canonical_role = next(iter(canonical_roles))
+        alias = next(role for role in controller.settings.role_aliases if role != canonical_role)
+        self.assertEqual(controller.settings.canonical_role_id(alias), canonical_role)
+
+        target = controller.settings.target("first")
+        stored = controller.authority.read(controller.authority.context_key(target, canonical_role))
+        self.assertIsNotNone(stored)
+        scope = ScopeRef.restore(stored)
+        selected = controller.authority.personas.resolve(
+            scope, observed_at=self.clock.now()).unwrap().selected
+        old_role = SubjectRef(controller.settings.installation_id, SubjectKind.BOT, alias)
+        controller.authority.personas.set_binding(
+            replace(selected, role=old_role, revision=selected.revision + 1),
+            expected_revision=selected.revision, observed_at=self.clock.now())
+        with controller.runtime.transaction() as connection:
+            connection.execute("DELETE FROM runtime_metadata WHERE key = ?",
+                               (controller.authority.context_key(target, canonical_role),))
+        controller.authority.write(controller.authority.context_key(target, alias), scope.document())
+
+        context = controller.authority.context(target.target_id, canonical_role)
+        self.assertEqual(context.role_binding.role.subject_id, canonical_role)
+        self.assertEqual(context.scope.key, scope.key)
 
 
 class MultiHostVideoTests(MultiFixture, unittest.IsolatedAsyncioTestCase):

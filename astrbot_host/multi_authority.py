@@ -381,6 +381,7 @@ class MultiAuthority:
 
     def context(self, target_id, role_id):
         target = self.target(target_id)
+        role_id = self.settings.canonical_role_id(role_id)
         if isinstance(target, GroupTarget):
             raise TaskError("host_group_context_requires_event", "a group context requires its actual authenticated speaker")
         stored = self.read(self.context_key(target, role_id))
@@ -408,7 +409,9 @@ class MultiAuthority:
                             and scope.native_scope_id != target.participant_id)):
                     continue
                 resolution = self.personas.resolve(scope, observed_at=self.now())
-                if resolution.failure is None and resolution.unwrap().binding.role.subject_id == role_id:
+                if (resolution.failure is None
+                        and self.settings.canonical_role_id(
+                            resolution.unwrap().binding.role.subject_id) == role_id):
                     stored = candidate
                     break
         if stored is None:
@@ -433,7 +436,12 @@ class MultiAuthority:
         actor = self.actor(resolved_target, scope.native_scope_id)
         binding = require(self.personas.resolve(scope, observed_at=self.now())).binding
         if binding.role != role:
-            raise TaskError("host_persona_binding_changed", "the private persona binding changed")
+            if self.settings.canonical_role_id(binding.role.subject_id) != role.subject_id:
+                raise TaskError("host_persona_binding_changed", "the private persona binding changed")
+            # Existing runtime bindings may still carry the pre-merge role id.
+            # Read through the canonical shared role; the next provision_scope
+            # persists that migration when the window receives a message.
+            binding = replace(binding, role=role)
         return TaskContext(actor, binding, AudienceRef(scope, (actor.subject,)))
 
     def authorize_delivery(self, target_id, expires_at):
