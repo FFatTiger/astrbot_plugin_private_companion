@@ -1,5 +1,9 @@
 # 更新日志
 
+## 7.0.6
+
+- 2026-10-26：修复全新安装或升级后初始化报 `StoragePathError: V2 must not use a V1 plugin directory as its data root`。AstrBot 4.29 的全新数据目录直接使用公开插件名，运行库只允许其下 `companion-7` / `profiles`，导致 `runtime` 子目录被误判；现在允许没有 V1 数据标记的 `runtime`，仍拒绝真正的 V1 数据根、其他旧插件目录和插件代码目录。
+
 ## 7.0.5
 
 - 2026-10-26：账号与会话链路按 AstrBot 账号着色，账号卡片、窗口卡片侧条与连线共用同一颜色；私聊窗口读取并显示发送者昵称，QQ 官方 openid 不再挤占窗口标题。

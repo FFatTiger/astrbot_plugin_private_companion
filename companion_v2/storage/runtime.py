@@ -2901,16 +2901,20 @@ def _validate_data_root(value: Path) -> Path:
             continue
         relative = root.relative_to(ancestor).parts
         # The public plugin name is shared with 6.x. Its isolated upgrade child
-        # and a fresh installation's profiles must remain usable after takeover.
-        # Old data itself, other legacy plugins and arbitrary children stay read-only.
+        # and a fresh installation's profiles/runtime must remain usable after
+        # takeover. Old data itself, other legacy plugins and arbitrary children
+        # stay read-only.
         if (ancestor.name.casefold() != "astrbot_plugin_private_companion" or not relative
-                or relative[0].casefold() not in ("companion-7", "profiles")):
+                or relative[0].casefold() not in ("companion-7", "profiles", "runtime")):
             raise StoragePathError("V2 must not use a V1 plugin directory as its data root")
+        if (relative[0].casefold() == "runtime"
+                and any((ancestor / marker).is_file() for marker in ("main.py", "pyproject.toml"))):
+            raise StoragePathError("V2 runtime must not be inside the plugin code directory")
         boundary = ancestor / relative[0]
         checked = (root, *(parent for parent in root.parents if parent.is_relative_to(boundary)))
         owned = any((ancestor / marker).is_file() for marker in (
             ".companion-v2-storage-owner.json", ".companion-v2-storage-location.json"))
-        if relative[0].casefold() == "profiles" and not owned:
+        if relative[0].casefold() in ("profiles", "runtime") and not owned:
             checked = (*checked, ancestor)
         if any((folder / marker).exists() for folder in checked
                for marker in ("companions.json", "companions.db", ".storage-backend-state.json")):

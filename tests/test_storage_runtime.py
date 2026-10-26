@@ -282,6 +282,31 @@ class StorageRuntimeTests(unittest.TestCase):
                                           installation_id=INSTALLATION_ID)
             runtime.close()
 
+    def test_fresh_public_name_runtime_is_allowed_without_legacy_markers(self):
+        with TemporaryDirectory(prefix="companion-storage-fresh-") as temporary:
+            public = Path(temporary) / "astrbot_plugin_private_companion"
+            public.mkdir()
+            runtime = StorageRuntime.open(data_root=public / "runtime",
+                                          installation_id=INSTALLATION_ID)
+            runtime.close()
+            self.assertTrue((public / "runtime" / StorageRuntime.DATABASE_FILENAME).is_file())
+
+    def test_plugin_code_directory_cannot_become_the_runtime_root(self):
+        with TemporaryDirectory(prefix="companion-storage-code-") as temporary:
+            public = Path(temporary) / "astrbot_plugin_private_companion"
+            public.mkdir()
+            (public / "main.py").write_text("", encoding="utf-8")
+            with self.assertRaises(StoragePathError):
+                StorageRuntime.open(data_root=public / "runtime", installation_id=INSTALLATION_ID)
+
+    def test_legacy_marker_root_still_rejects_a_direct_runtime_child(self):
+        with TemporaryDirectory(prefix="companion-storage-legacy-runtime-") as temporary:
+            public = Path(temporary) / "astrbot_plugin_private_companion"
+            public.mkdir()
+            (public / "companions.json").write_bytes(b'{"legacy":true}\n')
+            with self.assertRaises(StoragePathError):
+                StorageRuntime.open(data_root=public / "runtime", installation_id=INSTALLATION_ID)
+
     def test_isolated_child_rejects_legacy_markers_inside_its_boundary(self):
         with TemporaryDirectory(prefix="companion-storage-boundary-") as temporary:
             public = Path(temporary) / "astrbot_plugin_private_companion"
