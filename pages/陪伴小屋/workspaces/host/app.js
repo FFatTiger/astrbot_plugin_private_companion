@@ -262,6 +262,8 @@
     const personas = new Map();
     const mappedPersonas = new Map();
     const sessions = [];
+    const primaryLinks = (bindingConfig?.window_links || []).filter(link => link.mode === "primary");
+    const hiddenWindowIds = new Set(primaryLinks.flatMap(link => link.alias_target_ids || []));
     const accountKey = target => `account:${JSON.stringify([target.platform_id || "", target.account_id || "", target.bot_id || ""])}`;
     const ensureAccount = target => {
       const key = accountKey(target);
@@ -313,6 +315,7 @@
         .map(key => personas.get(key)?.label || personas.get(key)?.personaId));
     }
     targets.forEach((target, targetIndex) => {
+      if (hiddenWindowIds.has(String(target.target_id))) return;
       const account = ensureAccount(target);
       const personaId = String(target.persona_override || target.persona_id || "");
       const detailsAvailable = target.details_available !== false;
@@ -327,6 +330,7 @@
         roleKey: mapping?.roleKey || "",
         roleId: mapping?.roleId || "", registered: Boolean(mapping) && target.managed === true && !bindingsDirty,
         draft: Boolean(mapping) && bindingsDirty,
+        mergedAliases: primaryLinks.find(link => link.primary_target_id === String(target.target_id))?.alias_target_ids?.length || 0,
         pinKey: topologySessionPinKey(target), platform: account.platform_id, raw: target};
       sessions.push(session);
       if (persona) persona.sessionKeys.add(sessionKey);
@@ -460,7 +464,7 @@
     badge.className = `topology-node-badge${item.scopeKind === "group" ? " group" : ""}${isPinned ? " pinned" : ""}`;
     badge.textContent = kind === "account" ? `${mappedRoleCount(item)} 个角色`
       : kind === "persona" ? `${item.sessionKeys.size} 个窗口`
-        : `${isPinned ? "置顶 · " : ""}${item.scopeKind === "group" ? "群聊" : "私聊"}`;
+        : `${isPinned ? "置顶 · " : ""}${item.scopeKind === "group" ? "群聊" : "私聊"}${item.mergedAliases ? ` · 已合并 ${item.mergedAliases}` : ""}`;
     head.append(title, badge);
     const meta = document.createElement("span");
     meta.className = "topology-node-meta";
