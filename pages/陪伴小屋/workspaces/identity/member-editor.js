@@ -29,6 +29,12 @@
     voice_language: "语音语言", voice_foreign_text_mode: "外语文字处理",
     voice_provider_id: "通用语音扩展", voice_zh_provider_id: "中文语音扩展",
     voice_ja_provider_id: "日语语音扩展", voice_en_provider_id: "英语语音扩展",
+    voice_private_zh_provider_id: "私聊 · 中文语音扩展",
+    voice_private_ja_provider_id: "私聊 · 日语语音扩展",
+    voice_private_en_provider_id: "私聊 · 英语语音扩展",
+    voice_group_zh_provider_id: "群聊 · 中文语音扩展",
+    voice_group_ja_provider_id: "群聊 · 日语语音扩展",
+    voice_group_en_provider_id: "群聊 · 英语语音扩展",
     voice_probability: "语音触发概率", voice_cooldown_seconds: "语音冷却（秒）",
     voice_max_speech_chars: "单段朗读上限", voice_timeout_seconds: "合成超时（秒）",
     voice_trigger_keywords: "语音触发词", voice_extra_prompt: "语音表达偏好",
@@ -92,8 +98,10 @@
       "content_cleanup_rule", "content_cleanup_words", "content_replacement_enabled", "content_replacements"]},
     {title: "语音回复", fields: ["voice_enabled", "voice_trigger_mode", "voice_generation_mode", "voice_segment_mode",
       "voice_delivery_mode", "voice_position", "voice_language", "voice_foreign_text_mode", "voice_provider_id",
-      "voice_zh_provider_id", "voice_ja_provider_id", "voice_en_provider_id", "voice_probability",
-      "voice_cooldown_seconds", "voice_max_speech_chars", "voice_timeout_seconds", "voice_trigger_keywords", "voice_extra_prompt"]},
+      "voice_zh_provider_id", "voice_ja_provider_id", "voice_en_provider_id",
+      "voice_private_zh_provider_id", "voice_private_ja_provider_id", "voice_private_en_provider_id",
+      "voice_probability", "voice_cooldown_seconds", "voice_max_speech_chars", "voice_timeout_seconds",
+      "voice_trigger_keywords", "voice_extra_prompt"]},
     {title: "图片理解", fields: ["image_understanding_private_enabled", "astrbot_animated_image_understanding_enabled",
       "enable_private_image_self_recognition", "private_image_self_recognition_hint",
       "enable_private_image_vision_cache", "private_image_vision_cache_max_items",
@@ -1029,7 +1037,8 @@
     if (provenance.explicit) wrapper.dataset.explicit = "true";
     const label = name === "voice_probability" ? "语音触发概率（0–1）" : replyLabels[name] || name;
     const providerFields = new Set(["voice_provider_id", "voice_zh_provider_id",
-      "voice_ja_provider_id", "voice_en_provider_id"]);
+      "voice_ja_provider_id", "voice_en_provider_id", "voice_private_zh_provider_id",
+      "voice_private_ja_provider_id", "voice_private_en_provider_id"]);
     const tts = Array.isArray(state.tts?.providers) ? state.tts.providers : [];
     const providerChoices = providerFields.has(name) && tts.length ? {
       "": name === "voice_provider_id" ? "跟随角色默认" : "使用通用扩展",

@@ -44,6 +44,11 @@ class VoicePolicyTests(unittest.TestCase):
         self.assertEqual(probability.provider_for_language(), "")
         self.assertEqual(VoiceReplyPolicy(language="ja", provider_id="fallback", ja_provider_id="japanese")
                          .provider_for_language(), "japanese")
+        channel_policy = VoiceReplyPolicy(language="ja", ja_provider_id="japanese",
+            private_ja_provider_id="private-drama", group_ja_provider_id="group-pro")
+        self.assertEqual(channel_policy.provider_for_language("private"), "private-drama")
+        self.assertEqual(channel_policy.provider_for_language("group"), "group-pro")
+        self.assertEqual(channel_policy.provider_for_language(), "japanese")
 
     def test_voice_perception_describes_best_effort_delivery_without_provider_identity(self):
         policy = VoiceReplyPolicy(language="ja", delivery_mode="voice_only", provider_id="private-provider")

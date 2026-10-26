@@ -582,6 +582,42 @@
         "type": "string",
         "default": ""
       },
+      "private_zh_provider_id": {
+        "description": "私聊中文 TTS Provider ID",
+        "type": "string",
+        "default": "",
+        "hint": "优先于通用与中文语种绑定；留空沿用中文语种绑定。"
+      },
+      "private_ja_provider_id": {
+        "description": "私聊日语 TTS Provider ID",
+        "type": "string",
+        "default": "",
+        "hint": "优先于通用与日语语种绑定；留空沿用日语语种绑定。"
+      },
+      "private_en_provider_id": {
+        "description": "私聊英语 TTS Provider ID",
+        "type": "string",
+        "default": "",
+        "hint": "优先于通用与英语语种绑定；留空沿用英语语种绑定。"
+      },
+      "group_zh_provider_id": {
+        "description": "群聊中文 TTS Provider ID",
+        "type": "string",
+        "default": "",
+        "hint": "优先于通用与中文语种绑定；留空沿用中文语种绑定。"
+      },
+      "group_ja_provider_id": {
+        "description": "群聊日语 TTS Provider ID",
+        "type": "string",
+        "default": "",
+        "hint": "优先于通用与日语语种绑定；留空沿用日语语种绑定。"
+      },
+      "group_en_provider_id": {
+        "description": "群聊英语 TTS Provider ID",
+        "type": "string",
+        "default": "",
+        "hint": "优先于通用与英语语种绑定；留空沿用英语语种绑定。"
+      },
       "extra_prompt": {
         "description": "模型选句补充提示",
         "type": "text",
