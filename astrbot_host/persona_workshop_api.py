@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 from astrbot.api.web import request
 from companion_v2.execution.models import TaskError, digest, require
@@ -48,6 +49,19 @@ from companion_v2.relationships.profile_drafts import (build_relationship_profil
 from .management_identity import dashboard_operator
 from .legacy_config import read_v1_host_configuration, v1_setting
 from .persona_catalog import persona_choices
+
+logger = logging.getLogger(__name__)
+
+
+def _session_provider_id(session):
+    """Read the selected provider from either the single-host or multi-host session."""
+    common = getattr(getattr(session, "settings", None), "common", None)
+    configured = getattr(common, "provider_id", None)
+    if isinstance(configured, str):
+        return configured
+    profile = getattr(session, "profile", None)
+    configured = getattr(profile, "provider_id", None)
+    return configured if isinstance(configured, str) else ""
 
 
 PREFIX = "/astrbot_plugin_private_companion/persona"
@@ -251,7 +265,7 @@ class PersonaWorkshopWebAPI:
         model = getattr(model_session, "model", None)
         provider = getattr(model, "native", None)
         provider_id = getattr(model, "provider_id", "")
-        if (model is None or provider is None or provider_id != model_session.profile.provider_id
+        if (model is None or provider is None or provider_id != _session_provider_id(model_session)
                 or not callable(getattr(provider, "text_chat", None))):
             raise TaskError("role_profile_model_unavailable", "the selected model cannot create persona drafts")
         model._current()
@@ -379,7 +393,7 @@ class PersonaWorkshopWebAPI:
                 model = getattr(model_session, "model", None)
                 provider = getattr(model, "native", None)
                 provider_id = getattr(model, "provider_id", "")
-                if (model is None or provider is None or provider_id != model_session.profile.provider_id
+                if (model is None or provider is None or provider_id != _session_provider_id(model_session)
                         or not callable(getattr(provider, "text_chat", None))):
                     raise TaskError("role_profile_model_unavailable", "the selected model cannot create a profile draft")
                 model._current()
@@ -465,7 +479,8 @@ class PersonaWorkshopWebAPI:
             return outcome_response(Outcome.failed(error.code, str(error)))
         except (ValueError, TypeError, KeyError, UnicodeError, RecursionError, OverflowError):
             return outcome_response(Outcome.failed("role_profile_draft_invalid", "the profile draft response was invalid"))
-        except Exception:
+        except Exception as error:
+            logger.warning("[CompanionV2] 角色档案草稿生成失败", exc_info=True)
             return outcome_response(Outcome.failed("role_profile_draft_failed", "the profile could not be drafted; check the selected model and try again"))
 
     @staticmethod
@@ -717,7 +732,7 @@ class PersonaWorkshopWebAPI:
                 model = getattr(model_session, "model", None)
                 provider = getattr(model, "native", None)
                 provider_id = getattr(model, "provider_id", "")
-                if (model is None or provider is None or provider_id != model_session.profile.provider_id
+                if (model is None or provider is None or provider_id != _session_provider_id(model_session)
                         or not callable(getattr(provider, "text_chat", None))):
                     raise TaskError("role_profile_model_unavailable", "the selected model cannot create a persona draft")
                 model._current()
