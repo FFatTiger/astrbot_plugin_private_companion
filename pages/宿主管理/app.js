@@ -302,7 +302,8 @@
     const ensureAccount = target => {
       const key = accountKey(target);
       if (!accounts.has(key)) accounts.set(key, {key, platform_id: target.platform_id || "",
-        account_id: target.account_id || "", bot_id: target.bot_id || "", account_name: target.account_name || "",
+        platform_name: target.platform_name || "", account_id: target.account_id || "",
+        bot_id: target.bot_id || "", account_name: target.account_name || "",
         color: TOPOLOGY_ACCOUNT_COLORS[accounts.size % TOPOLOGY_ACCOUNT_COLORS.length],
         roleKeys: new Set(), personaKeys: new Set(), sessionKeys: new Set()});
       return accounts.get(key);
@@ -360,7 +361,8 @@
       const session = {key: sessionKey, targetId: displayValue(target.target_id, `窗口 ${targetIndex + 1}`),
         label: topologyScope(target), scopeKind: target.scope_kind === "group" || target.group_id ? "group" : "private",
         accountKey: account.key, accountColor: account.color,
-        accountLabel: accountChoiceLabel(account), personaKeys: persona ? [persona.key] : [],
+        accountLabel: accountChoiceLabel(account), platformName: account.platform_name || "",
+        personaKeys: persona ? [persona.key] : [],
         roleKey: mapping?.roleKey || "",
         roleId: mapping?.roleId || "", registered: Boolean(mapping) && target.managed === true && !bindingsDirty,
         draft: Boolean(mapping) && bindingsDirty,
@@ -504,7 +506,7 @@
     head.append(title, badge);
     const meta = document.createElement("span");
     meta.className = "topology-node-meta";
-    if (kind === "account") meta.textContent = `${platformLabel(item.platform_id)} · Bot ${item.bot_id || "未标记"}`;
+    if (kind === "account") meta.textContent = `${platformLabel(item.platform_name || item.platform_id)} · Bot ${item.bot_id || "未标记"}`;
     else if (kind === "persona") meta.textContent = "AstrBot 人格";
     else meta.textContent = item.raw.unified_msg_origin?.split(":").pop().includes("_") ? "分成员会话" : item.scopeKind === "group" ? "群聊窗口" : "私聊窗口";
     const detail = document.createElement("span");
@@ -885,7 +887,7 @@
     $("session-manager-state").textContent = "";
     if (item.kind !== "session") {
       $("session-manager-meta").textContent = item.kind === "account"
-        ? `${platformLabel(item.platform_id)} · ${mappedRoleCount(item)} 个角色 · ${item.sessionKeys.size} 个原生会话`
+        ? `${platformLabel(item.platform_name || item.platform_id)} · ${mappedRoleCount(item)} 个角色 · ${item.sessionKeys.size} 个原生会话`
         : item.kind === "persona" ? `${item.roleId ? `角色 ${topologySnapshot.roles.find(role => role.key === item.roleKey)?.name || item.roleId}` : "未归入角色"} · ${item.sessionKeys.size} 个会话窗口`
           : `${item.personaKeys.size} 个 AstrBot 人格 · ${item.accountKeys.size} 个账号 · ${item.sessionKeys.size} 个会话窗口`;
       const appendRelated = (label, key) => {
@@ -925,7 +927,7 @@
     const mappedRole = item.roleId
       ? topologySnapshot.roles.find(entry => entry.key === item.roleKey)?.name || roleDisplayName(item.roleId)
       : "未归入角色";
-    $("session-manager-meta").textContent = `${platformLabel(item.platform)} · ${accountChoiceLabel(account || {})} · ${item.label}`;
+    $("session-manager-meta").textContent = `${platformLabel(item.platformName || item.raw?.platform_name || item.platform)} · ${accountChoiceLabel(account || {})} · ${item.label}`;
     const mappingState = !row.native ? "尚未建立 AstrBot 会话"
       : item.draft ? "角色映射尚未保存" : item.registered ? "已归入角色，随角色自动运行"
         : "AstrBot 已发现，等待账号下的人格归入角色";
@@ -1444,7 +1446,7 @@
     const title = document.createElement("strong");
     title.textContent = accountChoiceLabel(account);
     const meta = document.createElement("small");
-    meta.textContent = `${platformLabel(account.platform_id)} · Bot ${account.bot_id || "未标记"}`;
+    meta.textContent = `${platformLabel(account.platform_name || account.platform_id)} · Bot ${account.bot_id || "未标记"}`;
     const add = document.createElement("button");
     add.type = "button";
     add.className = "button button-quiet";

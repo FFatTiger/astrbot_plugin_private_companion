@@ -293,6 +293,12 @@ class OfficialMultiHostTests(MultiFixture, unittest.IsolatedAsyncioTestCase):
         )
         self.controller = self.make_controller(self.config)
 
+    async def test_official_account_directory_reports_adapter_family_for_ui_labels(self):
+        accounts = self.controller.session_topology.accounts()
+        official = next(row for row in accounts if row["platform_id"] == ACCOUNT)
+        self.assertEqual(official["platform_name"], "qq_official")
+        self.assertEqual(official["account_id"], ACCOUNT)
+
     async def test_fresh_public_plugin_data_root_can_open_installations_storage(self):
         public = self.root / "astrbot-data" / "plugin_data" / "astrbot_plugin_private_companion"
         public.mkdir(parents=True)

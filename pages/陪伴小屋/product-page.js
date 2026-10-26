@@ -663,7 +663,7 @@ window.CompanionProduct = (() => {
   }
   const nativeId = value => /^\d+$/.test(String(value || "")) ? String(value) : "";
   const subjectLabel = item => item?.display_name || nativeId(item?.group_id || item?.participant_id) || "当前聊天对象";
-  const platformLabel = item => ({qq:"QQ · OneBot",default:"QQ · OneBot",aiocqhttp:"QQ · OneBot",onebot:"QQ · OneBot",qq_official:"QQ 官方机器人",qq_official_webhook:"QQ 官方机器人（Webhook）"})[item?.platform_id] || "当前平台";
+  const platformLabel = item => ({qq:"QQ · OneBot",default:"QQ · OneBot",aiocqhttp:"QQ · OneBot",onebot:"QQ · OneBot",qq_official:"QQ 官方机器人",qq_official_webhook:"QQ 官方机器人（Webhook）"})[item?.platform_name || item?.platform_id] || "当前平台";
   const accountLabel = item => {
     const id = nativeId(item.account_id);
     return item.account_name ? item.account_name + (id ? `（${id}）` : "") : id ? `QQ ${id}` : "当前账号";

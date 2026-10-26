@@ -122,21 +122,39 @@ class SessionTopology:
                 aliases[(row["platform_id"], row["account_id"])] = row["bot_id"]
                 rows.append(row)
         result = {}
+        platform_names = {}
 
-        def remember(platform_id, account_id, bot_id=None):
+        def remember(platform_id, account_id, bot_id=None, *, platform_name=""):
             platform_id, account_id = str(platform_id or "").strip(), str(account_id or "").strip()
             if not platform_id or not account_id:
                 return
+            previous = result.get((platform_id, account_id), {})
             result[(platform_id, account_id)] = {
+                **previous,
                 "platform_id": platform_id, "account_id": account_id,
                 "bot_id": bot_id or aliases.get((platform_id, account_id)) or derive_bot_id(account_id),
+                # platform_id is the configured instance key (for example
+                # ``test``); platform_name is the adapter family used for UI
+                # labels (for example ``qq_official``).
+                "platform_name": platform_name or previous.get("platform_name", ""),
             }
+
+        # Resolve adapter family names before configured rows are remembered.
+        for platform in platforms:
+            try:
+                meta = platform.meta()
+                if supported_platform_name(meta.name):
+                    platform_names[str(meta.id)] = str(meta.name)
+            except (AttributeError, ValueError, TypeError):
+                continue
 
         # Configured accounts remain visible before a reverse websocket has
         # registered its live client. A fresh install has no ``accounts`` rows
         # yet, so targets also seed the picker.
         for row in rows:
-            remember(row.get("platform_id"), row.get("account_id"), row.get("bot_id"))
+            platform_id = row.get("platform_id")
+            remember(platform_id, row.get("account_id"), row.get("bot_id"),
+                     platform_name=platform_names.get(str(platform_id or ""), ""))
         for platform in platforms:
             try:
                 meta = platform.meta()
@@ -145,12 +163,12 @@ class SessionTopology:
                 if meta.name == "aiocqhttp":
                     clients = getattr(platform.get_client(), "_wsr_api_clients", {})
                     for raw_id in clients:
-                        remember(meta.id, account_number(raw_id))
+                        remember(meta.id, account_number(raw_id), platform_name=meta.name)
                 else:
                     # QQ Official and the webhook adapter do not expose a
                     # OneBot self-id. Their stable account key is the platform
                     # instance id, also used by event_identity.
-                    remember(meta.id, meta.id)
+                    remember(meta.id, meta.id, platform_name=meta.name)
             except (AttributeError, ValueError, TypeError):
                 continue
         return sorted(result.values(), key=lambda row: (row["platform_id"], row["account_id"]))
