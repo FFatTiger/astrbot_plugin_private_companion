@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 from astrbot.core.message.components import At, Plain
 from astrbot_host.account_session_api import AccountSessionWebAPI
+from astrbot_host.multi_controller import AstrBotMultiController
 from astrbot_host.group_admission import group_trigger_facts
 from astrbot_host.multi_settings import MultiHostSettings
 from astrbot_host.session_topology import session_route
@@ -291,6 +292,18 @@ class OfficialMultiHostTests(MultiFixture, unittest.IsolatedAsyncioTestCase):
             group_targets=[],
         )
         self.controller = self.make_controller(self.config)
+
+    async def test_fresh_public_plugin_data_root_can_open_installations_storage(self):
+        public = self.root / "astrbot-data" / "plugin_data" / "astrbot_plugin_private_companion"
+        public.mkdir(parents=True)
+        controller = AstrBotMultiController(
+            self.native, self.config, public, native_types=self.types, now=self.clock.now)
+        self.addAsyncCleanup(controller.terminate)
+        initialized = await controller.initialize_profile()
+        self.assertTrue(initialized.is_success, initialized.failure)
+        started = await controller.start()
+        self.assertTrue(started.is_success, started.failure)
+        self.assertTrue((public / "installations").is_dir())
 
     async def test_official_private_event_runs_through_shared_host_and_astrbot_sender(self):
         await self.start_host()

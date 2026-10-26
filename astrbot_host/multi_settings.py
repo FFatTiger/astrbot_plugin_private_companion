@@ -1,12 +1,14 @@
 """Explicit account, participant and persona mappings for one shared installation."""
 
-from dataclasses import asdict, dataclass, field
+from collections import Counter
+from dataclasses import asdict, dataclass, field, replace
 
 from companion_v2.adapters.astrbot.native import HostAccount, route_id
 from companion_v2.adapters.astrbot.staging_config import ALLOWED_CAPABILITIES, REQUIRED_CAPABILITIES
 from companion_v2.execution.models import digest
 from companion_v2.conversation.forwards.models import ForwardIntakePolicy
 from companion_v2.conversation.segmentation import SegmentationPolicy
+from .identity_derivation import role_display_name
 from .settings import HostControlError, HostSettings, PROFILE_PATTERN, _boolean, _section, _text
 from .group_settings import GroupTarget, parse_group_targets
 
@@ -29,6 +31,39 @@ class PersonaMapping:
     bot_id: str
     persona_id: str
     role_id: str
+
+
+def _shared_persona_roles(personas: tuple[PersonaMapping, ...]) -> tuple[PersonaMapping, ...]:
+    """Keep one role id when the same AstrBot persona uses the same character name.
+
+    AstrBot personas are global while V2 roles used to be account-scoped.  When
+    the same persona is mapped under several Bot accounts with the same visible
+    role name, that is one character that should keep one memory owner, not two
+    roles.  Differently named roles stay separate so an explicit split remains
+    possible.
+    """
+    by_persona = {}
+    role_counts = Counter(mapping.role_id for mapping in personas)
+    for mapping in personas:
+        by_persona.setdefault(mapping.persona_id, []).append(mapping)
+    canonical = {}
+    for persona_id, rows in by_persona.items():
+        role_ids = {row.role_id for row in rows}
+        if len(role_ids) <= 1:
+            continue
+        labels = {role_display_name(row.role_id, [persona_id]) for row in rows}
+        if len(labels) != 1:
+            continue
+
+        def rank(row):
+            explicit = not row.role_id.startswith(("role-", "staging-"))
+            return (role_counts[row.role_id], explicit, row.role_id)
+
+        canonical[persona_id] = max(rows, key=rank).role_id
+    if not canonical:
+        return personas
+    return tuple(replace(mapping, role_id=canonical.get(mapping.persona_id, mapping.role_id))
+                 for mapping in personas)
 
 
 @dataclass(frozen=True)
@@ -205,6 +240,7 @@ class MultiHostSettings:
                 or len(set(capabilities)) != len(capabilities)
                 or not REQUIRED_CAPABILITIES.issubset(capabilities) or not set(capabilities).issubset(ALLOWED_CAPABILITIES)):
             raise HostControlError("host_capabilities_invalid", "configure registered non-core capabilities including reply prerequisites")
+        personas = _shared_persona_roles(tuple(personas))
         return cls(enabled, key, tuple(sorted(targets, key=lambda t: t.target_id)),
                    tuple(sorted(personas, key=lambda p: (p.bot_id, p.persona_id))), account_bindings, tuple(sorted(capabilities)),
                    common, groups, "onebot_group", legacy_group_delivery_shape or raw_group_mode == "preview")

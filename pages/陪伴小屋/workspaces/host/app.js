@@ -274,7 +274,7 @@
       return personas.get(key);
     };
     const ensureRole = (botId, roleId, name = roleId, mapped = true) => {
-      const key = `role:${JSON.stringify([botId, roleId])}`;
+      const key = roleId ? `role:${roleId}` : `role:unassigned:${botId}`;
       if (!roles.has(key)) roles.set(key, {key, botId, roleId, name, mapped,
         personaKeys: new Set(), accountKeys: new Set(), sessionKeys: new Set()});
       return roles.get(key);

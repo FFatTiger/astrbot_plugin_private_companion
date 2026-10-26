@@ -30,6 +30,11 @@ LEGACY_DATA_NAMES = ("astrbot_plugin_private_companion_v2",)
 V2_SUBDIRECTORY = "companion-7"
 # V1 的数据目录特征：它把全部陪伴数据放在这几个文件里。
 _V1_MARKERS = ("companions.json", "companions.db", ".storage-backend-state.json")
+# 某些 AstrBot 版本会让 get_data_dir() 返回插件代码目录。代码目录不能作为
+# V2 数据根；识别后改写到 AstrBot 标准的 data/plugin_data/<plugin> 目录。
+_PLUGIN_CODE_MARKERS = ("main.py", "pyproject.toml")
+_PLUGIN_CODE_NAMES = frozenset(("astrbot_plugin_private_companion", "astrbot_plugin_private_companion_v2",
+                                "astrbot_plugin_remember_you"))
 
 
 def _looks_like_data_root(path: Path) -> bool:
@@ -55,6 +60,27 @@ def _looks_like_v1_root(path: Path) -> bool:
     return any((path / name).exists() for name in _V1_MARKERS)
 
 
+def _looks_like_plugin_code_dir(path: Path) -> bool:
+    """True for the installed plugin code tree, never for a V2 data directory."""
+    if not path.is_dir():
+        return False
+    if not any((path / marker).is_file() for marker in _PLUGIN_CODE_MARKERS):
+        return False
+    return path.name.casefold() in _PLUGIN_CODE_NAMES
+
+
+def _plugin_data_sibling(code_dir: Path) -> Path:
+    """Map a plugin code tree to a sibling plugin_data directory.
+
+    AstrBot normally uses ``<data>/plugin_data/<plugin>``.  Some hosts return
+    the code tree itself from ``get_data_dir``; in that case use the conventional
+    sibling for the standard layout, or the nearest external fallback otherwise.
+    """
+    parent = code_dir.parent
+    base = parent.parent if parent.name.casefold() in ("plugins", "plugin") else parent
+    return base / "plugin_data" / code_dir.name
+
+
 def resolve_data_root(default_root: Path, *, legacy_names=LEGACY_DATA_NAMES) -> Path:
     """插件改名前后的数据根解析。
 
@@ -64,6 +90,10 @@ def resolve_data_root(default_root: Path, *, legacy_names=LEGACY_DATA_NAMES) -> 
     时以现在的名字为准，避免改名后新旧目录各写一半。
     """
     default = Path(default_root).resolve()
+    if _looks_like_plugin_code_dir(default):
+        sibling = _plugin_data_sibling(default)
+        if sibling is not None:
+            default = sibling.resolve()
     if _looks_like_data_root(default):
         return default
     for name in legacy_names:

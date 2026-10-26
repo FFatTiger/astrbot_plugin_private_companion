@@ -373,11 +373,20 @@ class SetupWebAPI:
             context = self.controller.context
             accounts = self.controller.session_topology.accounts()
             persona_names = await available_personas(context)
+            from .multi_settings import MultiHostSettings
+            try:
+                # The runtime may already share one persona role across Bot
+                # accounts; use the same normalized mapping in the setup picker.
+                mapping_rows = [{"bot_id": item.bot_id, "persona_id": item.persona_id,
+                                 "role_id": item.role_id}
+                                for item in MultiHostSettings.parse(self.controller.config).personas]
+            except (HostControlError, ValueError):
+                mapping_rows = self.controller.config.get("multi_host", {}).get("personas", [])
             choices = []
             for account in accounts:
                 names = [*persona_names, "[%None]"]
                 for persona_id in names:
-                    mapping = next((item for item in self.controller.config.get("multi_host", {}).get("personas", [])
+                    mapping = next((item for item in mapping_rows
                                     if item.get("bot_id") == account["bot_id"] and item.get("persona_id") == persona_id), None)
                     choices.append({"platform_id": account["platform_id"], "account_id": account["account_id"],
                                     "bot_id": account["bot_id"], "persona_id": persona_id,

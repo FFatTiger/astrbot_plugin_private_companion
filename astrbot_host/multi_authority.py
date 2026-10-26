@@ -97,7 +97,31 @@ class MultiAuthority:
     def _binding_differences(pinned, current):
         labels = {"accounts": "account", "private_targets": "private_target",
                   "group_targets": "group_target", "personas": "persona"}
-        return tuple(label for field, label in labels.items() if pinned.get(field) != current.get(field))
+        differences = []
+        for field, label in labels.items():
+            left, right = pinned.get(field), current.get(field)
+            if field == "personas":
+                left, right = (MultiAuthority._normalized_personas(left),
+                               MultiAuthority._normalized_personas(right))
+            if left != right:
+                differences.append(label)
+        return tuple(differences)
+
+    @staticmethod
+    def _normalized_personas(rows):
+        """Compare old account-scoped role ids by the shared character they became."""
+        if not isinstance(rows, (list, tuple)):
+            return rows
+        try:
+            from .multi_settings import PersonaMapping, _shared_persona_roles
+            mappings = tuple(PersonaMapping(str(row["bot_id"]), str(row["persona_id"]), str(row["role_id"]))
+                             for row in rows if isinstance(row, dict)
+                             and all(key in row for key in ("bot_id", "persona_id", "role_id")))
+            if len(mappings) != len(rows):
+                return rows
+            return [asdict(mapping) for mapping in _shared_persona_roles(mappings)]
+        except (ImportError, KeyError, TypeError, ValueError):
+            return rows
 
     def _legacy_binding_differences(self, stored_identities):
         """Validate older manifests that pinned only the full configuration hash."""

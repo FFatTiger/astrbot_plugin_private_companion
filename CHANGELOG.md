@@ -1,8 +1,13 @@
 # 更新日志
 
+## 7.0.7
+
+- 2026-10-26：同一个 AstrBot 人格在多个 Bot 账号下使用相同角色名时，合并为同一个角色与记忆归属，不再因为账号不同显示成两个同名角色；仍保留不同角色名的显式拆分。升级时旧的角色绑定清单按同一规则兼容，不会因此要求重新绑定。
+- 2026-10-26：继续修复全新安装的数据根识别：支持 `plugin_data/<plugin>/installations/<installation>/runtime`；如果宿主把插件代码目录当作数据目录返回，自动切换到标准 `plugin_data/<plugin>`，绝不把数据库写进代码树。
+
 ## 7.0.6
 
-- 2026-10-26：修复全新安装或升级后初始化报 `StoragePathError: V2 must not use a V1 plugin directory as its data root`。AstrBot 4.29 的全新数据目录直接使用公开插件名，运行库只允许其下 `companion-7` / `profiles`，导致 `runtime` 子目录被误判；现在允许没有 V1 数据标记的 `runtime`，仍拒绝真正的 V1 数据根、其他旧插件目录和插件代码目录。
+- 2026-10-26：修复全新安装或升级后初始化报 `StoragePathError: V2 must not use a V1 plugin directory as its data root`。AstrBot 4.29 的全新数据目录直接使用公开插件名，运行库只允许其下 `companion-7` / `profiles`，导致 `runtime` 子目录被误判；现在允许没有 V1 数据标记的 `runtime`，仍拒绝真正的 V1 数据根、其他旧插件目录和插件代码目录。多账号共享宿主使用的 `installations/<installation>/runtime` 也按同一边界放行；如果 AstrBot 的 `get_data_dir()` 返回插件代码目录，则自动切换到同级的 `plugin_data/<plugin>`，避免数据库写入代码目录。
 
 ## 7.0.5
 

@@ -67,6 +67,37 @@ class MultiSettingsTests(unittest.TestCase):
         reordered["multi_host"]["personas"].reverse()
         self.assertEqual(MultiHostSettings.parse(original), MultiHostSettings.parse(reordered))
 
+    def test_same_persona_uses_one_shared_role_across_bot_accounts(self):
+        config = multi_config()
+        config["multi_host"]["personas"] = [
+            {"bot_id": "bot-a", "persona_id": "星缘-私聊", "role_id": "星缘"},
+            {"bot_id": "bot-b", "persona_id": "星缘-私聊", "role_id": "role-bot-b-generated"},
+        ]
+        parsed = MultiHostSettings.parse(config)
+        self.assertEqual({mapping.role_id for mapping in parsed.personas}, {"星缘"})
+
+    def test_differently_named_roles_for_the_same_persona_stay_separate(self):
+        config = multi_config()
+        config["multi_host"]["personas"] = [
+            {"bot_id": "bot-a", "persona_id": "星缘-私聊", "role_id": "星缘"},
+            {"bot_id": "bot-b", "persona_id": "星缘-私聊", "role_id": "小星"},
+        ]
+        parsed = MultiHostSettings.parse(config)
+        self.assertEqual({mapping.role_id for mapping in parsed.personas}, {"星缘", "小星"})
+
+    def test_existing_manifest_accepts_one_shared_role_after_upgrade(self):
+        from astrbot_host.multi_authority import MultiAuthority
+
+        pinned = {"personas": [
+            {"bot_id": "bot-a", "persona_id": "星缘-私聊", "role_id": "星缘"},
+            {"bot_id": "bot-b", "persona_id": "星缘-私聊", "role_id": "role-bot-b-generated"},
+        ]}
+        current = {"personas": [
+            {"bot_id": "bot-a", "persona_id": "星缘-私聊", "role_id": "星缘"},
+            {"bot_id": "bot-b", "persona_id": "星缘-私聊", "role_id": "星缘"},
+        ]}
+        self.assertEqual(MultiAuthority._binding_differences(pinned, current), ())
+
 
 class NativePersonaSelectionTests(unittest.IsolatedAsyncioTestCase):
     async def test_group_window_ignores_the_private_conversation_default(self):

@@ -351,3 +351,21 @@ class StorageRuntimeTests(unittest.TestCase):
 
             with self.assertRaises(StorageOpenError):
                 StorageRuntime.open(data_root=root, installation_id=INSTALLATION_ID)
+
+    def test_fresh_public_name_installations_runtime_is_allowed(self):
+        with TemporaryDirectory(prefix="companion-storage-installations-") as temporary:
+            public = Path(temporary) / "astrbot_plugin_private_companion"
+            public.mkdir()
+            root = public / "installations" / "installation-a" / "runtime"
+            runtime = StorageRuntime.open(data_root=root, installation_id=INSTALLATION_ID)
+            runtime.close()
+            self.assertTrue((root / StorageRuntime.DATABASE_FILENAME).is_file())
+
+    def test_plugin_code_directory_installations_runtime_is_rejected(self):
+        with TemporaryDirectory(prefix="companion-storage-code-installations-") as temporary:
+            public = Path(temporary) / "astrbot_plugin_private_companion"
+            public.mkdir()
+            (public / "main.py").write_text("", encoding="utf-8")
+            with self.assertRaises(StoragePathError):
+                StorageRuntime.open(data_root=public / "installations" / "installation-a" / "runtime",
+                                    installation_id=INSTALLATION_ID)

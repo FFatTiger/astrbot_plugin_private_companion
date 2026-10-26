@@ -112,5 +112,26 @@ class V1TakeoverTests(unittest.TestCase):
             self.assertEqual(resolve_data_root(v1), v1.resolve())
 
 
+class PluginCodeDirectoryRedirectTests(unittest.TestCase):
+    def test_get_data_dir_returning_plugin_code_is_redirected_to_plugin_data(self):
+        with TemporaryDirectory() as temporary:
+            data = Path(temporary) / "data"
+            code = data / "plugins" / "astrbot_plugin_private_companion"
+            code.mkdir(parents=True)
+            (code / "main.py").write_text("", encoding="utf-8")
+            self.assertEqual(resolve_data_root(code),
+                             (data / "plugin_data" / "astrbot_plugin_private_companion").resolve())
+
+    def test_existing_sibling_v2_root_wins_over_code_directory(self):
+        with TemporaryDirectory() as temporary:
+            data = Path(temporary) / "data"
+            code = data / "plugins" / "astrbot_plugin_private_companion"
+            code.mkdir(parents=True)
+            (code / "main.py").write_text("", encoding="utf-8")
+            sibling = _root_with_data(data / "plugin_data", "astrbot_plugin_private_companion_v2")
+            self.assertEqual(resolve_data_root(code), sibling.resolve())
+
+
+
 if __name__ == "__main__":
     unittest.main()

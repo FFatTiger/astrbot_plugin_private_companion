@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import asdict
 import json
 import logging
 
@@ -47,6 +48,12 @@ class AccountSessionWebAPI:
         targets = deepcopy(section.get("targets", []))
         groups = deepcopy(section.get("group_targets", []))
         personas = deepcopy(section.get("personas", []))
+        try:
+            # Reading through the same parser as the runtime keeps a persona that
+            # is shared by several Bot accounts on one role id in the editor too.
+            personas = [asdict(mapping) for mapping in MultiHostSettings.parse(controller.config).personas]
+        except (HostControlError, ValueError):
+            pass
         enabled = bool(section.get("enabled", False))
         accounts = {(row["platform_id"], row["account_id"], row["bot_id"]):
                     {name: row[name] for name in ("platform_id", "account_id", "bot_id")}
