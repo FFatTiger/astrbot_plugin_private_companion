@@ -23,7 +23,6 @@ from companion_v2.conversation.quotes.models import CapturedQuote, message_numbe
 from companion_v2.conversation.forwards.models import CapturedForward, ForwardIntakePolicy, fits_forwards
 from companion_v2.conversation.media.audio.models import CapturedAudio, MAX_INPUT_AUDIOS, fits_audio_budget
 from companion_v2.conversation.media.video.models import CapturedVideo, MAX_VIDEOS, fits_video_budget
-from astrbot.api.event import AstrMessageEvent
 from .files import file_locator, prepare_file_text, MAX_FILES
 
 
