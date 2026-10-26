@@ -1,10 +1,14 @@
 """QQ Official account, route and AstrBot-session adaptation."""
 
+from copy import deepcopy
 from dataclasses import replace
+import json
 from types import SimpleNamespace as NS
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from astrbot.core.message.components import At, Plain
+from astrbot_host.account_session_api import AccountSessionWebAPI
 from astrbot_host.group_admission import group_trigger_facts
 from astrbot_host.multi_settings import MultiHostSettings
 from astrbot_host.session_topology import session_route
@@ -232,6 +236,40 @@ class OfficialAdapterTests(OfficialFixture, unittest.IsolatedAsyncioTestCase):
         from astrbot.api.event import AstrMessageEvent
         from astrbot_host.native import installed_native_types
         self.assertIs(installed_native_types().event, AstrMessageEvent)
+
+    async def test_dashboard_inline_role_can_register_an_official_account(self):
+        config = multi_config()
+        before = deepcopy(config)
+        discovered = {
+            "accounts": [{"platform_id": ACCOUNT, "account_id": ACCOUNT, "bot_id": "bot-test"}],
+            "personas": [{"platform_id": ACCOUNT, "account_id": ACCOUNT,
+                          "bot_id": "bot-test", "persona_id": "星缘-私聊"}],
+            "targets": [],
+        }
+
+        async def apply(candidate, *, expected_config=None):
+            self.assertEqual(expected_config, config)
+            config.clear()
+            config.update(candidate)
+            return {"saved": True, "requires_reload": False, "requires_initialize": False}
+
+        controller = NS(config=config, apply_bindings=AsyncMock(side_effect=apply))
+        api = AccountSessionWebAPI(controller)
+        api._discovered = AsyncMock(return_value=discovered)
+        request = NS(username="admin", query={}, body=AsyncMock(return_value=json.dumps({
+            "platform_id": ACCOUNT, "account_id": ACCOUNT, "bot_id": "bot-test",
+            "persona_ids": ["星缘-私聊"], "role_id": "星缘",
+        }, ensure_ascii=False).encode("utf-8")))
+        with patch("astrbot_host.account_session_api.request", request):
+            result = await api.add_role()
+        self.assertEqual(result["status"], "ok", result)
+        section = config["multi_host"]
+        self.assertIn({"platform_id": ACCOUNT, "account_id": ACCOUNT, "bot_id": "bot-test"}, section["accounts"])
+        self.assertIn({"bot_id": "bot-test", "persona_id": "星缘-私聊", "role_id": "星缘"}, section["personas"])
+        official = next(row for row in section["targets"] if row["platform_id"] == ACCOUNT)
+        self.assertEqual(official["participant_id"], "*")
+        self.assertEqual(before["multi_host"]["targets"], [row for row in section["targets"]
+                                                            if row["platform_id"] != ACCOUNT])
 
 
 class OfficialMultiHostTests(MultiFixture, unittest.IsolatedAsyncioTestCase):

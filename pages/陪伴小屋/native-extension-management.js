@@ -323,9 +323,11 @@ window.CompanionNativeExtensionManagement = (() => {
         if (!this.current()) return;
         if (action === "mihome_device_status") {
           const result = record.result || {};
+          const propertyLabels = {on:"开关", power:"功率", brightness:"亮度", color_temperature:"色温",
+            mode:"模式", temperature:"温度", humidity:"湿度", battery:"电量"};
           const properties = Object.entries(result.properties || {})
             .filter(([key, value]) => typeof key === "string" && ["string", "number", "boolean"].includes(typeof value))
-            .map(([key, value]) => `${key}：${String(value)}`).join(" · ");
+            .map(([key, value]) => `${propertyLabels[key] || key}：${typeof value === "boolean" ? (value ? "开" : "关") : String(value)}`).join(" · ");
           this.mihomeFeedback = {alias:String(payload?.alias || "设备"), failed:result.available !== true,
             message:result.available ? (properties || "已读取，但设备没有返回公开属性。") : "设备没有返回可用状态，请确认设备在线。"};
         }
