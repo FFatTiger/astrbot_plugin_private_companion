@@ -173,7 +173,12 @@ class RealitySettingsMethods:
         action = _single_line(payload.get('action'), 40).lower()
         mihome_page_snapshot: dict[str, Any] | None = None
         try:
-            if action.startswith('mihome_'):
+            if action == 'mobile_pairing_token':
+                rotate = payload.get('rotate', False)
+                if type(rotate) is not bool:
+                    raise ValueError('令牌轮换参数无效')
+                result = await self._mobile_pairing_token_command(rotate=rotate)
+            elif action.startswith('mihome_'):
                 mihome_api = self._mihome_api()
                 handler = getattr(mihome_api, 'page_action', None) if mihome_api is not None else None
                 if not callable(handler):

@@ -75,6 +75,40 @@ class NativeExtensionAPITests(unittest.IsolatedAsyncioTestCase):
             "action": "request_auth", "payload": {}})
         self.assertEqual(result["data"]["code"], "native_service_not_running")
 
+    async def test_mobile_pairing_token_enables_gateway_and_only_returns_new_secret_to_dashboard(self):
+        from astrbot_host.native_extensions.reality import activity_methods
+
+        service = await self.enable("reality")
+        denied = await self.call(PREFIX + "/action", body={"extension_id": "reality",
+            "action": "mobile_pairing_token", "payload": {"rotate": False}}, username="api_key:synthetic")
+        self.assertEqual(denied["data"]["code"], "dashboard_identity_required")
+        self.assertFalse(service._mobile_enabled())
+
+        async def start_gateway():
+            service._mobile_server_runner = NS(cleanup=AsyncMock())
+            service._mobile_server_site = NS(stop=AsyncMock())
+            service._mobile_server_bound_port = 6322
+            return True
+
+        with (patch.object(activity_methods.secrets, "token_urlsafe", return_value="synthetic-mobile-pairing-secret"),
+              patch.object(service, "_start_mobile_server", new=AsyncMock(side_effect=start_gateway)) as start):
+            generated = await self.call(PREFIX + "/action", body={"extension_id": "reality",
+                "action": "mobile_pairing_token", "payload": {"rotate": False}})
+            self.assertEqual(generated["status"], "ok", generated)
+            self.assertTrue(service._mobile_enabled())
+            self.assertEqual(service._mobile_pairing_token(), "synthetic-mobile-pairing-secret")
+            self.assertEqual(generated["data"]["result"]["pairing_token"], "synthetic-mobile-pairing-secret")
+            snapshot = {key: value for key, value in generated["data"].items() if key != "result"}
+            self.assertNotIn("synthetic-mobile-pairing-secret", json.dumps(snapshot))
+            self.assertTrue(snapshot["management"]["configuration"]["mobile"]["pairing_token_configured"])
+
+            repeated = await self.call(PREFIX + "/action", body={"extension_id": "reality",
+                "action": "mobile_pairing_token", "payload": {"rotate": False}})
+            self.assertEqual(repeated["status"], "ok", repeated)
+            self.assertEqual(repeated["data"]["result"]["pairing_token"], "")
+            self.assertEqual(start.await_count, 1)
+            await service._stop_mobile_server()
+
     async def test_vts_authorization_and_hotkeys_use_internal_service_without_holding_reply_lock(self):
         service = await self.enable("live")
         async def request_token():

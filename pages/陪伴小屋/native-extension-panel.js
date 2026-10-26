@@ -92,6 +92,7 @@ window.CompanionNativeExtensionPanel = (() => {
     constructor(root, name, options) {
       this.root = root; this.name = name; this.options = options;
       this.alive = true; this.ticket = 0; this.busy = false; this.dirty = false;
+      this.mobileTokenNotice = "";
       this.group = ""; this.query = ""; this.record = null; this.fields = [];
       /* 只挂一组时（手机连接页复用现实触及的 mobile 分组），不显示分组栏，
          否则同一份设置会出现两条导航。 */
@@ -178,7 +179,8 @@ window.CompanionNativeExtensionPanel = (() => {
           : this.field(key, field, this.draft[key], [key], group.id)).join("");
         return `<section class="native-extension-group" data-native-group-panel="${escape(group.id)}" ${group.id !== this.group ? "hidden" : ""}><h3>${escape(group.title)}</h3>${group.hint ? `<p class="native-extension-hint">${escape(group.hint)}</p>` : ""}${content}</section>`;
       }).join("");
-      this.root.innerHTML = `<div class="native-extension-panel"><header class="native-extension-head"><div><span class="native-extension-kicker">V2 内置能力</span><h3>${escape(names[this.name])}</h3><p>${escape(descriptions[this.name])}</p></div><div data-native-runtime></div></header><div class="native-extension-lifecycle" data-native-lifecycle></div>${["reality", "live"].includes(this.name) ? '<div data-native-management></div>' : ""}<form data-native-form><label class="native-extension-search"><span class="sr-only">查找设置项</span><input type="search" placeholder="查找设置项" aria-label="查找${escape(names[this.name])}设置项" data-native-search value="${escape(this.query)}"></label><div class="native-extension-workspace${this.onlyGroup ? " is-single" : ""}">${this.onlyGroup ? "" : `<nav class="native-extension-nav" aria-label="${escape(names[this.name])}设置分组">${this.groups.map(group => `<button type="button" data-native-group="${escape(group.id)}" aria-pressed="${group.id === this.group}">${escape(group.title)}</button>`).join("")}</nav>`}<div class="native-extension-settings">${controls}<p class="native-extension-no-results" hidden>没有匹配的设置项，换个关键词试试。</p></div></div><footer class="native-extension-savebar"><p role="status" aria-live="polite" data-native-notice></p><div><button class="button small" type="button" data-native-reload>重新读取</button><button class="button small primary" type="submit" data-native-save ${this.dirty ? "" : "disabled"}>保存并应用</button></div></footer></form></div>`;
+      const mobile = this.onlyGroup === "mobile" ? this.mobileConnectionCard() : "";
+      this.root.innerHTML = `<div class="native-extension-panel">${mobile}<header class="native-extension-head"><div><span class="native-extension-kicker">V2 内置能力</span><h3>${escape(names[this.name])}</h3><p>${escape(descriptions[this.name])}</p></div><div data-native-runtime></div></header><div class="native-extension-lifecycle" data-native-lifecycle></div>${["reality", "live"].includes(this.name) ? '<div data-native-management></div>' : ""}<form data-native-form><label class="native-extension-search"><span class="sr-only">查找设置项</span><input type="search" placeholder="查找设置项" aria-label="查找${escape(names[this.name])}设置项" data-native-search value="${escape(this.query)}"></label><div class="native-extension-workspace${this.onlyGroup ? " is-single" : ""}">${this.onlyGroup ? "" : `<nav class="native-extension-nav" aria-label="${escape(names[this.name])}设置分组">${this.groups.map(group => `<button type="button" data-native-group="${escape(group.id)}" aria-pressed="${group.id === this.group}">${escape(group.title)}</button>`).join("")}</nav>`}<div class="native-extension-settings">${controls}<p class="native-extension-no-results" hidden>没有匹配的设置项，换个关键词试试。</p></div></div><footer class="native-extension-savebar"><p role="status" aria-live="polite" data-native-notice></p><div><button class="button small" type="button" data-native-reload>重新读取</button><button class="button small primary" type="submit" data-native-save ${this.dirty ? "" : "disabled"}>保存并应用</button></div></footer></form></div>`;
       const managementRoot = this.root.querySelector("[data-native-management]");
       this.management = managementRoot ? window.CompanionNativeExtensionManagement?.mount(managementRoot, {
         extensionId:this.name, record:this.record, instance:this.instance,
@@ -190,6 +192,27 @@ window.CompanionNativeExtensionPanel = (() => {
         onUseHotkey:hotkey => this.useHotkey(hotkey),
       }) : null;
       this.filter(); this.setBusy(this.busy);
+    }
+    mobileConnectionCard() {
+      const mobile = this.record?.settings?.mobile || {};
+      const runtimeMobile = this.record?.management?.configuration?.mobile || {};
+      const statusMobile = {...mobile, ...runtimeMobile};
+      const host = String(statusMobile.host || "").trim();
+      const port = Number(statusMobile.port || 6322);
+      const configured = statusMobile.pairing_token_configured === true;
+      const running = statusMobile.running === true;
+      const bound = Number(statusMobile.bound_port || port);
+      const address = String(statusMobile.public_base_url || "").trim() || (host && host !== "0.0.0.0" ? `http://${host}:${bound}` : "请填写电脑内网或组网地址");
+      const state = !statusMobile.enabled ? ["未启用", "idle"] : !configured ? ["缺少配对令牌", "error"] : running ? ["网关运行中", "ready"] : ["等待启动", "pending"];
+      const issued = this.mobileTokenNotice && typeof this.mobileTokenNotice === "object" ? this.mobileTokenNotice : null;
+      const notice = issued ? (issued.running ? "网关已启动。请复制令牌，在手机端完成配对。" : "令牌已保存，但网关未能启动；请检查端口占用和模块状态。")
+        : configured ? "令牌不会回显；需要新手机或令牌泄露时轮换。" : "生成令牌会同时启用手机网关。";
+      const token = issued?.token ? `<div class="mobile-pairing-token"><input type="text" readonly aria-label="本次生成的手机配对令牌" value="${escape(issued.token)}"><button class="button small" type="button" data-mobile-copy-token>复制令牌</button></div>` : "";
+      const action = configured
+        ? `<button class="button small" type="button" data-mobile-token-action="rotate">轮换配对令牌</button>`
+        : `<button class="button small primary" type="button" data-mobile-token-action="generate">生成并启用网关</button>`;
+      const healthAddress = address === "请填写电脑内网或组网地址" ? "填写电脑内网 IP 后访问 /health" : `${address}/health`;
+      return `<section class="mobile-gateway-card" aria-labelledby="mobileGatewayTitle"><div><span class="native-extension-kicker">手机陪伴终端</span><h3 id="mobileGatewayTitle">原生连接准备</h3><p>Android 会先检查健康地址，再用配对令牌换取本机加密会话。</p></div><div class="mobile-gateway-status"><span class="native-extension-status ${state[1]}">${escape(state[0])}</span><dl><div><dt>连接地址</dt><dd>${escape(address)}</dd></div><div><dt>健康检查</dt><dd>${escape(healthAddress)}</dd></div><div><dt>监听端口</dt><dd>${escape(String(bound))}</dd></div><div><dt>绑定用户</dt><dd>${escape(String(statusMobile.allowed_user_id || "未明确绑定，需恰好一个 V2 私聊用户"))}</dd></div></dl></div><div class="mobile-gateway-actions">${action}</div>${token}<p class="native-extension-hint" data-mobile-token-result role="status" aria-live="polite">${escape(notice)}</p></section>`;
     }
     receiveManagement(record) {
       if (!validRecord(record)) return;
@@ -382,6 +405,8 @@ window.CompanionNativeExtensionPanel = (() => {
       if (button.hasAttribute("data-native-reload")) { this.load(); return; }
       if (button.dataset.nativeGroup) { this.group = button.dataset.nativeGroup; this.filter(); return; }
       if (button.dataset.nativeLifecycleAction) { this.lifecycle(button.dataset.nativeLifecycleAction); return; }
+      if (button.dataset.mobileTokenAction) { this.mobileToken(button.dataset.mobileTokenAction); return; }
+      if (button.hasAttribute("data-mobile-copy-token")) { this.copyMobileToken(); return; }
       if (button.dataset.nativeAdd || button.dataset.nativeRemove) {
         try { this.draft = this.collect(); }
         catch (error) { this.notice(error.message, true); error.field?.focus(); return; }
@@ -397,6 +422,44 @@ window.CompanionNativeExtensionPanel = (() => {
           put(this.draft, path, rows);
         }
         this.dirty = true; this.render(); this.notice("修改尚未保存。");
+      }
+    }
+    async mobileToken(action) {
+      if (this.busy || this.actionBusy || this.name !== "reality") return;
+      const node = this.root.querySelector("[data-mobile-token-result]");
+      const configured = this.record?.settings?.mobile?.pairing_token_configured === true;
+      const rotate = action === "rotate";
+      if (rotate && !window.confirm("轮换后，已连接的手机会话将失效，需要重新配对。继续吗？")) return;
+      this.actionBusy = true; this.updateStatus();
+      if (node) node.textContent = rotate ? "正在轮换令牌…" : "正在生成令牌…";
+      try {
+        const result = await window.CompanionProduct.request("POST", "extensions/action", {
+          extension_id:"reality", action:"mobile_pairing_token", payload:{rotate},
+        }, {timeoutMs:60000});
+        const value = result?.result?.pairing_token;
+        if (configured && !value) throw {code:"native_management_failed"};
+        this.mobileTokenNotice = value ? {token:value, running:result?.result?.running === true} : null;
+        await this.load();
+        if (!value) {
+          const notice = this.root.querySelector("[data-mobile-token-result]");
+          if (notice) notice.textContent = result?.result?.running
+            ? "网关已启用；令牌不会回显。如需在新手机配对，请轮换令牌。"
+            : "网关未能启动，请检查端口占用和模块状态。";
+        }
+      } catch (error) { if (node) node.textContent = errorText(error); }
+      finally { this.actionBusy = false; this.updateStatus(); }
+    }
+    async copyMobileToken() {
+      const input = this.root.querySelector(".mobile-pairing-token input");
+      if (!input) return;
+      input.select(); input.setSelectionRange(0, input.value.length);
+      try {
+        await navigator.clipboard.writeText(input.value);
+        const notice = this.root.querySelector("[data-mobile-token-result]");
+        if (notice) notice.textContent = "令牌已复制，可粘贴到 Android 配对页面。";
+      } catch (_) {
+        const notice = this.root.querySelector("[data-mobile-token-result]");
+        if (notice) notice.textContent = "令牌已选中，请复制后粘贴到 Android 配对页面。";
       }
     }
     onInput(event) {

@@ -5,7 +5,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from astrbot_host.model_route_material import build_summary, image_route_snapshot, route_snapshot, scope_umo
+from astrbot_host.model_route_material import (build_summary, image_edit_reference_limit,
+                                               image_route_snapshot, route_snapshot, scope_umo)
 from companion_v2.foundation.outcome import Outcome
 from companion_v2.foundation.refs import ScopeKind, ScopeRef, SubjectKind, SubjectRef
 
@@ -111,6 +112,37 @@ class ModelRouteMaterialTests(unittest.TestCase):
         summary = image_route_snapshot(LocalNativePort())
         self.assertEqual(summary, {"provider": "sd_webui"})
 
+    def test_edit_reference_limit_uses_the_most_conservative_configured_fallback(self):
+        port = NativePort()
+        settings = port.image_extension_api().output_configuration()["settings"]
+        settings["operation_routes"]["edit"] = ["online:primary", "online:secondary"]
+        settings["endpoints"].append({"id": "secondary", "enabled": True,
+            "base_url": "https://backup.example", "platform": "openai", "model": "backup",
+            "max_reference_images": 3})
+
+        self.assertEqual(image_edit_reference_limit(port), 1)
+        self.assertNotIn("max_reference_images", image_route_snapshot(port))
+
+    def test_edit_reference_limit_reads_through_a_composite_tool_port(self):
+        port = NativePort()
+
+        self.assertEqual(image_edit_reference_limit(SimpleNamespace(ports=(port,))), 1)
+
+    def test_edit_reference_limit_ignores_unavailable_protocols_and_reads_local_workflow_slots(self):
+        online = NativePort()
+        settings = online.image_extension_api().output_configuration()["settings"]
+        settings["operation_routes"]["edit"] = ["online:primary"]
+        settings["endpoints"][0]["platform"] = "minimax"
+        self.assertIsNone(image_edit_reference_limit(online))
+
+        local = LocalNativePort()
+        settings = local.image_extension_api().output_configuration()["settings"]
+        settings["operation_routes"]["edit"] = ["comfyui"]
+        settings["comfyui"] = {"base_url": "http://127.0.0.1:8188", "workflows": {
+            "edit": {"mapping": {"fields": {
+                "identity": {"kind": "image"}, "outfit": {"kind": "image"}}}}}}
+        self.assertEqual(image_edit_reference_limit(local), 2)
+
 
 def route_context():
     scope = ScopeRef("install", "qq", ScopeKind.PRIVATE, "friend",
@@ -173,32 +205,44 @@ class RouteHost:
 
 
 class ImageAPI:
-    def output_configuration(self):
-        return {"settings": {
+    def __init__(self):
+        self.settings = {
             "enabled": True,
-            "operation_routes": {"generate": ["online:primary"]},
+            "operation_routes": {"generate": ["online:primary"], "edit": ["online:primary"]},
             "endpoints": [{"id": "primary", "enabled": True, "base_url": "https://image.example",
-                           "platform": "openai", "model": "gpt-image-1"}],
-        }}
+                           "platform": "openai", "model": "gpt-image-1", "max_reference_images": 1}],
+        }
+
+    def output_configuration(self):
+        return {"settings": self.settings}
 
 
 class NativePort:
+    def __init__(self):
+        self.api = ImageAPI()
+
     def image_extension_api(self):
-        return ImageAPI()
+        return self.api
 
 
 class LocalImageAPI:
-    def output_configuration(self):
-        return {"settings": {
+    def __init__(self):
+        self.settings = {
             "enabled": True,
             "operation_routes": {"generate": ["sd_webui"]},
             "sd_webui": {"base_url": "http://127.0.0.1:7860"},
-        }}
+        }
+
+    def output_configuration(self):
+        return {"settings": self.settings}
 
 
 class LocalNativePort:
+    def __init__(self):
+        self.api = LocalImageAPI()
+
     def image_extension_api(self):
-        return LocalImageAPI()
+        return self.api
 
 
 if __name__ == "__main__":

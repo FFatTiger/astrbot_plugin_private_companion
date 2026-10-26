@@ -108,7 +108,7 @@ class NativeExtensionWebAPI(PerceptionWebAPI):
                     'scan_camera', 'test_camera', 'consent_camera', 'update_camera_policy', 'update_audio_policy',
                     'scan_audio', 'select_audio', 'test_audio', 'request_audio_consent',
                     'revoke_audio_consent', 'save', 'disable', 'stop_session', 'test',
-                    'cancel_reminder'}
+                    'cancel_reminder', 'mobile_pairing_token'}
                 if data['action'] not in allowed or 'action' in data['payload']:
                     raise ValueError('unsupported native reality action')
                 current()

@@ -24,21 +24,33 @@ _DELIVERY = (
     "使用 messages=[{\"type\":\"image\",\"path\":\"工具返回的原路径\"}] 投递当前会话，session 留空。"
     "需要随图说话可在同一 messages 中加入 plain.text；投递成功后自然收住，避免重复发送同一张图或重复随图正文。"
     "根据工具结果说明实际进展：没有成功结果时不声称已生成或送达，unknown 时保留原操作，不换编号重做。"
+    "图片错误码 host_image_limit 表示宿主本地图片处理预算超限（字节数、尺寸或张数），"
+    "reference_image_limit 表示已保存参考素材超出原生图像输入上限；两者都不是服务商日额度错误。"
+    "没有明确的服务商额度回执时，不要声称今天的生图额度已用完。"
     "短文字可以表达角色语气，但发起图片请求后的核心动作仍是完成图片生成与投递。"
 )
 
 
-def core_image_tool_contract(action, description, parameters):
+def core_image_tool_contract(action, description, parameters, *, reference_limit=None):
     """Annotate only the request-local schema; leave the provider catalog intact."""
     if action not in _PURPOSES:
         return description, parameters
     description = _PURPOSES[action] + "；返回图片原件与操作回执，生成成功本身不代表已发送。"
+    if action == "image.edit" and type(reference_limit) is int and reference_limit > 0:
+        description += (f"当前生图路线最多接收 {reference_limit} 张参考图；达到上限时优先保留 identity，"
+                        "把服装、姿态或场景要求写入 prompt，不要为同时满足多个用途盲目提交更多图片。")
     properties = parameters.get("properties", {})
     prompt = properties.get("prompt")
     if isinstance(prompt, dict):
         prompt["description"] = (
             "本次画面或修改要求，按图片调用偏好的格式书写；角色出镜时展开当前外观、穿搭与场景，自拍写明 selfie。"
         )
+    if action == "image.edit" and type(reference_limit) is int and reference_limit > 0:
+        for name in ("reference_ids", "reference_indices", "reference_roles"):
+            reference = properties.get(name)
+            if isinstance(reference, dict):
+                reference["description"] = (str(reference.get("description") or "").rstrip("。")
+                                             + f"；当前路线最多选择 {reference_limit} 张，优先 identity")
     return description, parameters
 
 
@@ -109,6 +121,15 @@ def inject_core_image_prompt(session, request, offered, values):
         return
     from .core_reply_tools import native_tool_name
 
+    reference_limit = None
+    if "image.edit" in actions:
+        try:
+            from .model_route_material import image_edit_reference_limit
+            reference_limit = image_edit_reference_limit(
+                getattr(session.application, "native_tool_port", None))
+        except Exception:
+            reference_limit = None
+
     descriptions = "\n".join(native_tool_name(action) + "：" + _PURPOSES[action] for action in actions)
     rule_hint = (
         "本轮用户文本已命中图片请求规则。若这句话确实是在要新图、自拍或改图，"
@@ -118,6 +139,10 @@ def inject_core_image_prompt(session, request, offered, values):
     instruction = "\n".join(part for part in (
         prompt_instruction(values), rule_hint,
         "本轮图片工具：\n" + descriptions, _DELIVERY) if part)
+    if reference_limit is not None:
+        instruction += (f"\n当前生图改图路线最多接收 {reference_limit} 张参考图。"
+                        "需要保持角色身份时优先选择 identity；如果上限不足，不要自动同时提交身份图和穿搭图，"
+                        "将其余服装、姿态或场景要求写进 prompt。")
     if "image.edit" in actions:
         instruction += (
             "\n本轮参考素材位于 companion_v2_context.image_reference_material。"

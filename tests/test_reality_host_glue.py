@@ -18,6 +18,7 @@ from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
 from astrbot_host.integration_registry import UnifiedCompanionExtensionAPI
 from astrbot_host.multi_controller import AstrBotMultiController
 from astrbot_host.native_extensions.reality.host_events import RealityHostEvents
+from astrbot_host.native_extensions.reality import mobile_gateway
 from astrbot_host.native_extensions.reality.mobile_gateway import _MobileRequestState, _mobile_request_state
 from companion_v2.capabilities import CapabilityAuthorizationState, CapabilityRepository
 from companion_v2.conversation.native_history import body, reference
@@ -512,6 +513,22 @@ class RealityHostGlueTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(code, 409)
                 self.assertEqual(rejected['code'], reason)
                 self.assertIn(message, rejected['message'])
+
+    async def test_mobile_gateway_registers_legacy_native_routes(self):
+        self.runtime.config['mobile'].update({
+            'enabled': True, 'pairing_token': 'synthetic-long-pairing-token', 'proxy_rooms': False})
+        runner = NS(setup=AsyncMock(), cleanup=AsyncMock())
+        site = NS(start=AsyncMock(), stop=AsyncMock())
+        with (patch.object(mobile_gateway.web, 'AppRunner', return_value=runner) as make_runner,
+              patch.object(mobile_gateway.web, 'TCPSite', return_value=site)):
+            self.assertTrue(await self.runtime._start_mobile_server())
+            app = make_runner.call_args.args[0]
+            paths = {route.resource.canonical for route in app.router.routes()}
+            self.assertIn('/pair', paths)
+            self.assertIn('/status', paths)
+            self.assertIn('/astrbot_plugin_reality_companion/mobile/pair', paths)
+            self.assertIn('/astrbot_plugin_reality_companion/mobile/status', paths)
+            await self.runtime._stop_mobile_server()
 
     async def test_mobile_room_failure_preserves_code_and_unknown_result_without_replay(self):
         phone = self.mobile_session(ttl=600)

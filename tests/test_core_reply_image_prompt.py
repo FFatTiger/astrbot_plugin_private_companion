@@ -11,7 +11,8 @@ from astrbot.core.agent.message import Message, TextPart, dump_messages_with_che
 from astrbot.core.provider.entities import ProviderRequest
 
 from astrbot_host.core_reply import CORE_REPLY_CONTEXT_EXTRA
-from astrbot_host.core_reply_image_prompt import core_image_tools, inject_core_image_prompt
+from astrbot_host.core_reply_image_prompt import (core_image_tool_contract, core_image_tools,
+                                                  inject_core_image_prompt)
 from astrbot_host.core_reply_perception import inject_core_reply_perception_context
 from astrbot_host.core_reply_tools import native_tool_name
 from astrbot_host.native_extensions.host_events import prepare_native_host_request
@@ -139,7 +140,29 @@ class CoreReplyImagePromptTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"type":"image"', prompt)
         self.assertIn("session 留空", prompt)
         self.assertIn('reference_indices=[]', prompt)
+        self.assertIn("host_image_limit", prompt)
+        self.assertIn("不是服务商日额度错误", prompt)
         self.assertNotIn("role-face", prompt)
+
+    def test_active_reference_limit_is_explained_in_prompt_and_request_tool_schema(self):
+        settings = {
+            "enabled": True,
+            "operation_routes": {"edit": ["online:primary"]},
+            "endpoints": [{"id": "primary", "enabled": True,
+                "base_url": "https://image.example", "platform": "openai",
+                "max_reference_images": 1}],
+        }
+        api = NS(output_configuration=lambda: {"settings": settings})
+        self.application.native_tool_port = NS(image_extension_api=lambda: api)
+
+        self.inject()
+
+        self.assertIn("最多接收 1 张参考图", self.request.system_prompt)
+        description, parameters = core_image_tool_contract("image.edit", "", {
+            "properties": {"reference_ids": {"description": "已保存参考素材 ID"}},
+        }, reference_limit=1)
+        self.assertIn("最多接收 1 张参考图", description)
+        self.assertIn("优先 identity", parameters["properties"]["reference_ids"]["description"])
 
     async def test_reference_changes_only_update_temporary_user_context(self):
         self.inject()

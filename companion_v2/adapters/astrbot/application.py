@@ -51,6 +51,7 @@ class AstrBotCompanionHost:
                                                 memory_owner=memory_owner,
                                                 memory_push=memory_push,
                                                 **application_options)
+        self.application.native_tool_port = tool_port
         if tool_port is not None and callable(getattr(tool_port, "attach", None)):
             tool_port.attach(self.application)
         self.event_port, self.role_port = event_port, role_port

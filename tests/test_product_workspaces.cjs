@@ -438,22 +438,22 @@ test("display labels preserve names while internal role and executor keys stay o
   assert.equal(h.product.identity().operator_id, "dashboard:synthetic-admin");
 });
 
-test("the account workspace relays account discovery, mappings and relationship discoveries", async () => {
+test("the account workspace relays account discovery, mappings, relationship discoveries and startup", async () => {
   const h = await harness();
   h.product.mountWorkspace();
-  for (const [method, endpoint] of [["GET", "accounts"], ["POST", "accounts"]]) {
+  for (const [method, endpoint] of [["GET", "accounts"], ["POST", "accounts"], ["POST", "host/start"]]) {
     await h.request(h.host, method, endpoint);
     assert.equal(h.host.messages.at(-1).ok, true);
   }
   await h.request(h.host, "GET", "acquaintance");
   assert.equal(h.host.messages.at(-1).ok, true);
   assert.deepEqual(h.calls.map(call => `${call.method} ${call.endpoint}`),
-    ["GET accounts", "POST accounts", "GET acquaintance"]);
+    ["GET accounts", "POST accounts", "POST host/start", "GET acquaintance"]);
   await h.request(h.host, "GET", "accounts/session");
   await h.request(h.host, "POST", "accounts/session/extra");
   await h.request(h.host, "POST", "acquaintance");
   await h.request(h.host, "GET", "acquaintance/authorization");
-  assert.equal(h.calls.length, 3);
+  assert.equal(h.calls.length, 4);
   assert.equal(h.host.messages.at(-1).ok, false);
 });
 
@@ -676,7 +676,7 @@ test("requests in flight during a mapping refresh receive a bounded stale-scope 
 test("account editor cannot relay manual runtime operations or native window edits", async () => {
   const h = await harness();
   h.product.mountWorkspace();
-  for (const endpoint of ["host/probe", "host/initialize", "host/start", "host/stop", "accounts/session"]) {
+  for (const endpoint of ["host/probe", "host/initialize", "host/stop", "accounts/session"]) {
     await h.request(h.host, "POST", endpoint);
     assert.equal(h.host.messages.at(-1).ok, false);
   }

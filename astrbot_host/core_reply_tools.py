@@ -128,8 +128,17 @@ class _OfferedTool:
 class CoreReplyFunctionTool(FunctionTool):
     def __init__(self, session, offered):
         from .core_reply_image_prompt import core_image_tool_contract
+        reference_limit = None
+        if offered.spec.action == "image.edit":
+            try:
+                from .model_route_material import image_edit_reference_limit
+                reference_limit = image_edit_reference_limit(
+                    getattr(session.application, "native_tool_port", None))
+            except Exception:
+                reference_limit = None
         description, parameters = core_image_tool_contract(offered.spec.action, offered.spec.description,
-                                                          json.loads(offered.spec.parameters_json))
+                                                          json.loads(offered.spec.parameters_json),
+                                                          reference_limit=reference_limit)
         super().__init__(name=native_tool_name(offered.spec.action), description=description, parameters=parameters)
         self._session, self._action = session, offered.spec.action
 

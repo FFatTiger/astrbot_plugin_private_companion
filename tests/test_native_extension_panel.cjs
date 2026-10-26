@@ -82,6 +82,11 @@ async function harness(name, viewport = {width:1360, height:900}) {
             data.audio_output.playback_volume = body.payload.playback_volume;
           }
           if (body.action === "test_audio") return structuredClone({...record, result:{played:true}});
+          if (body.action === "mobile_pairing_token") {
+            record.settings.mobile.enabled = true;
+            record.settings.mobile.pairing_token_configured = true;
+            return structuredClone({...record, result:{pairing_token:"synthetic-mobile-token", running:true}});
+          }
           if (body.action === "request_audio_consent") return structuredClone({...record,
             result:{confirmation_required:true, prompt:"请本人在私聊发送：我理解风险并确认授权"}});
           if (body.action === "save") data.users[0].alarm = {...data.users[0].alarm, ...body.payload};
@@ -237,6 +242,26 @@ test("mobile settings stay within the viewport and search reaches hidden groups"
       await page.getByRole("searchbox", {name:"查找直播与表演设置项"}).fill("");
       await page.screenshot({path:path.join(process.env.COMPANION_UI_OUTPUT, "native-settings-desktop.png")});
     }
+  } finally { await page.close(); }
+});
+
+test("mobile pairing generates and reveals a token once, while rotation is explicit", async () => {
+  const page = await harness("reality", {width:390, height:844});
+  try {
+    assert.equal(await page.getByRole("button", {name:"生成并启用网关", exact:true}).isVisible(), true);
+    assert.match(await page.locator("[data-mobile-token-result]").textContent(), /同时启用/);
+    await page.getByRole("button", {name:"生成并启用网关", exact:true}).click();
+    const token = page.locator(".mobile-pairing-token input");
+    await token.waitFor();
+    assert.equal(await token.inputValue(), "synthetic-mobile-token");
+    assert.equal(await page.getByRole("button", {name:"轮换配对令牌", exact:true}).isVisible(), true);
+    assert.match(await page.locator("[data-mobile-token-result]").textContent(), /复制令牌/);
+    assert.match(await page.locator(".mobile-gateway-status").textContent(), /health/);
+    await page.evaluate(() => { window.confirm = () => true; });
+    await page.getByRole("button", {name:"轮换配对令牌", exact:true}).click();
+    const requests = await page.evaluate(() => window.requests.filter(item => item.endpoint === "extensions/action"));
+    assert.deepEqual(requests.map(item => item.body.payload), [{rotate:false}, {rotate:true}]);
+    assert.equal(await token.inputValue(), "synthetic-mobile-token");
   } finally { await page.close(); }
 });
 

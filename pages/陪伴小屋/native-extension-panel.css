@@ -85,6 +85,18 @@
 .mobile-connection-guide ol { margin: 0; padding-left: 1.25rem; color: var(--t-text); line-height: 1.9; }
 .mobile-connection-guide p { margin: var(--sp-2) 0 0; color: var(--t-text-soft); font-size: var(--fs-body); line-height: 1.8; }
 .mobile-connection-settings { min-width: 0; }
+.mobile-gateway-card { display: grid; gap: var(--sp-3); padding: var(--sp-4); margin-bottom: var(--sp-5); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--t-surface-soft); }
+.mobile-gateway-card h3 { margin: var(--sp-2) 0; font-size: var(--fs-title); }
+.mobile-gateway-card p { margin: 0; color: var(--secondary); line-height: 1.8; }
+.mobile-gateway-status { display: grid; gap: var(--sp-3); }
+.mobile-gateway-status dl { display: grid; gap: var(--sp-2); margin: 0; }
+.mobile-gateway-status dl > div { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: var(--sp-3); min-width: 0; }
+.mobile-gateway-status dt { color: var(--muted); font-size: var(--fs-micro); }
+.mobile-gateway-status dd { margin: 0; color: var(--ink); font-size: var(--fs-tiny); overflow-wrap: anywhere; }
+.mobile-gateway-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.mobile-pairing-token { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.mobile-pairing-token input { flex: 1; min-width: 0; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--ink); background: var(--t-surface, var(--bg)); font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; user-select: all; }
+.mobile-gateway-card [data-mobile-token-result] { overflow-wrap: anywhere; }
 .native-extension-nav {
   display: flex;
   flex-direction: column;
