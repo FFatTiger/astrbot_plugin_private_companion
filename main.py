@@ -1016,6 +1016,20 @@ class PrivateCompanionV2StagingPlugin(Star):
 
     @filter.on_decorating_result(priority=-1000000)
     async def guard_companion_core_delivery(self, event: AstrMessageEvent):
+        # Final boundary safety: a model may reach the core pipeline through a
+        # path that does not run the V2 response observer (for example an empty
+        # wake-prefix turn). Strip the reaction protocol before AstrBot sends it.
+        try:
+            getter = getattr(event, "get_result", None)
+            result = getter() if callable(getter) else None
+            chain = getattr(result, "chain", None) if result is not None else None
+            from companion_v2.expression.reply_intent import extract_reply_intent
+            for part in chain or ():
+                text = getattr(part, "text", None)
+                if isinstance(text, str) and "pc_reaction_expression" in text:
+                    part.text = extract_reply_intent(text)[0]
+        except Exception:
+            pass
         activate_core_reply_delivery_guard(event)
         activate_core_reply_tracking(event)
         activate_core_reply_segmentation(event)
