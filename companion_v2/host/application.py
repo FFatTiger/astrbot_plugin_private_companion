@@ -20,7 +20,9 @@ from companion_v2.agenda.background import AgendaBackground, AgendaDispatchPolic
 from companion_v2.agenda.service import AgendaService
 from companion_v2.agenda.calendar import CalendarService
 from companion_v2.agenda.planning import CalendarPlanning
-from companion_v2.role_work.state.configuration import StateConfigurationOwner, configuration_fields as state_configuration_fields
+from companion_v2.role_work.state.configuration import (
+    StateConfigurationOwner, configuration_fields as state_configuration_fields, migrate_presence_to_role,
+)
 from companion_v2.role_work.state.service import RoleStateService
 from companion_v2.role_work.state.maintenance import StateMaintenance
 from companion_v2.capabilities.ownership import DEFAULT_MEMORY_OWNER
@@ -274,6 +276,10 @@ class CompanionApplication:
                     WardrobeConfigurationOwner(runtime),
                     QzoneConfigurationOwner(runtime),
                     *capability_owners))
+        try:
+            migrate_presence_to_role(runtime)
+        except Exception as error:
+            logger.warning("[CompanionV2] QQ presence scope migration failed error_type=%s", type(error).__name__)
         self.reply_settings = ReplySettings(self.configuration)
         self.perception_settings = PerceptionSettings(self.configuration)
         self.screen_settings = ScreenSettings(self.configuration)

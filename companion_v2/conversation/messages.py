@@ -776,6 +776,19 @@ class ConversationMessages:
                 context, events, row["role_instruction"], self.tasks.now(), batch_id
             )
             contributions = tuple(contributions) + tuple(captured_knowledge)
+        current_text = ""
+        if context.scope.kind is ScopeKind.PRIVATE and self.cross_window_context is not None and inputs:
+            parts = []
+            for item in inputs:
+                try:
+                    data = json.loads(item["event_json"])
+                    record = self._read_source(source_from_document(data["source"]), context,
+                                               data["capability"], self.tasks.now())
+                except Exception:
+                    continue
+                if record.payload:
+                    parts.append(record.payload)
+            current_text = "\n".join(parts)
         if len(contributions) > 32:
             raise ValueError("context contributions must be bounded")
         material_refs = []
@@ -807,7 +820,8 @@ class ConversationMessages:
             if (self.cross_window_context is not None
                     and context.scope.kind in (ScopeKind.PRIVATE, ScopeKind.GROUP)):
                 try:
-                    saved["cross_window"] = self.cross_window_context.capture(context, self.tasks.now())
+                    saved["cross_window"] = self.cross_window_context.capture(
+                        context, self.tasks.now(), current_text=current_text)
                 except Exception as error:
                     logger.warning("V2 cross-window snapshot failed: %s", type(error).__name__)
             profile_snapshot = self.role_profile_context.capture(context, self.tasks.now())
