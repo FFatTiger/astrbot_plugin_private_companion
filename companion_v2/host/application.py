@@ -944,7 +944,7 @@ class CompanionApplication:
                     deadline = min(deadline, journal_deadline) if deadline else journal_deadline
                 more_background = self.background.advance() or more_background
                 await asyncio.sleep(0)
-                self.contact_schedule.advance()
+                await self.contact_schedule.advance_async()
                 await asyncio.sleep(0)
                 if loop.time() >= next_wal_checkpoint:
                     checkpoint = getattr(self.runtime, "checkpoint_passive", None)
