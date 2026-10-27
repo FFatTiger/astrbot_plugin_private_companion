@@ -58,11 +58,11 @@ def _session_provider_id(session):
     """Read the selected provider from either the single-host or multi-host session."""
     common = getattr(getattr(session, "settings", None), "common", None)
     configured = getattr(common, "provider_id", None)
-    if isinstance(configured, str):
-        return configured
+    if isinstance(configured, str) and configured.strip():
+        return configured.strip()
     profile = getattr(session, "profile", None)
     configured = getattr(profile, "provider_id", None)
-    return configured if isinstance(configured, str) else ""
+    return configured.strip() if isinstance(configured, str) and configured.strip() else ""
 
 
 PREFIX = "/astrbot_plugin_private_companion/persona"
@@ -480,7 +480,7 @@ class PersonaWorkshopWebAPI:
             return outcome_response(Outcome.failed(error.code, str(error)))
         except (ValueError, TypeError, KeyError, UnicodeError, RecursionError, OverflowError):
             return outcome_response(Outcome.failed("role_profile_draft_invalid", "the profile draft response was invalid"))
-        except Exception as error:
+        except Exception:
             logger.warning("[CompanionV2] 角色档案草稿生成失败", exc_info=True)
             return outcome_response(Outcome.failed("role_profile_draft_failed", "the profile could not be drafted; check the selected model and try again"))
 

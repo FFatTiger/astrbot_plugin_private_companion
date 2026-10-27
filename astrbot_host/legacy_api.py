@@ -581,13 +581,22 @@ class LegacyMigrationWebAPI:
     @staticmethod
     def _group_import_arguments(root, key, plan):
         """Build one group import request; skip worldbook when the plan has none."""
-        worldbook = plan.get("group_worldbook") or {}
+        if (not isinstance(plan, dict) or type(plan.get("plan_token")) is not str
+                or not plan["plan_token"]):
+            raise ValueError("legacy_group_plan_invalid")
+        worldbook = plan.get("group_worldbook")
+        if worldbook is None:
+            worldbook = {}
+        expression = plan.get("group_expression")
+        if (not isinstance(worldbook, dict) or not isinstance(expression, dict)
+                or type(expression.get("available")) is not bool):
+            raise ValueError("legacy_group_plan_invalid")
         return {
             "v1_root": str(root), "source_persona_id": key[0],
             "source_group_id": key[1], "plan_token": plan["plan_token"],
             "import_group_network": True, "confirm_group_mapping": True, "confirm_member_ids": True,
             "import_group_worldbook": bool(worldbook.get("entries") or worldbook.get("members")),
-            "import_group_expression": bool(plan["group_expression"]["available"]),
+            "import_group_expression": expression["available"],
             "confirm_expression_mapping": True,
         }
 
@@ -640,7 +649,12 @@ class LegacyMigrationWebAPI:
                               "state": "failed", "reason": error.code})
                 continue
             plan = await asyncio.to_thread(api._plan, root, key[0], key[1], target, group_session)
-            group_arguments = self._group_import_arguments(root, key, plan)
+            try:
+                group_arguments = self._group_import_arguments(root, key, plan)
+            except (KeyError, TypeError, ValueError):
+                items.append({"kind": "group", "persona_id": key[0], "group_id": key[1],
+                              "state": "failed", "reason": "legacy_group_plan_invalid"})
+                continue
             response = await asyncio.to_thread(api.apply_import, group_arguments, root, target, group_session)
             items.append({"kind": "group", "persona_id": key[0], "group_id": key[1],
                           "state": "imported" if response.get("status") == "ok" else "failed",
@@ -3031,7 +3045,7 @@ class LegacyMigrationWebAPI:
         """Split role defaults and window-only fields before tokens and validation.
 
         Domain owners define which fields can be shared. Device permissions and
-        platform presentation remain in their original window.
+        typing presentation remain in their original window; QQ account status is role-shared.
         """
         service = session.application.configuration
         for intent in intents:

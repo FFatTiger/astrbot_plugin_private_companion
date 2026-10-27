@@ -38,6 +38,16 @@ from .fish_audio import MODEL_OPTIONS as FISH_AUDIO_MODEL_OPTIONS
 
 logger = logging.getLogger(__name__)
 
+
+def _probe_error_summary(error):
+    """Return a bounded, URL/credential-free probe failure summary for logs."""
+    text = str(error)
+    text = re.sub(r"https?://[^\s]+", "[URL]", text, flags=re.I)
+    text = re.sub(r"(?i)\b(?:api[_-]?key|token|secret|password|authorization)\b\s*[:=]\s*\S+",
+                  "[REDACTED]", text)
+    text = re.sub(r"\bBearer\s+\S+", "Bearer [REDACTED]", text, flags=re.I)
+    return (type(error).__name__ + ": " + text.replace("\n", " ").replace("\r", " "))[:320]
+
 PREFIX = "/astrbot_plugin_private_companion/model"
 VOICE_FIELDS = {"zh": "voice_zh_provider_id", "ja": "voice_ja_provider_id", "en": "voice_en_provider_id"}
 VOICE_CHANNELS = {"private": "私聊", "group": "群聊"}
@@ -609,8 +619,8 @@ class ModelWebAPI:
             except asyncio.TimeoutError:
                 result, code = "unknown", "model_probe_timeout"
             except Exception as error:
-                logger.warning("[CompanionV2] 模型探测失败 provider=%s error_type=%s error=%s",
-                               provider_id, type(error).__name__, error, exc_info=True)
+                logger.warning("[CompanionV2] 模型探测失败 provider=%s error=%s",
+                               provider_id, _probe_error_summary(error))
                 result, code = "unknown", "model_probe_failed"
             async with self.controller._control_lock:
                 self._authorized()

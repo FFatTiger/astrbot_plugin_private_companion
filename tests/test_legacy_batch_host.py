@@ -104,6 +104,15 @@ class LegacyBatchHostTests(unittest.IsolatedAsyncioTestCase):
             self.v1_root, ("persona", "group"), plan)
         self.assertTrue(arguments["import_group_worldbook"])
 
+    def test_group_import_rejects_malformed_plan_shape(self):
+        for plan in ({}, {"plan_token": "token"},
+                     {"plan_token": "token", "group_expression": {"available": "yes"}},
+                     {"plan_token": "token", "group_expression": {"available": False},
+                      "group_worldbook": []}):
+            with self.subTest(plan=plan), self.assertRaises(ValueError):
+                LegacyMigrationWebAPI._group_import_arguments(
+                    self.v1_root, ("persona", "group"), plan)
+
 
 if __name__ == "__main__":
     unittest.main()
