@@ -93,5 +93,17 @@ class LegacyBatchHostTests(unittest.IsolatedAsyncioTestCase):
         apply.assert_not_called()
 
 
+    def test_group_import_skips_empty_worldbook(self):
+        plan = {"plan_token": "token", "group_expression": {"available": False},
+                "group_worldbook": {"entries": 0, "members": 0}}
+        arguments = LegacyMigrationWebAPI._group_import_arguments(
+            self.v1_root, ("persona", "group"), plan)
+        self.assertFalse(arguments["import_group_worldbook"])
+        plan["group_worldbook"]["entries"] = 1
+        arguments = LegacyMigrationWebAPI._group_import_arguments(
+            self.v1_root, ("persona", "group"), plan)
+        self.assertTrue(arguments["import_group_worldbook"])
+
+
 if __name__ == "__main__":
     unittest.main()

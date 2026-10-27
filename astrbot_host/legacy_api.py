@@ -578,6 +578,19 @@ class LegacyMigrationWebAPI:
             lambda migration, root, session: self._batch_apply(migration, root, session, arguments),
             root_override=root_override)
 
+    @staticmethod
+    def _group_import_arguments(root, key, plan):
+        """Build one group import request; skip worldbook when the plan has none."""
+        worldbook = plan.get("group_worldbook") or {}
+        return {
+            "v1_root": str(root), "source_persona_id": key[0],
+            "source_group_id": key[1], "plan_token": plan["plan_token"],
+            "import_group_network": True, "confirm_group_mapping": True, "confirm_member_ids": True,
+            "import_group_worldbook": bool(worldbook.get("entries") or worldbook.get("members")),
+            "import_group_expression": bool(plan["group_expression"]["available"]),
+            "confirm_expression_mapping": True,
+        }
+
     async def _batch_apply(self, migration, root, session, arguments):
         """Apply the reviewed scope item by item, keeping one receipt per item."""
         from .legacy_group_data_api import LegacyGroupDataWebAPI
@@ -627,14 +640,7 @@ class LegacyMigrationWebAPI:
                               "state": "failed", "reason": error.code})
                 continue
             plan = await asyncio.to_thread(api._plan, root, key[0], key[1], target, group_session)
-            group_arguments = {
-                "v1_root": str(root), "source_persona_id": key[0],
-                "source_group_id": key[1], "plan_token": plan["plan_token"],
-                "import_group_network": True, "confirm_group_mapping": True, "confirm_member_ids": True,
-                "import_group_worldbook": True,
-                "import_group_expression": bool(plan["group_expression"]["available"]),
-                "confirm_expression_mapping": True,
-            }
+            group_arguments = self._group_import_arguments(root, key, plan)
             response = await asyncio.to_thread(api.apply_import, group_arguments, root, target, group_session)
             items.append({"kind": "group", "persona_id": key[0], "group_id": key[1],
                           "state": "imported" if response.get("status") == "ok" else "failed",
@@ -1513,7 +1519,8 @@ class LegacyMigrationWebAPI:
             import_relationship_profiles as import_legacy_relationship_profiles,
             relationship_profile_entries, relationship_profile_token)
         relationship_entries = relationship_profile_entries(
-            self.controller.runtime, context, data_plan.relationship_profiles)
+            self.controller.runtime, context, data_plan.relationship_profiles,
+            seed=self._relationship_config_seed())
         relationship_token = relationship_profile_token(relationship_entries)
         if plan_token != self._data_plan_token(data_plan, context, service, source_group_id,
                                                source_persona_id, existing_ids, existing_heads,
@@ -2003,6 +2010,7 @@ class LegacyMigrationWebAPI:
             except TaskError as error:
                 return outcome_response(Outcome.failed(error.code, str(error)))
             except (TypeError, ValueError, KeyError):
+                logger.warning("[CompanionV2] 旧版迁移请求参数处理失败", exc_info=True)
                 return outcome_response(Outcome.failed("legacy_request_invalid", "invalid legacy arguments"))
         # Binding application owns the lifecycle/control locks and may replace
         # the runtime. All writes through the old session have finished above.
