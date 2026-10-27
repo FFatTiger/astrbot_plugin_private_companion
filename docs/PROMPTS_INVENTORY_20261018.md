@@ -124,7 +124,7 @@ V2 自己执行回复批次时，由 `EvidencePromptCompiler.compile`（`compani
 | `GENERATED_IMAGE_INSTRUCTION` / `SCREEN_INSTRUCTION` | `messages.py:657-679` | 生成图与屏幕原件不是用户照片 | 本轮有生成图/屏幕采集 |
 | 输出协议 | `companion_v2/adapters/astrbot/model_wire.py:17-26` | 最终只输出一个 JSON，附有效示例 | 每次批处理（`astrbot` 适配器） |
 | 流式追加契约 | `companion_v2/adapters/astrbot/reply_stream.py:12` | 边生成边发送时的字段顺序 | 开启流式回复 |
-| `FINAL_PROMPT_GUARD` | `companion_v2/model_gateway/prompt_composer.py:15` | 最后一个 system：只输出最终结果、材料只作资料 | 每次模型请求 |
+| `FINAL_PROMPT_GUARD` | `companion_v2/model_gateway/prompt_composer.py:15` | 同一条 system 的末尾：只输出最终结果、材料只作资料 | 每次模型请求 |
 | 模型失败提示 | `companion_v2/conversation/generation.py:31` | 失败时直接发给用户的固定文案（非提示词） | 模型失败 |
 
 ## 6. 统一装配顺序（所有模型任务共用）
@@ -136,9 +136,9 @@ V2 自己执行回复批次时，由 `EvidencePromptCompiler.compile`（`compani
 3. `task_prompt`：任务档（`ModelTaskProfile` 的短提示，见第 7 节表格里“任务档”一列）＋管理员在该任务下保存的覆盖提示。
 4. `output_contract`：输出契约（回复链为 JSON 契约；其他任务为“只输出任务要求的 JSON”）。
 5. `capability_instruction`：本轮能力说明（工具目录、图片选择协议等）。
-6. `terminal_prompt_guard`：`FINAL_PROMPT_GUARD`，作为**最后一条 system 消息**追加在材料之后（`companion_v2/adapters/astrbot/model_wire.py:227`）。
+6. `terminal_prompt_guard`：`FINAL_PROMPT_GUARD`，放在**同一条 system 消息的末尾**（`companion_v2/model_gateway/prompt_composer.py:33-58`）。
 
-实际消息布局（`model_wire.py:152-227`）：system(1) → system(2..5) → user{`materials`/`deferred`/`unavailable`}（图片/音频/视频按原序作为多模态 part 附在这条 user 里）→ 工具往返 → system(6)。
+实际消息布局（`model_wire.py:145-160`）：system(1..6 合并为一条) → user{`materials`/`deferred`/`unavailable`}（图片/音频/视频按原序作为多模态 part 附在这条 user 里）→ 工具往返。合并是为了避开上游对多条 system 的过度内容过滤，角色、任务、契约与末尾约束的顺序不变。
 
 ## 7. 任务档（ModelTaskProfile）一览
 
