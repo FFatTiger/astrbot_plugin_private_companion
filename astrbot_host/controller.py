@@ -500,11 +500,17 @@ class AstrBotStagingController:
             from .model_route_material import model_route_keyword_material
             from .web_read_material import web_read_keyword_material
             from companion_v2.conversation.keyword_materials import KeywordMaterials
+            async def deepseek_fetch(url):
+                port = configured_search_port(self.context, query="链接正文", result_count=1,
+                    topic="general", deepseek_provider_resolver=search_provider_resolver)
+                if port is None or not callable(getattr(port, "fetch_article", None)):
+                    return None
+                return await port.fetch_article(url)
             self.session.application.keyword_materials = KeywordMaterials((
                 balance_keyword_material(self.session.application),
                 model_route_keyword_material(self.session.application, self.context,
                                              native_tool_port=self.native_extensions),
-                web_read_keyword_material(self.session.application),
+                web_read_keyword_material(self.session.application, fetch=deepseek_fetch),
             ))
         except Exception as error:
             logger.warning("[CompanionV2] 关键词材料登记失败 error_type=%s", type(error).__name__)
