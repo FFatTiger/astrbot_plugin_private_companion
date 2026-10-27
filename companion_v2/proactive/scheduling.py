@@ -1583,12 +1583,7 @@ class ContactSchedule:
         return tuple("automatic-contact-" + key for key in self._workers) + tuple(
             "contact-judge-" + key for key in self._judges)
 
-    def cancel_running(self):
-        self._closed = True
-        for worker in tuple(self._workers.values()):
-            worker.cancel()
-        for worker in tuple(self._judges.values()):
-            worker.cancel()
+    def _close_sources(self):
         if self.events is not None:
             self.events.close()
         if self.growth_events is not None:
@@ -1609,8 +1604,20 @@ class ContactSchedule:
         self.news_events.close()
         self.screen_events.close()
 
+    def cancel_running(self, *, close_sources=True):
+        self._closed = True
+        for worker in tuple(self._workers.values()):
+            worker.cancel()
+        for worker in tuple(self._judges.values()):
+            worker.cancel()
+        if close_sources:
+            self._close_sources()
+
     async def close(self):
-        self.cancel_running()
+        # Stop accepting work and cancel live tasks, but keep sources open until
+        # the in-flight planner has returned; a planning thread must never read a
+        # closed event source or storage connection.
+        self.cancel_running(close_sources=False)
         planning = self._planning
         if planning is not None and not planning.done():
             try:
@@ -1619,6 +1626,7 @@ class ContactSchedule:
                 pass
             except Exception:
                 pass
+        self._close_sources()
         workers = tuple(self._workers.values()) + tuple(self._judges.values())
         if workers:
             await asyncio.wait(workers, timeout=0.25)

@@ -54,6 +54,31 @@ class ContactScheduleOffloadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen["plan"], plan)
         self.assertGreater(ticks, 0, "event loop must keep running while candidate sources are evaluated")
 
+    async def test_close_waits_for_inflight_planner_before_closing_sources(self):
+        scheduler = object.__new__(ContactSchedule)
+        scheduler._closed = False
+        scheduler._workers = {}
+        scheduler._judges = {}
+        for name in ("events", "growth_events", "journal_events", "calendar_events",
+                     "reminiscence_events", "weather_events", "weather_change_events",
+                     "official_alert_events"):
+            setattr(scheduler, name, None)
+        seen = {}
+        planning = asyncio.create_task(asyncio.sleep(0.05))
+        scheduler._planning = planning
+
+        class Source:
+            def close(self):
+                seen["closed_after_planner"] = planning.done()
+
+        scheduler.balance_events = Source()
+        scheduler.news_events = Source()
+        scheduler.screen_events = Source()
+
+        await scheduler.close()
+        self.assertTrue(seen["closed_after_planner"], "planner must finish before sources close")
+        self.assertTrue(planning.done())
+
 
 if __name__ == "__main__":
     unittest.main()
