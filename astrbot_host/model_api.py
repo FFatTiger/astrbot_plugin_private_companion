@@ -4,6 +4,7 @@ import asyncio
 import base64
 import inspect
 import json
+import logging
 import re
 from copy import deepcopy
 from pathlib import Path
@@ -35,6 +36,7 @@ from .host_token_usage import read_astrbot_token_usage
 from .voice import _read_audio
 from .fish_audio import MODEL_OPTIONS as FISH_AUDIO_MODEL_OPTIONS
 
+logger = logging.getLogger(__name__)
 
 PREFIX = "/astrbot_plugin_private_companion/model"
 VOICE_FIELDS = {"zh": "voice_zh_provider_id", "ja": "voice_ja_provider_id", "en": "voice_en_provider_id"}
@@ -606,7 +608,9 @@ class ModelWebAPI:
                 result, code = "ok", ""
             except asyncio.TimeoutError:
                 result, code = "unknown", "model_probe_timeout"
-            except Exception:
+            except Exception as error:
+                logger.warning("[CompanionV2] 模型探测失败 provider=%s error_type=%s error=%s",
+                               provider_id, type(error).__name__, error, exc_info=True)
                 result, code = "unknown", "model_probe_failed"
             async with self.controller._control_lock:
                 self._authorized()
