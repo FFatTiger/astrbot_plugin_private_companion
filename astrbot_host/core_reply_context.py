@@ -302,7 +302,6 @@ def build_core_reply_prompt(application, context, native_input, *, at, keyword_m
         return "\n\n【对话附加提示】\n" + prompt.strip() if isinstance(prompt, str) and prompt.strip() else ""
 
     optional("task_prompt", task_prompt, stable=True)
-    profile("role_profile", getattr(messages, "role_profile_context", None), stable=True)
     optional("person_card", lambda: _material_section("当前相识资料", GROUP_INSTRUCTION
         if context.scope.kind is ScopeKind.GROUP else MEMORY_INSTRUCTION,
         (messages.acquaintance.card_contribution(context, at),)))
