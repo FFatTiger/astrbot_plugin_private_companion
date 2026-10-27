@@ -699,6 +699,28 @@ def _profile_data(payload):
     return payload
 
 
+def persona_profile_settings(root, configuration, persona_id):
+    """Return the V1 profile payload and source for one persona.
+
+    A secondary persona without its own profile inherits the primary store,
+    matching V1's ``inherit_primary`` contract. Ambiguous or unreadable
+    secondary profiles are reported instead of silently falling back.
+    """
+    root = Path(root)
+    primary = primary_profile(root, configuration)
+    if primary.payload is None:
+        return None, primary.error, ""
+    if not persona_id:
+        return _profile_data(primary.payload), "", str(primary.selected_path(root))
+    inventory, _ = _persona_sources(root, primary)
+    selected, issue, relative = _selected_profile(root, persona_id, inventory, primary)
+    if selected is None and issue in ("persona_profile_ambiguous", "persona_profile_unreadable"):
+        return None, issue, ""
+    if selected is None:
+        return _profile_data(primary.payload), "", str(primary.selected_path(root))
+    return _profile_data(selected), "", relative
+
+
 def _date_key(value):
     if not isinstance(value, str):
         return ""
