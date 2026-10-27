@@ -455,11 +455,13 @@
         "description": "语音分段范围",
         "type": "string",
         "options": [
+          "whole",
           "each",
           "first",
           "last"
         ],
-        "default": "each"
+        "default": "whole",
+        "hint": "whole 等全部文字收齐后合成一次，语气和上下文更完整；each 每段分别合成，出音更早但会切碎语义。"
       },
       "delivery_mode": {
         "description": "发送形态",
