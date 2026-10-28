@@ -13,10 +13,22 @@ NOW = datetime(2026, 9, 27, 10, tzinfo=timezone.utc)
 
 
 class GroupParticipationHintTests(unittest.TestCase):
-    def hints(self, recent=(), batches=None, settings=None, materials=(), sender="200", images=(), native=False):
+    def hints(self, recent=(), batches=None, settings=None, materials=(), sender="200", images=(), native=False,
+              current_text=""):
         request = NS(event=NS(received_at=NOW), context=NS(materials=materials), images=images)
         context = NS(actor=NS(principal=NS(native_account_id=sender)))
-        return group_hints(request, context, settings or {}, recent, batches or {}, native=native)
+        return group_hints(request, context, settings or {}, recent, batches or {}, native=native,
+                           current_text=current_text)
+
+    def test_mention_attribution_never_claims_another_accounts_name(self):
+        other = self.hints(current_text="[提及账号 123] 小天使")
+        self.assertIn("其他账号", other)
+        self.assertIn("不要接成", other)
+        own = self.hints(current_text="[提及机器人] 小天使")
+        self.assertIn("明确 @ 了本角色", own)
+        speaking_about = self.hints(current_text="给星缘搓了一个家")
+        self.assertIn("没有明确 @ 本角色", speaking_about)
+        self.assertIn("第三人称", speaking_about)
 
     def test_segmented_reply_is_one_round_and_future_receipts_do_not_count(self):
         recent = [dict(type="confirmed_group_reply", part_id=part, delivered_at=at.isoformat())

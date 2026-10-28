@@ -73,7 +73,8 @@ def native_participation_turn(participation, context, native_input, settings):
                   for turn in turns)
     request = SimpleNamespace(event=SimpleNamespace(received_at=at), images=getattr(native_input, "images", ()),
                               context=SimpleNamespace(materials=()))
-    hints = group_hints(request, context, settings, recent, {}, native=True)
+    hints = group_hints(request, context, settings, recent, {}, native=True,
+                        current_text=native_input.text)
     observation = observe(participation.records, owner=owner_key(context), settings=values,
         items=(*recent_visible, current), at=at, current_speaker=context.actor.principal.native_account_id)
     hints += observation_instruction(values, observation["facts"], group_safety_settings(settings))

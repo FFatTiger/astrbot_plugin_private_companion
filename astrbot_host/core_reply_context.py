@@ -1,4 +1,4 @@
-"""Local, optional V2 background for AstrBot-owned conversation turns.
+﻿"""Local, optional V2 background for AstrBot-owned conversation turns.
 
 The host keeps its own current conversation history, media and model pipeline.
 This bridge only reads the domain owners' authorized background. It never
@@ -41,6 +41,9 @@ GROUP_INSTRUCTION = (
     "当前是群聊，回复面向本群。当前发言者只代表本人，群公共记忆中的旧话保留各自账号和时间，"
     "不当作当前成员的新发言或全群共识。熟人卡、已归属的成员资料和近期互动可帮助延续本群的相处方式，"
     "互动边不证明现实关系、私聊关系或权限；私人关系资料不用于替代当前发言者的明确表达。"
+    "群内 @ 归因只认本轮文本里的 [提及机器人]；[提及账号 X] 是其他成员。人格名、角色名、群名片别名、"
+    "known_names 和旧记忆里的昵称都不是“在叫我”的证据：即使与别人提到或 @ 的名字相同，也不要接成"
+    "“在叫我/你刚才叫我/是在叫我吗”；第三人称谈论同名角色不等于直接呼唤。"
 )
 CURRENT_TIME_INSTRUCTION = """current_local_time 是系统时钟按当前窗口配置时区投影出的本轮时间，用于理解现在、今天和问候时段。历史消息与摘要保留各自日期，不能充当当前时间。
 感知本轮 current_local_time 与最近历史消息时间戳的跨度：同一对话流内直接自然接话；隔了半天、隔夜或隔了几天再聊时，自然体现重逢或时隔感，不把几天前的话头当成上一秒刚说完直接硬接。
