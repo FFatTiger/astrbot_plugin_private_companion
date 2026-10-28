@@ -37,6 +37,12 @@
 
   <meta name="companion-api-host" content="astrbot_plugin_private_companion">
   <meta charset="UTF-8">
+  <!-- The page is loaded inside AstrBot's sandboxed asset iframe.  A normal
+       refresh can otherwise reuse an older cached document while the bundle
+       hash has already changed, leaving the old mount script in memory. -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#eef1f8">
   <meta name="color-scheme" content="light">
@@ -154,17 +160,18 @@
     <script defer src="setup-guide.js?v=migration-role-fallback-20261025"></script>
     <script defer src="semantic-page.js?v=consolidated-20261024-r1"></script>
     <script defer src="perception-page.js?v=consolidated-20261024-r1"></script>
-    <script defer src="perception-native-page.js?v=perception-auto-dates-20261025"></script>
+    <script defer src="perception-native-page.js?v=perception-dense-20261028-r22"></script>
+<script defer src="huawei-health-page.js?v=perception-dense-20261028-r22"></script>
     <script defer src="weather-source-page.js?v=weather-source-auth-mode-20261025"></script>
-    <script defer src="perception-overview.js?v=perception-auto-dates-20261025"></script>
+    <script defer src="perception-overview.js?v=perception-dense-20261028-r22"></script>
     <script defer src="reality-access.js?v=reality-readonly-consent-20261002"></script>
     <script defer src="game-access.js?v=game-room-consent-20261014"></script>
 
     <script defer src="screen-observation.js?v=screen-retained-20261014"></script>
     <script defer src="screen-access.js?v=screen-retained-20261014"></script>
-    <script defer src="app.js?v=account-display-preferences-20261028"></script>
+    <script defer src="app.js?v=perception-dense-20261028-r22"></script>
     <script defer src="room-editor.js?v=transient-time-preview-20261004"></script>
-    <script defer src="memory-page.js?v=directory-names-20261002"></script>
+    <script defer src="memory-page.js?v=memory-repair-20261028"></script>
     <script defer src="contact-page.js?v=auto-milestones-20261025"></script>
     <script defer src="learning-page.js?v=learning-record-ownership-20261012"></script>
     <script defer src="behavior-page.js?v=group-behavior-20261015"></script>

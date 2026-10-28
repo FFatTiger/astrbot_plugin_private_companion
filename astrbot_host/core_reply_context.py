@@ -1,4 +1,4 @@
-﻿"""Local, optional V2 background for AstrBot-owned conversation turns.
+"""Local, optional V2 background for AstrBot-owned conversation turns.
 
 The host keeps its own current conversation history, media and model pipeline.
 This bridge only reads the domain owners' authorized background. It never
@@ -14,6 +14,7 @@ import time
 from companion_v2.conversation.foreground import ContextContribution, ContributionState
 from companion_v2.conversation.awareness_context import INSTRUCTION as CROSS_WINDOW_INSTRUCTION
 from companion_v2.conversation.growth_context import ROLE_GROWTH_INSTRUCTION
+from companion_v2.conversation.health_context import HEALTH_INSTRUCTION
 from companion_v2.conversation.life_context import LIFE_INSTRUCTION
 from companion_v2.conversation.messages import KNOWLEDGE_INSTRUCTION
 from companion_v2.conversation.open_items_context import INSTRUCTION as OPEN_ITEMS_INSTRUCTION
@@ -25,6 +26,7 @@ from companion_v2.delivery.history import CONTEXT_INSTRUCTION as SENT_MESSAGE_IN
 from companion_v2.foundation.refs import ScopeKind
 from companion_v2.knowledge.members import MEMBER_CLUE_INSTRUCTION
 from companion_v2.role_work.state.service import INSTRUCTION as STATE_INSTRUCTION
+from .core_reply_health import health_perception_snapshot
 
 
 logger = logging.getLogger(__name__)
@@ -229,7 +231,7 @@ def _input_received_at(native_input, fallback):
     return getattr(native_input, "at", None) or getattr(native_input, "received_at", None) or fallback
 
 
-def build_core_reply_prompt(application, context, native_input, *, at, keyword_materials=()):
+def build_core_reply_prompt(application, context, native_input, *, at, keyword_materials=(), health_material=None):
     """Build optional background independently; no failed section blocks reply."""
     blocks, stable_blocks, sections, expression_signal_ids = [], [], [], []
     measured, started = [], time.monotonic()
@@ -361,6 +363,18 @@ def build_core_reply_prompt(application, context, native_input, *, at, keyword_m
             instructions.append(CALENDAR_INSTRUCTION)
             if settings["almanac_enabled"]:
                 instructions.append(ALMANAC_INSTRUCTION)
+        # Health material is private by construction: mobile telemetry is keyed
+        # to the current recipient and the Reality consent is checked again in
+        # the host adapter before any reading reaches this prompt.  This is the
+        # single health on/off switch; saving it also prepares the source and
+        # the current private-window consent.
+        if context.scope.kind is ScopeKind.PRIVATE and settings.get("health_enabled") is True:
+            health = health_material
+            if health is None:
+                health = health_perception_snapshot(application, context, at)
+            if health:
+                perception_data["health_context"] = health
+                instructions.append(HEALTH_INSTRUCTION)
         # Personal birthdays are explicit profile data, so they remain available
         # even when generic calendar labels are disabled. User data is included
         # only for the identified private recipient; role data is safe to share
