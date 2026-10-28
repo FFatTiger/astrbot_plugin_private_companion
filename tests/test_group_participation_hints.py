@@ -6,6 +6,7 @@ import unittest
 
 from companion_v2.conversation.group_timing import short_input_wait
 from companion_v2.conversation.participation_prompts import group_hints
+from companion_v2.conversation.native_participation import speaker_history_instruction
 from companion_v2.foundation.refs import ScopeKind
 
 
@@ -29,6 +30,17 @@ class GroupParticipationHintTests(unittest.TestCase):
         speaking_about = self.hints(current_text="给星缘搓了一个家")
         self.assertIn("没有明确 @ 本角色", speaking_about)
         self.assertIn("第三人称", speaking_about)
+
+    def test_recent_group_history_keeps_each_speaker_out_of_the_current_turn(self):
+        history = speaker_history_instruction((
+            {"speaker_id": "A", "text": "@星缘 小天使"},
+            {"speaker_id": "B", "text": "什么"},
+        ), "B")
+        self.assertIn("[speaker_id=A] @星缘 小天使", history)
+        self.assertIn("[speaker_id=B] 什么", history)
+        self.assertIn("不同的人", history)
+        self.assertIn("current_group_speaker=B", history)
+        self.assertEqual(speaker_history_instruction((), "B"), "")
 
     def test_segmented_reply_is_one_round_and_future_receipts_do_not_count(self):
         recent = [dict(type="confirmed_group_reply", part_id=part, delivered_at=at.isoformat())
