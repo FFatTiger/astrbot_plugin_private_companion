@@ -184,7 +184,7 @@ window.CompanionReplyPage = (() => {
       enable_humanized_expression: "勾选后，下面的额外表达提示会与所选风格叠加；自由模式下关闭即可移除这段提示。",
       humanized_expression_prompt: "最多 4000 字。约束模式使用此正文；留空使用内置默认文本。勾选“追加拟人表达提示”后，在自由或引导模式也会额外注入。本对象与群聊各自保存。",
       content_cleanup_enabled: "用于主动消息和普通私聊、群聊的文字回复，默认开启。发送前按所选方式整理文字；关闭时不执行清理。需要调整说法时优先补充上方提示词。",
-      content_cleanup_scope: "按句首、句中、句尾三个位置清理：句首只处理每段开头，句中只处理不贴首尾的匹配，句尾只处理每段末尾。",
+      content_cleanup_scope: "可多选：句首处理每段开头，句中处理不贴首尾的匹配，句尾处理每段末尾；勾选需要的位置即可，支持任意组合。",
       content_cleanup_words: "按所选位置逐字清理词条。例如填入“。”和“，”并选择“句尾”，即可保留句中标点、清理每段末尾；也可添加空格、换行或制表符。",
       content_cleanup_rule: "仅在清理方式选为正则时使用；最多 512 字。",
       content_replacements: "逐项填写原词和替换文本。",
@@ -375,12 +375,17 @@ window.CompanionReplyPage = (() => {
     ],
     segmentedChoices: ["rule_mode", "part_gap_mode", "streaming_mode", "prompt_style_mode"],
     inputs: {
+      content_cleanup_scope: "chips",
       split_words: "word-list", content_cleanup_words: "word-list", recall_forbidden_words: "word-list",
       content_replacements: "replacement-list", component_order: "order-list",
       group_wakeup_direct_words: "word-list", group_wakeup_context_words: "word-list",
       group_wakeup_interest_keywords: "word-list", group_wakeup_primary_member_ids: "word-list",
       group_wakeup_owner_direct_words: "word-list",
       file_understanding_format_groups: "word-list",
+    },
+    chipOptions: {
+      content_cleanup_scope: {mode: "multi", options: ["leading", "middle", "trailing"],
+        labels: {leading: "句首", middle: "句中", trailing: "句尾"}, hideInput: true},
     },
     visibility: {
       streaming_mode: {streaming: true},
@@ -666,9 +671,11 @@ window.CompanionReplyPage = (() => {
     } finally { clearTimeout(timer); }
   }
 
-  /* 旧配置的整段已退役；进入草稿时迁到句中，避免下拉框落空并在保存时被判非法。 */
+  /* 旧版整段清理迁成三项全选；其余单值保持原样，避免无改动也变脏。 */
   function normalizeReplyDraft(draft) {
-    if (draft?.content_cleanup_scope === "all") draft.content_cleanup_scope = "middle";
+    if (draft?.content_cleanup_scope === "all") {
+      draft.content_cleanup_scope = "leading、middle、trailing";
+    }
   }
 
   /* 读取由工作台负责；这里只订阅它的结果，用来渲染预览与保存摘要。 */
@@ -1259,6 +1266,7 @@ window.CompanionReplyPage = (() => {
       rows: pageSpec.rows,
       segmentedChoices: spec.segmentedChoices,
       inputs: spec.inputs,
+      chipOptions: spec.chipOptions,
       visibility: spec.visibility,
       listFields: spec.listFields,
       order: pageSpec.order,
