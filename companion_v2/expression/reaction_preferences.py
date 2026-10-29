@@ -21,7 +21,19 @@ OPT_IN = (
 REQUEST = (
     rf"^(?:请|给我|帮我|来|发|找|想看|要看).{{0,12}}{ASSET}(?:吧|呀|啊|看看)?$",
     rf"^{ASSET}(?:来|发|找)?(?:一张|一个|吧|呀|啊|看看)?$",
+    # A repeat ask can follow the address ("大肥鱼再发一个表情包").  It needs an
+    # explicit volition word so prose about stickers is not read as a request.
+    rf"(?:再|又|也|快|赶紧|多)[\s]{{0,2}}(?:请|给我|帮我|来|发|找|要)?.{{0,8}}"
+    rf"{ASSET}(?:吧|呀|啊|看看|呗)?$",
 )
+# Group messages arrive with the mention in the text ("@hcuu 发几个表情包"),
+# and the anchored request patterns above would otherwise never match.
+_ADDRESS = re.compile(r"^(?:@\S+[\s,，:：]*\s*|\[At:[^\]]*\]\s*)+")
+
+
+def request_text(text):
+    """Drop the addressing prefix so an explicit ask can still be recognised."""
+    return _ADDRESS.sub("", text or "")
 NEGATIVE = (
     rf"(?:刚才|上一张|那张|这张).{{0,10}}(?:{ASSET})?.{{0,8}}(?:不合适|不贴切|不喜欢|尴尬|难看)",
     rf"{ASSET}.{{0,8}}(?:不合适|不贴切|不喜欢|尴尬|难看)",
@@ -69,7 +81,7 @@ class ReactionPreferences:
             out = matches(OPT_OUT, text)
             if out:
                 requested = False
-            elif matches(REQUEST, text):
+            elif matches(REQUEST, request_text(text)):
                 requested = True
             self._observe(owner, actor, row["event_key"], text,
                           datetime.fromisoformat(event["received_at"]).timestamp())
@@ -81,7 +93,7 @@ class ReactionPreferences:
         self.service.check(context)
         owner, actor = self.service.owner(context), self.actor(context)
         self._observe(owner, actor, "native:" + digest([context.key, event_id]), text, at.timestamp())
-        requested = matches(REQUEST, text) and not matches(OPT_OUT, text)
+        requested = matches(REQUEST, request_text(text)) and not matches(OPT_OUT, text)
         with self.store.db() as db:
             db.execute("INSERT OR REPLACE INTO reaction_turns VALUES (?,?,?,?)",
                        (turn_id, owner, actor, int(requested)))
