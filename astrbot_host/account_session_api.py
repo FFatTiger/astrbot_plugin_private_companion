@@ -116,7 +116,18 @@ class AccountSessionWebAPI:
             code = data.get("code") or response.get("message") or "setup_targets_unavailable"
             reason = response.get("reason") or "the native session directory could not be read"
             raise TaskError(code, reason)
-        return response["data"]
+        data = response["data"]
+        managed = {(row.get("platform_id"), row.get("account_id"), row.get("bot_id"), row.get("group_id"))
+                   for row in self._view()["groups"]}
+        groups = []
+        for row in data.get("targets", []):
+            if row.get("scope_kind") != "group":
+                continue
+            key = (row.get("platform_id"), row.get("account_id"), row.get("bot_id"), row.get("group_id"))
+            saved = key in managed
+            groups.append({**row, "managed": saved or row.get("managed") is True,
+                           "available_for_target": bool(row.get("native") and row.get("group_id"))})
+        return {**data, "groups": groups}
 
     async def get(self):
         try:

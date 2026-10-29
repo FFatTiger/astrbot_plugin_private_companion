@@ -390,7 +390,7 @@ class SinglePageTests(PageRequests, unittest.IsolatedAsyncioTestCase):
         service = PluginPageService(NS(plugin_store_path=str(plugin_root.parent)))
         plugin = NS(root_dir_name=plugin_root.name, reserved=False)
         pages = await service.discover_plugin_pages(plugin)
-        self.assertEqual([page.name for page in pages], ["陪伴小屋"])
+        self.assertEqual([page.name for page in pages], ["陪伴中心", "陪伴小屋"])
         page = next(page for page in pages if page.name == "陪伴小屋")
         entry = await service.resolve_plugin_page_file(plugin, page.name, "")
         html = service.rewrite_plugin_page_html(entry.read_text(encoding="utf-8"), plugin_root.name, page.name,
@@ -538,3 +538,68 @@ class MultiPageTests(PageRequests, MultiFixture, unittest.IsolatedAsyncioTestCas
                             for path in migration_paths))
         await self.controller.terminate()
         self.assertEqual(self.native.registered_web_apis, [])
+
+    async def test_group_display_name_comes_from_the_native_directory_or_group_id(self):
+        config = multi_config(group_targets=[
+            dict(target_id="named", platform_id="qq-main", account_id="100", bot_id="bot-a", group_id="300"),
+            dict(target_id="unnamed", platform_id="qq-main", account_id="100", bot_id="bot-a", group_id="301")])
+        self.controller = self.make_controller(config)
+        self.register()
+        (await self.controller.initialize_profile()).unwrap()
+        observed = {
+            "named": {"unified_msg_origin": "qq-main:GroupMessage:300", "account_id": "100",
+                      "group_name": "读书群", "conversation_id": "group-cid"},
+        }
+        with patch.object(self.controller.session_topology, "_observed", return_value=observed):
+            result = await self.request()
+        self.assertEqual(result["status"], "ok", result)
+        groups = {row["target_id"]: row for row in result["data"]["targets"] if row["scope_kind"] == "group"}
+        self.assertEqual(groups["named"]["display_name"], "读书群")
+        self.assertEqual(groups["unnamed"]["display_name"], "301")
+
+    async def test_overview_reuses_the_directory_host_and_setup_snapshot(self):
+        self.controller = self.make_controller(multi_config())
+        self.register()
+        (await self.controller.initialize_profile()).unwrap()
+        handler = next(handler for path, handler, _, _ in self.native.registered_web_apis
+                       if path == PREFIX + "/page/overview")
+        request = Request({"type": "http", "method": "GET", "path": PREFIX + "/page/overview",
+                           "headers": [], "query_string": b""})
+        with bind_request_context(PluginRequest(request, username="admin")):
+            result = await handler()
+        self.assertEqual(result["status"], "ok", result)
+        data = result["data"]
+        self.assertEqual(set(data), {"installation_id", "operator_id", "operator_name", "setup", "host",
+                                      "performance", "targets", "today"})
+        self.assertEqual(data["host"]["state"], self.controller.status()["state"])
+        self.assertIn("enabled", data["performance"])
+        self.assertEqual(data["setup"]["step"], "binding")
+        self.assertIsInstance(data["today"], list)
+
+    async def test_capabilities_report_existing_sender_flags_and_null_without_a_platform(self):
+        from astrbot_host.role_paths import HOST_PREFIX
+        self.controller = self.make_controller(multi_config())
+        self.register()
+        (await self.controller.initialize_profile()).unwrap()
+        handler = next(handler for path, handler, _, _ in self.native.registered_web_apis
+                       if path == HOST_PREFIX + "/capabilities")
+
+        async def call(query):
+            request = Request({"type": "http", "method": "GET", "path": HOST_PREFIX + "/capabilities",
+                               "headers": [], "query_string": query.encode()})
+            with bind_request_context(PluginRequest(request, username="admin")):
+                return await handler()
+
+        result = await call("target_id=first&role_id=role-a")
+        self.assertEqual(result["status"], "ok", result)
+        components = result["data"]["message_components"]
+        self.assertEqual(components, {"face": True, "poke": True, "quote": True, "mention": True})
+        self.assertEqual(result["data"]["screen"][0]["assembled"], False)
+        self.assertIn("configured", result["data"]["voice"])
+        with patch.object(self.controller.session_topology, "accounts", return_value=[]):
+            unnamed = await call("target_id=first&role_id=role-a")
+        self.assertEqual(unnamed["status"], "ok", unnamed)
+        self.assertEqual(unnamed["data"]["message_components"],
+                         {"face": None, "poke": None, "quote": None, "mention": None})
+        unknown = await call("target_id=missing&role_id=role-a")
+        self.assertEqual(unknown["data"]["code"], "host_target_unknown")
