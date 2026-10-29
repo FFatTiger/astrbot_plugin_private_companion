@@ -1,21 +1,7 @@
-import {ensureStyles, esc, card, action, status, empty, fieldRows, settingsOf, revisionOf, postAction, confirmAction, buttonBar, summaryGrid, schemaFields} from "./ability-shared.js";
+import {ensureStyles, esc, card, action, status, empty, fieldRows, settingsOf, revisionOf, postAction, confirmAction, buttonBar, summaryGrid, schemaFields, extensionItems as normalize, extensionStateOf as stateOf, EXTENSION_STATE_LABELS as STATE_LABELS, EXTENSION_STATE_TONES as STATE_TONES} from "./ability-shared.js";
 
-const STATE_LABELS = {assembled: "已装配", paused: "已暂停", discarded: "未装配", desired: "待检查", failed: "启动失败"};
-const STATE_TONES = {assembled: "ready", paused: "paused", discarded: "muted", desired: "pending", failed: "failed"};
 const extensionName = item => item?.name || item?.title || item?.extension_id || item?.id || "未命名扩展";
 const extensionId = item => item?.extension_id || item?.id || item?.name || "";
-function stateOf(item) {
-  if (item?.desired_state === "paused") return "paused";
-  if (item?.desired_state === "discarded" || item?.assembled === false) return "discarded";
-  if (item?.runtime?.state === "failed" || item?.state === "failed") return "failed";
-  if (item?.assembled === true || item?.desired_state === "assembled") return "assembled";
-  return "desired";
-}
-function normalize(data) {
-  const raw = Array.isArray(data?.extensions) ? data.extensions : data?.extensions && typeof data.extensions === "object"
-    ? Object.entries(data.extensions).map(([id, item]) => ({extension_id: id, ...item})) : [];
-  return raw.map(item => ({...item, extension_id: extensionId(item)}));
-}
 const actionText = name => ({assemble: "装配", pause: "暂停", resume: "恢复", update: "更新", uninstall: "卸载"}[name] || "调整");
 const categoryText = value => ({extension:"拓展",basic:"基础"}[String(value || "").toLowerCase()] || "能力");
 

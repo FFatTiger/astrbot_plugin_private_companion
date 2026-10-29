@@ -12,6 +12,23 @@ export function ensureStyles() {
   }
 }
 
+// 扩展装配态只有一个口径：manifest 的 assembled/desired_state 加运行期失败。
+// 各页面（首页、能力总览、感知、平台扩展）都从这里取，避免各写一份判断。
+export const EXTENSION_STATE_LABELS = {assembled: "已装配", paused: "已暂停", discarded: "未装配", desired: "待检查", failed: "启动失败"};
+export const EXTENSION_STATE_TONES = {assembled: "ready", paused: "paused", discarded: "muted", desired: "pending", failed: "failed"};
+export function extensionStateOf(item) {
+  if (item?.desired_state === "paused") return "paused";
+  if (item?.desired_state === "discarded" || item?.assembled === false) return "discarded";
+  if (item?.runtime?.state === "failed" || item?.state === "failed") return "failed";
+  if (item?.assembled === true || item?.desired_state === "assembled") return "assembled";
+  return "desired";
+}
+export function extensionItems(data) {
+  const raw = Array.isArray(data?.extensions) ? data.extensions
+    : data?.extensions && typeof data.extensions === "object" ? Object.entries(data.extensions).map(([id, item]) => ({extension_id: id, ...item}))
+      : [];
+  return raw.map(item => ({...item, extension_id: item.extension_id || item.id || item.name || ""}));
+}
 export const settingsOf = data => data?.settings && typeof data.settings === "object"
   ? {...data.settings}
   : data && typeof data === "object" ? {...data} : {};
