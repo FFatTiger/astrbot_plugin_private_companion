@@ -16,6 +16,8 @@ const valueFrom = (root, name, fallback = "") => root.querySelector(`[data-ui-fi
 const page = { id: "system-models", section: "系统", title: "模型与连接", async render(root, ctx) {
   style(); root.innerHTML = `<div class="page-loading">正在读取</div>`;
   const role = ctx.role, api = ctx.api;
+  // 群目标的 model_api 只有群模型路由（astrbot_host/group_model_api.py）；生图/语音/TTS/诊断等是角色级，挂在同 role_id 的私聊角色上。
+  const roleModel = ctx.roleWithConfig?.(role)?.model_api || role?.model_api;
   if (!role?.model_api) { root.innerHTML = `<div class="system-empty">当前角色没有模型配置接口。</div>`; return; }
   let data;
   try { data = unwrap(await api.get(role.model_api)); } catch (error) { root.innerHTML = `<div class="system-error">模型目录读取失败：${esc(error.message || "")}</div>`; return; }
@@ -40,10 +42,10 @@ const page = { id: "system-models", section: "系统", title: "模型与连接",
   };
   const quick = foldCard("批量指派", `<p class="system-note">先应用到页面草稿，最后统一保存。</p>${quickGroups.map((group, index) => row(groupLabels[group] || group, `<div class="system-inline">${select(`quick-provider-${index}`, "", {"":"不修改", ...providers}, {label:groupLabels[group] || group})}${button("应用到草稿", `quick-${index}`)}</div>`)).join("")}`);
   const replacement = card("拒答替代", `${row("作用范围", select("replacement-scope", data.replacement_scope || "", {"":"按任务", role:"角色默认", window:"当前对象"}, {label:"作用范围"}))}${row("启用替代", toggle("fallback-on-refusal", Boolean(data.fallback_on_refusal), {label:"启用拒答替代"}))}${row("拒答匹配词", textField("refusal-terms", Array.isArray(data.refusal_terms) ? data.refusal_terms.join(", ") : data.refusal_terms || "", {label:"拒答匹配词"}))}<details class="system-details"><summary>替代规则</summary><textarea class="system-json" data-model-json="replacement" aria-label="替代规则">${esc(JSON.stringify(data.replacement_rules || [], null, 2))}</textarea></details>`);
-  let voice = {}; try { voice = unwrap(await api.get(`${role.model_api}/voice`)); } catch (_) {}
+  let voice = {}; try { voice = unwrap(await api.get(`${roleModel}/voice`)); } catch (_) {}
   const voiceProviders = choicesOf(voice.providers || data.voice?.providers || []);
   const voiceCard = foldCard("语音模型", row("中文语音", select("voice-zh", data.voice_zh_provider_id || voice.languages?.find(item => item.code === "zh")?.provider_id || "", {"":"跟随上级", ...voiceProviders}, {label:"中文语音"})) + row("日语语音", select("voice-ja", data.voice_ja_provider_id || "", {"":"不设置", ...voiceProviders}, {label:"日语语音"})) + row("英语语音", select("voice-en", data.voice_en_provider_id || "", {"":"不设置", ...voiceProviders}, {label:"英语语音"})) + row("合成超时", numberField("voice-timeout", data.voice_timeout_seconds || 30, "秒", {label:"合成超时"})));
-  let tts = {}; try { tts = unwrap(await api.get(`${role.model_api}/tts/providers`)); } catch (_) {}
+  let tts = {}; try { tts = unwrap(await api.get(`${roleModel}/tts/providers`)); } catch (_) {}
   const ttsItems = Array.isArray(tts.items) ? tts.items : Array.isArray(tts.providers) ? tts.providers : [];
   const ttsRows = ttsItems.map((item, index) => `<li class="system-list-item"><div><strong>${esc(item.name || "语音连接")}</strong><small>${esc(item.model || item.voice || "")}</small></div><div class="system-inline">${statusBadge(item.enable === false || item.enabled === false ? "已停用" : "已启用", item.enable === false || item.enabled === false ? "warn" : "ok")}${button("编辑", `edit-tts-${index}`)}${button("克隆", `clone-tts-${index}`)}${button("测试", `test-tts-${index}`)}${button(item.enable === false || item.enabled === false ? "启用" : "停用", `toggle-tts-${index}`)}</div></li>`).join("");
   const connections = foldCard("语音连接管理", `<ul class="system-list">${ttsRows || "<li class=\"system-empty\">暂无语音连接</li>"}</ul>${button("新建连接", "create-tts")}`);
@@ -80,7 +82,7 @@ const page = { id: "system-models", section: "系统", title: "模型与连接",
       });
       dialog.remove();
       if (!accepted) return;
-      try { await api.post(`${role.model_api}/tts/providers/update`, {provider_id: item.id, values}); message("语音连接已保存"); await page.render(root, ctx); }
+      try { await api.post(`${roleModel}/tts/providers/update`, {provider_id: item.id, values}); message("语音连接已保存"); await page.render(root, ctx); }
       catch (error) { message(error.message || "语音连接保存失败"); }
     }, {once: true});
     try { dialog.showModal(); } catch (_) { dialog.remove(); }
@@ -95,10 +97,10 @@ const page = { id: "system-models", section: "系统", title: "模型与连接",
       if (action.startsWith("quick-")) { const index = Number(action.slice(6)), group = quickGroups[index], provider = root.querySelector(`[data-ui-field="quick-provider-${index}"]`)?.value; if (provider) tasks.filter(task => groupOf(task.kind) === group).forEach(task => { const current = draft.get(task.kind) || {...task}; current.provider = provider; draft.set(task.kind, current); }); state.dirty = true; message("已应用到页面草稿"); return; }
       if (action === "test-voice" || action.startsWith("test-tts-")) { if (!await uiConfirm(root, "确认调用语音服务", "测试可能调用真实服务并产生费用。", {confirmLabel:"继续", danger:true})) return; }
       if (action.startsWith("clone-tts-") && !await uiConfirm(root, "确认克隆连接", "将新增一个语音连接副本。", {confirmLabel:"克隆"})) return;
-      if (action.startsWith("toggle-tts-")) { const item = ttsItems[Number(action.slice(11))]; await api.post(`${role.model_api}/tts/providers/update`, {provider_id:item.id, values:{enable:item.enable === false || item.enabled === false}}); message("连接状态已更新"); return; }
-      if (action.startsWith("test-tts-")) { const item = ttsItems[Number(action.slice(9))]; await api.post(`${role.model_api}/tts/providers/test`, {id:item.id}); message("测试已提交"); return; }
-      if (action.startsWith("clone-tts-")) { const item = ttsItems[Number(action.slice(10))]; await api.post(`${role.model_api}/tts/providers/clone`, {id:item.id, new_id:`${item.id}-copy`}); message("连接副本已创建"); return; }
-      if (action === "create-tts") { await api.post(`${role.model_api}/tts/providers/create`, {id:"new-provider", name:"新语音服务"}); message("新连接已创建"); return; }
+      if (action.startsWith("toggle-tts-")) { const item = ttsItems[Number(action.slice(11))]; await api.post(`${roleModel}/tts/providers/update`, {provider_id:item.id, values:{enable:item.enable === false || item.enabled === false}}); message("连接状态已更新"); return; }
+      if (action.startsWith("test-tts-")) { const item = ttsItems[Number(action.slice(9))]; await api.post(`${roleModel}/tts/providers/test`, {id:item.id}); message("测试已提交"); return; }
+      if (action.startsWith("clone-tts-")) { const item = ttsItems[Number(action.slice(10))]; await api.post(`${roleModel}/tts/providers/clone`, {id:item.id, new_id:`${item.id}-copy`}); message("连接副本已创建"); return; }
+      if (action === "create-tts") { await api.post(`${roleModel}/tts/providers/create`, {id:"new-provider", name:"新语音服务"}); message("新连接已创建"); return; }
       if (action.startsWith("edit-tts-")) { openTtsEditor(ttsItems[Number(action.slice(9))]); return; }
       const save = event.target.closest('[data-ui-save="models"]'); if (!save) return;
     } catch (error) { message(error.message || "操作未完成"); }
@@ -122,9 +124,9 @@ const page = { id: "system-models", section: "系统", title: "模型与连接",
       }
       const replacement = {replacement_rules:JSON.parse(root.querySelector('[data-model-json="replacement"]')?.value || "[]"), replacement_scope:valueFrom(root, "replacement-scope"), fallback_on_refusal:root.querySelector('[data-ui-toggle="fallback-on-refusal"]')?.getAttribute("aria-checked") === "true", refusal_terms:valueFrom(root, "refusal-terms").split(/[,，]/).map(value => value.trim()).filter(Boolean)};
       await api.post(`${role.model_api}/configure`, {kind:"replacement_rules", operation_key:api.operationKey("model-replacement"), edit_token:data.edit_token, changes:replacement});
-      await api.post(`${role.model_api}/voice/save`, {operation_key:api.operationKey("voice"), edit_token:voice.edit_token || data.edit_token, changes:{voice_zh_provider_id:valueFrom(root,"voice-zh"),voice_ja_provider_id:valueFrom(root,"voice-ja"),voice_en_provider_id:valueFrom(root,"voice-en"),voice_timeout_seconds:Number(valueFrom(root,"voice-timeout",30))}});
-      await api.post(`${role.model_api}/search/save`, {revision:search.revision, changes:{deepseek_provider_id:valueFrom(root,"deepseek-provider")}}).catch(() => {});
-      await api.post(`${role.model_api}/laya/save`, {revision:laya.revision, changes:{enabled:root.querySelector('[data-ui-toggle="laya-enabled"]')?.getAttribute("aria-checked") === "true", mode:valueFrom(root,"laya-mode"), endpoint:valueFrom(root,"laya-endpoint"), timeout_seconds:Number(valueFrom(root,"laya-timeout",30))}}).catch(() => {});
+      await api.post(`${roleModel}/voice/save`, {operation_key:api.operationKey("voice"), edit_token:voice.edit_token || data.edit_token, changes:{voice_zh_provider_id:valueFrom(root,"voice-zh"),voice_ja_provider_id:valueFrom(root,"voice-ja"),voice_en_provider_id:valueFrom(root,"voice-en"),voice_timeout_seconds:Number(valueFrom(root,"voice-timeout",30))}});
+      await api.post(`${roleModel}/search/save`, {revision:search.revision, changes:{deepseek_provider_id:valueFrom(root,"deepseek-provider")}}).catch(() => {});
+      await api.post(`${roleModel}/laya/save`, {revision:laya.revision, changes:{enabled:root.querySelector('[data-ui-toggle="laya-enabled"]')?.getAttribute("aria-checked") === "true", mode:valueFrom(root,"laya-mode"), endpoint:valueFrom(root,"laya-endpoint"), timeout_seconds:Number(valueFrom(root,"laya-timeout",30))}}).catch(() => {});
       await api.post("config/configure", {section:"budget", operation_key:api.operationKey("budget"), edit_token:budget.edit_token, changes:{enabled:root.querySelector('[data-ui-toggle="budget-enabled"]')?.getAttribute("aria-checked") === "true", daily_limit:Number(valueFrom(root,"budget-daily",0))}}).catch(() => {});
       state.dirty = false; setSaveState(root, "models", "已保存", "ok"); message("模型与连接已保存");
     } catch (error) { save.disabled = false; setSaveState(root, "models", stateText(error.message || "保存失败"), "error"); } finally { state.saving = false; }

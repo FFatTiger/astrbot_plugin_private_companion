@@ -22,7 +22,7 @@ const page = {
   id: "ability-image-materials", section: "能力", title: "生图与素材",
   async render(root, ctx) {
     ensureStyles(); root.innerHTML = `<div class="page-loading">正在读取生图能力</div>`;
-    const model = ctx.role?.model_api || "", configPath = ctx.roleWithConfig?.()?.config_api || "", materials = imageMaterialPath(ctx.role);
+    const model = ctx.roleWithConfig?.()?.model_api || ctx.role?.model_api || "", configPath = ctx.roleWithConfig?.()?.config_api || "", materials = imageMaterialPath(ctx.role);
     const [image, output, config, inventory, album] = await Promise.all([safeGet(ctx, pathJoin(model, "image")), safeGet(ctx, pathJoin(model, "image/output")), safeGet(ctx, configPath, {sections: "image.output,image_review,quota,photo.reference,wardrobe"}), safeGet(ctx, materials), safeGet(ctx, pathJoin(materials, "album"))]);
     const imageSettings = image.settings ? {...image.settings} : Object.fromEntries((Array.isArray(image.actions) ? image.actions : []).map(item => [item.id || item.action, item.enabled ?? item.registered ?? item.state === "ready"]));
     const outputSettings = {...settingsOf(output)};

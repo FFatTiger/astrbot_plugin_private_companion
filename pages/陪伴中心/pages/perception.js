@@ -37,7 +37,7 @@ const page = {
       model: role.model_api, voice: role.voice_api, image: role.image_api,
       perception: role.perception_native_api ? pathJoin(role.perception_native_api, "runtime") : "",
       native: role.perception_native_api, screen: role.screen_access_api,
-      reality: role.reality_access_api, recalls: role.reply_api ? pathJoin(role.reply_api, "recalls") : "",
+      reality: role.reality_access_api, recalls: role.reply_api && role.config_api ? pathJoin(role.reply_api, "recalls") : "",
       extensions: "integration/manifest", balance: "host-options/balance", weather: "host-options/weather", semantic: "semantic"
     };
     const reads = await Promise.all(Object.entries(paths).map(async ([key, path]) => [key, await safeGet(ctx, path, key === "recalls" ? {limit: 5} : key === "semantic" ? {target_id: ctx.target?.target_id, role_id: role.role_id} : undefined)]));
