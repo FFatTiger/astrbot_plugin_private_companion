@@ -39,7 +39,8 @@ async function request(method, path, body, options = {}) {
   const route = relative(path);
   if (transport.request) return envelope(await transport.request(method, route, body, options));
   const call = method === "GET" ? transport.apiGet(route, body, options) : transport.apiPost(route, body, options);
-  return envelope(await call);
+  // 宿主 bridge 拒绝时只把后端 message（即错误码）放进 Error.message，没有 code；补上，页面才能按码分支。
+  return envelope(await call.catch(error => { throw error?.code ? error : Object.assign(error instanceof Error ? error : problem(String(error)), {code: /^[a-z][a-z0-9_]*$/.test(error?.message || "") ? error.message : "request_failed"}); }));
 }
 
 export const api = {

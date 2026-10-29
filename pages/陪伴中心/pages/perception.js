@@ -70,7 +70,7 @@ const page = {
         const fields = Object.entries(settings).slice(0, 12).map(([key, value]) => [key, key, typeof value === "boolean" ? "bool" : typeof value === "number" ? "number" : "text", typeof value === "number" ? "" : ""]);
         const body = fields.length ? `<div data-reality-id="${esc(id)}" class="ability-form">${fieldRows(settings, fields)}</div>${buttonBar(`<button type="button" class="ability-button is-primary" data-reality-save="${esc(id)}">保存</button>`)}` : empty(item.invokable === false ? "当前能力未授权" : "没有可编辑参数");
         return `<details class="ability-more"><summary>${esc(item.name || id)}<span>${status(item.invokable === false ? "未授权" : item.state || "可用", item.invokable === false ? "muted" : "ready")}</span></summary><div class="ability-more-body">${body}</div></details>`;
-      }).join("") : empty("能力目录暂不可读"), {meta: realityItems.length ? "" : "只读"}) : "";
+      }).join("") : empty(data.reality?.installed === false ? "现实扩展未安装" : "能力目录暂不可读"), {meta: realityItems.length ? "" : "只读"}) : "";
       root.innerHTML = `<div class="page-stack">${state.notice ? `<div class="ability-notice">${esc(state.notice)}</div>` : ""}${card("感知通道总览", `<div class="ability-channel-board">${channels}</div>`, {meta: `${platformId || "当前平台"} · 16 通道`})}${balance}${weather}${native}${screenCard}${reality}${proactiveCard}${saveBar("perception", {disabled: state.busy})}</div>`;
     };
     draw();
