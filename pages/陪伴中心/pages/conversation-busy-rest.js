@@ -1,4 +1,4 @@
-import {api, card, more, ensureConversationCss, readConfig, renderFields, syncDependencies, setupEditor, pathFor} from "./conversation-shared.js";
+import {api, card, more, ensureConversationCss, readConfig, saveConfig, renderFields, syncDependencies, setupEditor, pathFor} from "./conversation-shared.js";
 import {saveBar} from "../ui.js";
 
 const yes = field => ({field, values:["true"]});
@@ -12,14 +12,14 @@ const makeState = (draft,busy,life) => ({draft,base:{...draft},available:new Set
 
 const page = {id:"conversation-busy-rest",section:"对话",title:"忙碌与休息",async render(root,ctx) {
   ensureConversationCss(); root.innerHTML = `<div class="page-loading">正在读取</div>`;
-  if (!ctx.role?.config_api && !ctx.role?.reply_api) { root.innerHTML = `<div class="page-empty">当前角色不可用</div>`; return; }
-  const [busy,life] = await Promise.all([readConfig(ctx.role,"busy_gate").catch(()=>({})),readConfig(ctx.role,"life").catch(()=>({}))]); const state = makeState(merge(busy,life),busy,life); state.onChange = () => syncDependencies(root,state.draft);
-  root.innerHTML = `<div class="page-stack conversation-page" data-busy-root>${card("忙碌时的回复与主动联系",`${renderFields(state,busyCommon)}${more(renderFields(state,busyMore))}`,{meta:"角色设置"})}${card("休息时的回复与补看",`${renderFields(state,lifeCommon,{rest_reply_mode:{probability:"概率判定",llm:"模型判定"}})}${more(renderFields(state,lifeMore))}`,{meta:"角色设置"})}${saveBar("busy-rest",{disabled:true})}</div>`;
+  if (!pathFor(ctx)) { root.innerHTML = `<div class="page-empty">当前对象没有可用的角色配置接口</div>`; return; }
+  const [busy,life] = await Promise.all([readConfig(ctx,ctx.role,"busy_gate").catch(()=>({})),readConfig(ctx,ctx.role,"life").catch(()=>({}))]); const state = makeState(merge(busy,life),busy,life); state.readonly = !ctx.configEditable; state.onChange = () => syncDependencies(root,state.draft);
+  root.innerHTML = `<div class="page-stack conversation-page" data-busy-root>${ctx.configEditable ? "" : `<p class="ui-hint">这些是角色默认设置，所有群共用；请把作用范围切到「角色默认」再修改。</p>`}${card("忙碌时的回复与主动联系",`${renderFields(state,busyCommon)}${more(renderFields(state,busyMore))}`,{meta:"角色设置"})}${card("休息时的回复与补看",`${renderFields(state,lifeCommon,{rest_reply_mode:{probability:"概率判定",llm:"模型判定"}})}${more(renderFields(state,lifeMore))}`,{meta:"角色设置"})}${saveBar("busy-rest",{disabled:true})}</div>`;
   syncDependencies(root,state.draft);
   setupEditor(root,state,"busy-rest",async()=>{
     const busyChanges={},lifeChanges={}; [...busyCommon,...busyMore,...lifeCommon,...lifeMore].forEach(spec=>{const name=spec.name;if(!state.available.has(name)||JSON.stringify(state.draft[name])===JSON.stringify(state.base[name]))return;(busyCommon.concat(busyMore).some(item=>item.name===name)?busyChanges:lifeChanges)[name]=state.draft[name];});
-    if(Object.keys(busyChanges).length){const result=await api.post(`${pathFor(ctx.role)}/configure`,{section:"busy_gate",operation_key:api.operationKey("busy-gate"),edit_token:state.busyToken,changes:busyChanges});state.busyToken=result?.edit_token||state.busyToken;}
-    if(Object.keys(lifeChanges).length){const result=await api.post(`${pathFor(ctx.role)}/configure`,{section:"life",operation_key:api.operationKey("life"),edit_token:state.lifeToken,changes:lifeChanges});state.lifeToken=result?.edit_token||state.lifeToken;}
+    if(Object.keys(busyChanges).length){const result=await saveConfig(ctx,ctx.role,"busy_gate",busyChanges,state.busyToken);state.busyToken=result?.edit_token||state.busyToken;}
+    if(Object.keys(lifeChanges).length){const result=await saveConfig(ctx,ctx.role,"life",lifeChanges,state.lifeToken);state.lifeToken=result?.edit_token||state.lifeToken;}
   });
 }};
 export default page;

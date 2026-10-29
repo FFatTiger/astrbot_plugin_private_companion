@@ -1,4 +1,4 @@
-const BUILD_ID = window.COMPANION_BUILD_ID || "20261029-02";
+const BUILD_ID = window.COMPANION_BUILD_ID || "20261029-03";
 const versioned = path => `${path}?v=${BUILD_ID}`;
 const [apiModule, uiModule, placeholderModule] = await Promise.all([
   import(versioned("./api.js")),
@@ -103,7 +103,10 @@ async function render() {
   document.body.innerHTML = `<div class="console-shell${state.navOpen ? " nav-open" : ""}"><button class="mobile-menu" type="button" data-mobile-menu aria-label="打开导航">☰</button><aside class="console-sidebar">${navMarkup()}</aside><main class="console-main"><header class="console-topbar">${topMarkup(page)}</header><section class="console-content"><div id="page-root"></div></section></main></div>`;
   const root = $("#page-root");
   if (state.loading) { root.innerHTML = `<div class="page-loading">正在读取</div>`; return; }
-  const ctx = {api, target: state.target, role: state.role, scope: state.scope, capabilities: state.capabilities, ui, roleWithConfig: (role = state.role) => roleWithConfig(role), navigate: (route) => { const [s, p] = route.replace(/^#\/?/, "").split("/"); setHash(decodeURIComponent(s), decodeURIComponent(p)); }};
+  // configEditable：角色级配置只有「角色默认」范围、或当前对象本身就是那个角色时才可写；
+  // 群目标在「当前群」范围只能看，不能改角色默认。
+  const configEditable = state.scope === "role" || state.target?.scope_kind !== "group";
+  const ctx = {api, target: state.target, role: state.role, scope: state.scope, capabilities: state.capabilities, configEditable, ui, roleWithConfig: (role = state.role) => roleWithConfig(role), navigate: (route) => { const [s, p] = route.replace(/^#\/?/, "").split("/"); setHash(decodeURIComponent(s), decodeURIComponent(p)); }};
   try { await page.render(root, ctx); } catch (_) { root.innerHTML = `<div class="page-empty">读取失败</div>`; }
 }
 

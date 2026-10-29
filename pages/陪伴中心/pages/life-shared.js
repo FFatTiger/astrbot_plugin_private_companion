@@ -128,9 +128,11 @@ export function bindForm(root, fields, base, onSave, name = "life") {
 }
 export async function safeGet(ctx, path, query) { return ctx.api.get(path, query); }
 export async function safePost(ctx, path, body) { return ctx.api.post(path, body); }
-export function configPath(role) { return role?.config_api || role?.reply_api?.replace(/\/reply$/, "/config") || ""; }
-export async function readConfig(ctx, role, sections) { return sectionData(await safeGet(ctx, configPath(role), {sections: sections.join(",")})); }
-export async function saveConfig(ctx, role, section, changes, editToken) { return safePost(ctx, `${configPath(role)}/configure`, {section, ...op(`config-${section}`), edit_token: editToken, changes}); }
+// 群角色的 config_api 为 null：配置统一归到同 role_id 的私聊角色，找不到就不可用，
+// 不再把 reply_api 改写成后端不存在的 /config。
+export function configPath(ctx, role = ctx?.role) { return ctx?.roleWithConfig?.(role)?.config_api || ""; }
+export async function readConfig(ctx, role, sections) { const path = configPath(ctx, role); if (!path) return {}; return sectionData(await safeGet(ctx, path, {sections: sections.join(",")})); }
+export async function saveConfig(ctx, role, section, changes, editToken) { const path = configPath(ctx, role); if (!path) throw new Error("当前对象没有可用的角色配置接口"); return safePost(ctx, `${path}/configure`, {section, ...op(`config-${section}`), edit_token: editToken, changes}); }
 export function pageStack(content) { return `<div class="page-stack life-page">${content}</div>`; }
 export function scopeNote(ctx, editable = true) { return editable ? `<span class="life-scope">${esc(ctx.scope === "role" ? "角色默认" : "当前对象设置")}</span>` : `<span class="life-scope muted">只读展示</span>`; }
 export function readOnlyLink(label, route, message = "") { return `${message ? `<span class="life-inline-note">${esc(message)}</span>` : ""}${link(label, route)}`; }

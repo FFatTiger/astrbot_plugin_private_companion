@@ -29,8 +29,11 @@ const page = {
   async render(root, ctx) {
     ensureStyles(); root.innerHTML = `<div class="page-loading">正在读取语义目录</div>`;
     let semantic = {}, reaction = {};
-    try { [semantic, reaction] = await Promise.all([ctx.api.get("semantic"), ctx.role?.config_api ? ctx.api.get(ctx.role.config_api, {sections: "reaction"}) : Promise.resolve({})]); } catch (_) {}
-    const group = ctx.target?.scope_kind === "group", qq = ctx.capabilities?.message_components?.face === true, configPath = ctx.role?.config_api || (ctx.role?.reply_api || "").replace(/\/reply$/, "/config");
+    // reaction 是安装级 section（multi_api.INSTALLATION_CONFIGURATION_SECTIONS 包含 proactive.contact/reaction/budget），
+    // 角色的 config 路由不收它，所以直接走安装级 config 路由；不再从 reply_api 推导 /config。
+    const configPath = "config";
+    try { [semantic, reaction] = await Promise.all([ctx.api.get("semantic"), ctx.api.get(configPath, {sections: "reaction"})]); } catch (_) {}
+    const group = ctx.target?.scope_kind === "group", qq = ctx.capabilities?.message_components?.face === true;
     const reactionSection = reaction?.sections?.reaction || reaction?.reaction || {};
     const reactionSettings = settingsOf(reactionSection);
     const state = {semanticDraft: {...settingsOf(semantic)}, reactionDraft: {...reactionSettings}, semanticToken: tokenOf(semantic), reactionToken: tokenOf(reactionSection) || tokenOf(reaction), items: catalogItems(semantic), query: "", notice: "", modal: null, busy: false};
@@ -68,8 +71,9 @@ const page = {
         try {
           let result;
           result = await postAction(ctx, "semantic", {action: "configure", changes: state.semanticDraft, revision: semantic.revision}, "semantic-configure");
-          await postChanges(ctx, configPath, state.reactionDraft, state.reactionToken, "reaction");
-          state.semanticToken = tokenOf(result) || state.semanticToken; state.reactionToken = tokenOf(result) || state.reactionToken; setSaveState(root, name, "已保存", "ok"); state.notice = "配置已保存";
+          state.semanticToken = tokenOf(result) || state.semanticToken;
+          const savedReaction = await postChanges(ctx, configPath, state.reactionDraft, state.reactionToken, "reaction");
+          state.reactionToken = tokenOf(savedReaction) || state.reactionToken; setSaveState(root, name, "已保存", "ok"); state.notice = "配置已保存";
         } catch (_) { setSaveState(root, name, "保存失败", "error"); }
         state.busy = false; draw(); return;
       }

@@ -32,7 +32,7 @@ const page = {
   async render(root, ctx) {
     ensureStyles(); root.innerHTML = `<div class="page-loading">正在读取感知通道</div>`;
     const role = ctx.role || {};
-    const configPath = role.config_api || (role.reply_api || "").replace(/\/reply$/, "/config");
+    const configPath = ctx.roleWithConfig?.()?.config_api || "";
     const paths = {
       model: role.model_api, voice: role.voice_api, image: role.image_api,
       perception: role.perception_native_api ? pathJoin(role.perception_native_api, "runtime") : "",
@@ -86,7 +86,7 @@ const page = {
       const save = event.target.closest("[data-ui-save]");
       if (save) {
         const kind = "perception"; state.busy = true; setSaveState(root, kind, "保存中");
-        try { const entries = [["balance","host-options/balance",""],["weather","host-options/weather",""],["native",pathJoin(paths.native,"configure"),""],["screen",configPath,"screen"]]; for (const [name,path,section] of entries) { if (!path || !state.drafts[name]) continue; const result = await postChanges(ctx,path,state.drafts[name],state.tokens[name],section); state.tokens[name] = tokenOf(result) || state.tokens[name]; } state.notice = "配置已保存"; setSaveState(root, kind, "已保存", "ok"); }
+        try { const entries = [["balance","host-options/balance",""],["weather","host-options/weather",""],["native",pathJoin(paths.native,"configure"),""],["screen",ctx.configEditable ? configPath : "","screen"]]; for (const [name,path,section] of entries) { if (!path || !state.drafts[name]) continue; const result = await postChanges(ctx,path,state.drafts[name],state.tokens[name],section); state.tokens[name] = tokenOf(result) || state.tokens[name]; } state.notice = "配置已保存"; setSaveState(root, kind, "已保存", "ok"); }
         catch (_) { setSaveState(root, kind, "保存失败", "error"); }
         state.busy = false; draw(); return;
       }
