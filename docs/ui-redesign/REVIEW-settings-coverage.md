@@ -77,3 +77,39 @@
 | 首页“家具按钮直切换”是否足以替代文档要求的“布置房间弹窗” | 当前家具按钮本身可切换 localStorage，但“布置房间”按钮是空动作。 | 确认是否保留直接切换并删除按钮，或实现弹窗。 |
 | 生图页面 section wrapper 问题是否已被某个未记录的 transport 解包层修正 | `api.js` 的 envelope 只解包顶层 data，不会把 `sections.<name>.settings` 提升；测试直接展示嵌套结构，因此按当前仓库代码判定为问题。 | 若线上桥接另行改写 section 结构，应把该约定写入 mock/契约并同步页面。 |
 
+
+## 修复记录（第一批）
+
+分支 `fix/center-settings`，逐条对应上方问题行。每步一个提交，最后统一把 `index.html`/`shell.js` 版本号从 `20261029-02` 升到 `20261029-03` 绕过浏览器缓存；改完对 `pages/陪伴中心` 下全部 js 做了一次 ESM 语法检查。
+
+| # | 问题 | 处理 |
+|---|---|---|
+| 1 | 首页扩展状态按 `item.state` 判断 | 已修。装配态归一化抽到 `pages/ability-shared.js` 的 `extensionStateOf`/`extensionItems`，首页与能力总览共用一份；首页徽标和动作都按归一化状态生成。 |
+| 2 | 首页“布置房间”空动作 | 已修。删除该按钮（家具逐件直切换保留），对应的 `room-edit` 分支一并移除。 |
+| 3 | 联系人备注/身份级别保存写不存在的回执节点 | 已修。`saveNickname`/`saveTier` 不再写 `[data-nickname-state]`/`[data-tier-state]`，回执统一走已有的 `saveBar("member-access")`（保存中/已保存/保存失败）。 |
+| 4 | 群详情成员 chip 无点击 | 已修。chip 点击按页面已有的 sessionStorage 约定写入 `companion-contact-person{native_account_id}` 后跳「联系人/联系人详情」，联系人详情按 `subject_id` 或 `native_account_id` 回选该成员。 |
+| 5 | 群配置字段读写走不存在的 `/config` | 已修。`api.readRole`/`api.saveConfig` 不再把 `reply_api` 改写成 `/config`；群角色改由新增的 `ctx.roleWithConfig()` 找同 `role_id` 的私聊 `config_api`，找不到即不可用。参与页在「角色默认」范围可编辑，在「当前群」范围只读并提示“这些设置所有群共用，请到「角色默认」修改”，群自己的 5 个插话字段仍在当前群可编辑。 |
+| 6 | `private_debounce_max_ms` 空值写 0、无范围 | 已修。界面按秒显示，min/max/step 取后端 `private_debounce.LIMITS`（10–120000ms → 0.01–120 秒，步长 0.01）；空值或越界不写回草稿、禁用保存并提示，保存值为原值×1000。 |
+| 7 | 两个后端不认识的诊断目的 | 已修。删除 `mobile_location`、`reaction_image`，消息测试只保留后端 `PURPOSES` 注册的 15 个目的，计数改为实际数量。 |
+| 8 | “提出成长建议”不看 `propose_enabled` | 已修。按钮仅在当前窗口 `propose_enabled` 为真时可用（非编辑范围也禁用），否则显示原因；提交前再校验一次。 |
+| 9 | `FALLBACK_REALITY` 伪造可调用能力 | 已修。删除 fallback；能力目录为空或读取失败时现实触及卡显示“能力目录暂不可读”，不生成任何可编辑项。 |
+| 10 | 屏幕设置卡只看 API 是否存在 | 已修（与第 1 条共用归一化）。改读 `integration/manifest`，仅当 screen 扩展 `extensionStateOf === "assembled"` 且 `screen_access_api` 存在时显示。 |
+| 11 | 手机连接卡插入对象变量、字段不能保存 | 已修。模板插入 `mobileCard`，字段接入草稿并通过 `extensions/configure`（与同文件其它扩展卡同一写法）保存；卡片显示条件也改按装配态判断。 |
+| 12 | 配置段未解包 `{settings, edit_token}` | 已修。生图偏好/审核/配额/参考图/衣柜、表情 `reaction` 段（含 `vision_verify_mode`）都改为 `settings` 取字段、`edit_token` 单独取，POST 的 `changes` 只放字段（对照 `tests/test_configuration_api.py` 的 `sections.<name>.settings` 结构）。 |
+| 13 | 概率字段单位 | 已修。`reactions_trigger_probability`、`reactions_collection_private/group_probability` 界面按百分数：读 ×100、写 ÷100，控件范围 0–100、步长 0.1，草稿仍存后端 0–1 小数。 |
+| 14 | `learning_interval_seconds` 单位 | 已修。界面按分钟：读 ÷60、写 ×60，范围 1–1440。 |
+| 15 | 参考图/衣柜/相册列表只在初次 render 计算 | 已修。三个列表改为从最新 state 取（`referenceItems()` 等），上传/登记/排序/撤回后 `refreshMaterials` 更新即生效。 |
+| 16 | 运行状态卡显示原始 key | 已修。建立状态键中文标签表（启用/接受投递/运行健康/私聊投递授权/群聊投递授权/投递方式/活动目标/目标数量…），`failure_code` 显示为“失败原因”、`last_error` 为“最近错误”。 |
+| 17 | 窗口拆分提交空的 `linked_target_id` | 已修（按后端实际契约）。`accounts/window-unlink`（`account_session_api.unlink_window`）校验 `set(body) == {"primary_target_id"}` 并整行解绑，所以仍发真实的 `primary_target_id`、不再发空的 `linked_target_id`；合并行改为逐项列出该行关联窗口（名称）并显示拆分按钮。**未做**“每个 linked target 一个按钮”：后端没有单条解绑路由，前端硬加会稳定报 `account_config_invalid`。 |
+| 18 | 任务附加提示词属性/监听器不一致 | 已修。textarea 统一为 `data-task-field`，input 监听改读 `dataset.taskField`，修改能进入保存的 `changes`。 |
+| 19 | `data-task-inherit` 保存时未读取 | 已修。保存时收集每个任务的“跟随上级”勾选：勾选 → `reset` 回退为继承；取消勾选且原本 `explicit === false` → 把当前值写成 `explicit` changes。只对该任务 `fields` 里真实存在的字段提交，避免未知字段被拒。 |
+| 20 | `conversation.reply` 只该禁宿主托管字段 | 已修。附加提示词本来就没加 disabled（报告中“提示词被禁”部分不成立，真正的问题是第 18 条的监听器不匹配）；现在只禁用宿主托管字段（主模型/备用模型/输出上限/超时/替代规则，对应后端 `CORE_MANAGED_FIELDS`），这些字段的高级“跟随上级”勾选框也禁用并注明由运行服务托管。 |
+| 21 | TTS“编辑”按钮无表单 | 已修。后端有 `tts/providers/update`（`{provider_id, values}`），补最小编辑弹窗：按 `item.fields` 渲染 bool/number/select/textarea，密钥留空表示不改，保存后重新读取列表。同时把 TTS 列表读成后端实际返回的 `items`（原来读 `tts.providers` 一直为空）并修正 enable 开关的提交契约（同一路由）。克隆/测试/新建三个按钮的载荷键仍与后端不符，未在本批处理。 |
+| 22 | 诊断页预览/批次路径错误 | 已修。改为实际注册的 `accounts/preview`、`accounts/batches`，按接口要求带 `target_id`（预览另带 `batch_id`）。 |
+| 23 | 其余 6 处仍在推导 `/config` | 已修（第 8 步单独提交）。`life-shared.configPath`、`conversation-shared.pathFor` 改为接收 `ctx` 并用 `ctx.roleWithConfig()?.config_api`；`perception.js`、`image-materials.js`、`default-permissions.js` 同样改用该解析；`reaction-semantics.js` 的 `reaction` 段属安装级 section（`astrbot_host/multi_api.py` 的 `INSTALLATION_CONFIGURATION_SECTIONS` 含 `proactive.contact`/`reaction`/`budget`，角色 config 路由不接受它），因此改为走安装级 `config` 路由而不是推导路径。保存在「当前群」范围（`ctx.configEditable === false`）下对这些角色级字段改为只读并提示到「角色默认」修改：默认权限与跨窗口、忙碌与休息、表达学习、理解（网页理解卡）、生图与素材。`grep 'replace(/\/reply$/'` 在 `pages/陪伴中心` 下已无命中。 |
+
+补充说明：
+
+- 修第 3 条时误留了一段 `} catch` 残句，导致 `contact-details.js` 不是合法 ESM；`node --check` 对 `.js` 在本机 Node 22 会走 CJS 探测而对带 `import` 的文件误报通过，最终改用“复制成 `.mjs` 再 `node --check`”+ 逐个 `import()` 对全部模块复验，已修复并全量通过（同一轮检查未再发现其它语法错误）。
+- 第二批范围（日程编辑弹窗、接受日程建议/写状态、单条 `accounts/group-target`、旧版资料九类导入、语音私聊/群聊覆盖、Laya 完整配置）未改动。
+- 角色节的 `role-profile.js`/`world-knowledge.js`/`role-growth-strategy.js` 仍直接用 `ctx.role.config_api`。它们不在本次列出的 6 处里，群目标下表现为“读取失败/不可用”而不是错误写入，故未扩展修改；若要统一，建议下一批一起改成 `ctx.roleWithConfig()`。
