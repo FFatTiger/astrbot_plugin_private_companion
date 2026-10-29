@@ -2,12 +2,23 @@ import {ensureStyles, esc, card, row, toggle, textField, numberField, select, sa
 
 const MODELS = [["embedding_provider", "向量模型", "select"], ["rerank_provider", "候选重排", "select"], ["analysis_provider", "视觉与词义分析", "select"]];
 const MODEL_MORE = [["timeout_seconds", "模型超时", "number", "秒"], ["batch_size", "索引批次", "number", "条"]];
-const SLANG_MORE = [["slang_web_search_candidates", "检索词数", "number", "个"], ["slang_web_search_results", "每词参考数", "number", "条"], ["learning_interval_seconds", "词义整理间隔", "number", "分钟"]];
-const SEND_FIELDS = [["reactions_trigger_probability", "自动发送概率", "number", "%"], ["reactions_cooldown_seconds", "发送间隔", "number", "秒"], ["reactions_delivery_mode", "发送位置", "select", {separate_after: "正文后单独发送", same_message: "与正文同条发送", separate_before: "正文前单独发送"}], ["reactions_image_format", "发送格式", "select", {image: "普通图片", qq_emoji: "QQ 表情"}]];
-const COLLECTION_FIELDS = [["reactions_collection_private_probability", "私聊收录概率", "number", "%"], ["reactions_collection_group_probability", "群聊收录概率", "number", "%"], ["reactions_collection_mode", "收录审核", "select", {automatic: "自动启用", confirm: "待人工确认"}]];
+const SLANG_MORE = [["slang_web_search_candidates", "检索词数", "number", "个"], ["slang_web_search_results", "每词参考数", "number", "条"], ["learning_interval_seconds", "词义整理间隔", "number", "分钟", {min: 1, max: 1440, step: 1}]];
+const SEND_FIELDS = [["reactions_trigger_probability", "自动发送概率", "number", "%", {min: 0, max: 100, step: .1}], ["reactions_cooldown_seconds", "发送间隔", "number", "秒"], ["reactions_delivery_mode", "发送位置", "select", {separate_after: "正文后单独发送", same_message: "与正文同条发送", separate_before: "正文前单独发送"}], ["reactions_image_format", "发送格式", "select", {image: "普通图片", qq_emoji: "QQ 表情"}]];
+const COLLECTION_FIELDS = [["reactions_collection_private_probability", "私聊收录概率", "number", "%", {min: 0, max: 100, step: .1}], ["reactions_collection_group_probability", "群聊收录概率", "number", "%", {min: 0, max: 100, step: .1}], ["reactions_collection_mode", "收录审核", "select", {automatic: "自动启用", confirm: "待人工确认"}]];
 const BOUNDARY_FIELDS = [["low_latency_enabled", "低延迟模式", "bool"], ["embedding_backfill_enabled", "后台补齐向量", "bool"], ["candidate_limit", "每轮候选素材数", "number", "条"], ["embedding_candidate_limit", "向量检索候选上限", "number", "条"], ["embedding_backfill_batch_size", "补齐批次大小", "number", "条"], ["embedding_backfill_interval_seconds", "补齐间隔", "number", "秒"], ["embedding_weight", "向量权重", "number", "", {step: .01}], ["embedding_score_threshold", "向量相似度门槛", "number", "", {step: .01}]];
 const VISION_MODE = ["vision_verify_mode", "视觉复核模式", "select", {off: "不复核", embedding: "仅向量命中时复核", always: "每次复核"}];
 const catalogItems = data => Array.isArray(data?.items) ? data.items : Array.isArray(data?.catalog?.items) ? data.catalog.items : [];
+// 后端存 0–1 小数（companion_v2/storage/semantic.py 的 PROBABILITY_FIELDS），界面用百分数。
+const PERCENT_FIELDS = new Set(["reactions_trigger_probability", "reactions_collection_private_probability", "reactions_collection_group_probability"]);
+const MINUTES_FIELD = "learning_interval_seconds";
+const PERCENT_OF = value => Math.round(Number(value ?? 0) * 10000) / 100;
+const FRACTION_OF = value => Math.min(100, Math.max(0, Number(value) || 0)) / 100;
+const displayDraft = draft => {
+  const next = {...draft};
+  for (const name of PERCENT_FIELDS) if (next[name] != null) next[name] = PERCENT_OF(next[name]);
+  if (next[MINUTES_FIELD] != null) next[MINUTES_FIELD] = Math.round(Number(next[MINUTES_FIELD]) / 60);
+  return next;
+};
 const itemTitle = item => item?.payload?.name || item?.payload?.term || item?.name || item?.term || "未命名素材";
 const itemImage = item => item?.thumbnail_url || item?.image_url || item?.payload?.image_url || item?.payload?.url || "";
 const providers = data => { const p = data?.providers || {}; return Object.fromEntries([...(p.embedding || []), ...(p.rerank || []), ...(p.analysis || [])].map(item => [item.id || item.name || item, item.name || item.id || item])); };
@@ -20,10 +31,11 @@ const page = {
     let semantic = {}, reaction = {};
     try { [semantic, reaction] = await Promise.all([ctx.api.get("semantic"), ctx.role?.config_api ? ctx.api.get(ctx.role.config_api, {sections: "reaction"}) : Promise.resolve({})]); } catch (_) {}
     const group = ctx.target?.scope_kind === "group", qq = ctx.capabilities?.message_components?.face === true, configPath = ctx.role?.config_api || (ctx.role?.reply_api || "").replace(/\/reply$/, "/config");
-    const reactionSettings = reaction?.sections?.reaction || reaction?.reaction || settingsOf(reaction);
-    const state = {semanticDraft: {...settingsOf(semantic)}, reactionDraft: {...reactionSettings}, semanticToken: tokenOf(semantic), reactionToken: tokenOf(reactionSettings) || tokenOf(reaction), items: catalogItems(semantic), query: "", notice: "", modal: null, busy: false};
+    const reactionSection = reaction?.sections?.reaction || reaction?.reaction || {};
+    const reactionSettings = settingsOf(reactionSection);
+    const state = {semanticDraft: {...settingsOf(semantic)}, reactionDraft: {...reactionSettings}, semanticToken: tokenOf(semantic), reactionToken: tokenOf(reactionSection) || tokenOf(reaction), items: catalogItems(semantic), query: "", notice: "", modal: null, busy: false};
     const modelChoices = providers(semantic);
-    const fields = (draft, list) => fieldRows(draft, list.map(item => item[2] === "select" && item.length < 5 ? [...item, modelChoices] : item));
+    const fields = (draft, list) => fieldRows(displayDraft(draft), list.map(item => item[2] === "select" && item.length < 5 ? [...item, modelChoices] : item));
     const actionButton = (label, name, id, danger = false) => uiActionButton(label, name, {small:true, danger, dataKey:"data-item-action", extra:`data-item-id="${esc(id || "")}"`});
     const modalFields = draft => fieldRows(draft, [["name", "名称", "text"], ["description", "描述", "textarea"], ["visible_text", "图中文字", "textarea"], ["tags", "标签（逗号分隔）", "text"], ["emotions", "情绪（逗号分隔）", "text"], ["intents", "意图（逗号分隔）", "text"], ["enabled", "允许检索", "bool"]]);
     const draw = () => {
@@ -67,7 +79,7 @@ const page = {
       if (itemButton) { const item = state.items.find(value => String(value.id) === String(itemButton.dataset.itemId)); if (!item) return; const operation = itemButton.dataset.itemAction; if (operation === "edit") { state.modal = {...(item.payload || item), id: item.id, revision: item.revision}; draw(); return; } if (operation === "delete" && !await confirmAction(`删除「${itemTitle(item)}」？`)) return; try { await postAction(ctx, "semantic", {action: operation, item_id: item.id, revision: item.revision}, `semantic-${operation}`); semantic = await ctx.api.get("semantic"); state.items = catalogItems(semantic); state.notice = operation === "delete" ? "素材已删除" : "素材已补全"; } catch (_) { state.notice = "操作未完成"; } draw(); return; }
       if (event.target.closest("[data-item-save]") && state.modal) { try { await postAction(ctx, "semantic", {action: "edit", item_id: state.modal.id, revision: state.modal.revision, updates: state.modal}, "semantic-edit"); state.modal = null; semantic = await ctx.api.get("semantic"); state.items = catalogItems(semantic); state.notice = "素材已保存"; } catch (_) { state.notice = "保存失败"; } draw(); }
     });
-    root.addEventListener("input", event => { const field = event.target.closest("[data-ui-field]"); if (field) { const key = field.dataset.uiField, value = read(field); if (state.modal) state.modal[key] = value; else if (BOUNDARY_FIELDS.some(item => item[0] === key) || key === "vision_verify_mode") state.reactionDraft[key] = value; else state.semanticDraft[key] = value; } if (event.target.matches("[data-catalog-query]")) state.query = event.target.value; });
+    root.addEventListener("input", event => { const field = event.target.closest("[data-ui-field]"); if (field) { const key = field.dataset.uiField, value = read(field); if (state.modal) state.modal[key] = value; else if (PERCENT_FIELDS.has(key)) state.semanticDraft[key] = FRACTION_OF(value); else if (key === MINUTES_FIELD) state.semanticDraft[key] = Math.round(Math.min(1440, Math.max(1, Number(value) || 1)) * 60); else if (BOUNDARY_FIELDS.some(item => item[0] === key) || key === "vision_verify_mode") state.reactionDraft[key] = value; else state.semanticDraft[key] = value; } if (event.target.matches("[data-catalog-query]")) state.query = event.target.value; });
     root.addEventListener("change", async event => { const input = event.target.closest("[data-catalog-file]"); if (!input?.files?.length) return; for (const file of [...input.files].slice(0, 20)) { const data = await new Promise(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(",")[1] || ""); reader.readAsDataURL(file); }); try { await postAction(ctx, "semantic", {action: "import", data, mime_type: file.type, metadata: {name: file.name}}, "semantic-import"); } catch (_) { state.notice = "部分素材导入失败"; } } semantic = await ctx.api.get("semantic"); state.items = catalogItems(semantic); draw(); });
   }
 };
