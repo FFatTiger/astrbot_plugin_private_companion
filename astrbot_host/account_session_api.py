@@ -118,6 +118,22 @@ class AccountSessionWebAPI:
             raise TaskError(code, reason)
         return response["data"]
 
+    async def _native_groups(self):
+        """列出原生群会话，不带“已配置”过滤。
+
+        setup/targets 只列受管窗口，因此第一次保存某个群时它必然还不在里面；
+        判断“这个群真实存在吗”必须回到底层会话目录。
+        """
+        return await self.controller.session_topology.inventory(scope_kind="group")
+
+    @staticmethod
+    def _group_present(rows, platform_id, account_id, group_id):
+        return any(row.get("scope_kind") == "group"
+                   and row.get("platform_id") == platform_id
+                   and row.get("account_id") in ("", account_id)
+                   and row.get("group_id") == group_id
+                   for row in rows)
+
     async def get(self):
         try:
             self._admin()
@@ -364,11 +380,10 @@ class AccountSessionWebAPI:
                     raise TaskError("account_group_target_account_required",
                                     "bind this Bot account and persona in account management first")
                 discovered = await self._discovered()
-                if not any(row.get("scope_kind") == "group"
-                           and row.get("platform_id") == platform_id
-                           and row.get("account_id") in ("", account_id)
-                           and row.get("group_id") == group_id
-                           for row in discovered.get("targets", [])):
+                if (not self._group_present(discovered.get("targets", []),
+                                            platform_id, account_id, group_id)
+                        and not self._group_present(await self._native_groups(),
+                                                    platform_id, account_id, group_id)):
                     issue = next((item for item in discovered.get("directory", {}).get("issues", [])
                                   if item.get("platform_id") in ("", platform_id)), None)
                     if issue:
@@ -548,10 +563,9 @@ class AccountSessionWebAPI:
                         if previous is not None and account_key(previous) == key:
                             continue
                         raise TaskError("account_config_invalid", "each window must select a configured Bot account")
-                    if kind == "group" and previous is None and not any(
-                            item.get("scope_kind") == "group" and item["platform_id"] == key[0]
-                            and item.get("account_id") in ("", key[1]) and item.get("group_id") == peer
-                            for item in discovered["targets"]):
+                    if (kind == "group" and previous is None
+                            and not self._group_present(discovered["targets"], key[0], key[1], peer)
+                            and not self._group_present(await self._native_groups(), key[0], key[1], peer)):
                         issue = next((item for item in discovered.get("directory", {}).get("issues", [])
                                       if item.get("platform_id") in ("", key[0])), None)
                         if issue:
