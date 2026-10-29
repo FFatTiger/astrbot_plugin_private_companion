@@ -1,4 +1,4 @@
-import {ensureStyles, esc, card, row, toggle, textField, numberField, select, saveBar, setSaveState, settingsOf, tokenOf, postChanges, postAction, status, empty, buttonBar, summaryGrid, more, advancedCard, pathJoin, fieldRows, confirmAction} from "./ability-shared.js";
+import {ensureStyles, esc, card, row, toggle, textField, numberField, select, saveBar, setSaveState, settingsOf, tokenOf, postChanges, postAction, status, empty, buttonBar, summaryGrid, more, advancedCard, pathJoin, fieldRows, confirmAction, extensionItems, extensionStateOf} from "./ability-shared.js";
 
 const CHANNELS = [
   ["当前日期与时间", "时空", "calendar"], ["所在地与天气", "时空", "weather"], ["天气预警", "时空", "weather_alert"], ["日历与节气", "时空", "calendar_detail"],
@@ -10,10 +10,10 @@ const BALANCE_FIELDS = [["url", "数据地址", "text"], ["user_id", "用户编�
 const WEATHER_FIELDS = [["provider", "数据源", "select", {qweather: "和风天气", open_meteo: "公开天气服务"}], ["api_key", "访问密钥", "text"], ["base_url", "地址", "text"]];
 const NATIVE_FIELDS = [["news_source_kind", "资讯源类型", "select", {host: "默认服务", disabled: "关闭", bilibili: "B 站", rss: "资讯订阅", json: "结构化数据"}], ["news_source_url", "资讯源地址", "text"], ["news_source_uid", "B 站账号编号", "text"], ["news_source_limit", "每次条数", "number", "条"]];
 const SCREEN_FIELDS = [["enabled", "启用屏幕观察", "bool"], ["recent_observation_enabled", "保存最近观测", "bool"], ["max_observations", "最近观测上限", "number", "条"]];
-const FALLBACK_REALITY = [["location", "定位"], ["mobile", "手机"], ["screen", "屏幕"], ["camera", "摄像头"], ["mihome", "米家"], ["microphone", "麦克风"], ["contacts", "联系人"], ["calendar", "日历"]];
 const safeGet = async (ctx, path, query) => { if (!path) return {}; try { return await ctx.api.get(path, query); } catch (_) { return {}; } };
 const settingData = (data, section = "") => section ? (data?.sections?.[section] || data?.[section] || {}) : settingsOf(data);
-const capabilityItems = data => Array.isArray(data?.capabilities) ? data.capabilities : data?.capabilities && typeof data.capabilities === "object" ? Object.entries(data.capabilities).map(([id, value]) => ({id, ...value})) : FALLBACK_REALITY.map(([id, name]) => ({id, name, invokable: true}));
+// 能力目录只认后端实际返回的清单；读不到就空，不按平台名猜一份“可调用”的能力。
+const capabilityItems = data => Array.isArray(data?.capabilities) ? data.capabilities : data?.capabilities && typeof data.capabilities === "object" ? Object.entries(data.capabilities).map(([id, value]) => ({id, ...value})) : [];
 const channelText = (key, data) => {
   const value = data[key] || {};
   if (key === "weather") return value?.settings?.planning_weather_location || value.location || value.status || "天气地点待配置";
@@ -38,7 +38,7 @@ const page = {
       perception: role.perception_native_api ? pathJoin(role.perception_native_api, "runtime") : "",
       native: role.perception_native_api, screen: role.screen_access_api,
       reality: role.reality_access_api, recalls: role.reply_api ? pathJoin(role.reply_api, "recalls") : "",
-      extensions: "extensions", balance: "host-options/balance", weather: "host-options/weather", semantic: "semantic"
+      extensions: "integration/manifest", balance: "host-options/balance", weather: "host-options/weather", semantic: "semantic"
     };
     const reads = await Promise.all(Object.entries(paths).map(async ([key, path]) => [key, await safeGet(ctx, path, key === "recalls" ? {limit: 5} : undefined)]));
     const data = Object.fromEntries(reads);
@@ -56,17 +56,20 @@ const page = {
       const weather = card("天气数据源", `<div data-form-kind="weather" class="ability-form">${fieldRows(state.drafts.weather, WEATHER_FIELDS)}</div>`);
       const nativeMore = `<div data-form-kind="native-more" class="ability-form">${fieldRows(state.drafts.native, NATIVE_FIELDS.slice(3))}</div>`;
       const native = paths.native ? card("原生感知设置", `<div data-form-kind="native" class="ability-form">${fieldRows(state.drafts.native, NATIVE_FIELDS.slice(0, 3))}</div>${more(nativeMore, "更多")}`) : "";
-      const screenInstalled = data.extensions?.screen?.assembled || data.extensions?.screen?.desired_state === "assembled" || Boolean(paths.screen);
+      // 屏幕设置卡只在 manifest 显示 screen 扩展已装配（assembled/desired_state）且 API 存在时出现。
+      const screenExtension = extensionItems(data.extensions).find(item => item.extension_id === "screen") || {};
+      const screenInstalled = Boolean(paths.screen) && extensionStateOf(screenExtension) === "assembled";
       const screenMore = `<div data-form-kind="screen-more" class="ability-form">${fieldRows(state.drafts.screen, SCREEN_FIELDS.slice(2))}${summaryGrid([["最近观测", data.screen?.last_observation || data.screen?.last || "暂无"]])}</div>`;
       const screenCard = screenInstalled ? card("屏幕观察", `<div data-form-kind="screen" class="ability-form">${fieldRows(state.drafts.screen, SCREEN_FIELDS.slice(0, 2))}</div>${more(screenMore, "更多")}`) : "";
       const proactiveCard = card("主动联系素材条件", `${summaryGrid([["天气", proactive.weather_enabled === false ? "未提供" : "可用"], ["资讯", proactive.news_share_enabled === false ? "未提供" : "可用"], ["余额", proactive.balance_awareness_enabled === false ? "未提供" : "可用"]])}<div class="ability-readonly-line"><span>编辑位置</span><span>生活 › 主动联系</span><button type="button" class="ability-link-button" data-nav="生活/主动联系">去设置</button></div>`);
-      const reality = paths.reality ? card("现实触及", capabilityItems(data.reality).map(item => {
+      const realityItems = capabilityItems(data.reality);
+      const reality = paths.reality ? card("现实触及", realityItems.length ? realityItems.map(item => {
         const id = item.id || item.capability_id || item.name || "capability";
         const settings = item.settings || item.config || {};
         const fields = Object.entries(settings).slice(0, 12).map(([key, value]) => [key, key, typeof value === "boolean" ? "bool" : typeof value === "number" ? "number" : "text", typeof value === "number" ? "" : ""]);
         const body = fields.length ? `<div data-reality-id="${esc(id)}" class="ability-form">${fieldRows(settings, fields)}</div>${buttonBar(`<button type="button" class="ability-button is-primary" data-reality-save="${esc(id)}">保存</button>`)}` : empty(item.invokable === false ? "当前能力未授权" : "没有可编辑参数");
         return `<details class="ability-more"><summary>${esc(item.name || id)}<span>${status(item.invokable === false ? "未授权" : item.state || "可用", item.invokable === false ? "muted" : "ready")}</span></summary><div class="ability-more-body">${body}</div></details>`;
-      }).join("")) : "";
+      }).join("") : empty("能力目录暂不可读"), {meta: realityItems.length ? "" : "只读"}) : "";
       root.innerHTML = `<div class="page-stack">${state.notice ? `<div class="ability-notice">${esc(state.notice)}</div>` : ""}${card("感知通道总览", `<div class="ability-channel-board">${channels}</div>`, {meta: `${platformId || "当前平台"} · 16 通道`})}${balance}${weather}${native}${screenCard}${reality}${proactiveCard}${saveBar("perception", {disabled: state.busy})}</div>`;
     };
     draw();
