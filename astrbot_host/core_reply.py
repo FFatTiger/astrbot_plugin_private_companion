@@ -157,6 +157,10 @@ def prepare_core_reply_event(
                                    state.get("voice_segment_count", 1))
                 if isawaitable(message):
                     message = await message
+                if isinstance(getattr(message, "chain", None), (list, tuple)) and not message.chain:
+                    # Preparation may have produced nothing to send (no matching
+                    # image, empty body).  Never hand an empty chain to a platform.
+                    return None
             from .core_reply_media_delivery import native_reply_messages, native_wire_message
             from .core_reply_voice import commit_pending_voice_claim, release_pending_voice_claim
             result = None

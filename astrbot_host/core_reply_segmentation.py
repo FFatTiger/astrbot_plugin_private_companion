@@ -8,6 +8,7 @@ import re
 
 from astrbot.core.message.components import Plain, Record
 from astrbot.core.message.message_event_result import MessageChain
+from astrbot.core.platform.astr_message_event import AstrMessageEvent
 
 from companion_v2.conversation.segmentation import SegmentationPolicy, part_gap_seconds
 from companion_v2.conversation.segment_control import LLM_SEGMENT_MARKER, controlled_parts
@@ -21,6 +22,9 @@ from .core_reply_presentation import (
 
 logger = logging.getLogger(__name__)
 MARKED = "_companion_v2_segmented"
+# Platforms whose native event has no text stream of its own, so the complete
+# replies are delivered by ``send_group_stream`` below.
+MANAGED_GROUP_STREAM_PLATFORMS = ("aiocqhttp", "wechat_helper")
 NATIVE_PROMPT = (
     "群聊正文按语意自然停顿；一两句通常就够，不为凑段数扩写。只有清楚的主题转折才拆开长文。"
     "连续标点（例如 ...？、？！）保持在同一条消息里，不要生成以孤立标点开头的气泡；称呼或短分句跟随完整回应。"
@@ -246,13 +250,45 @@ def prepare_core_reply_segmentation(event):
     event.send = send_parts
 
 
-def prepare_core_reply_streaming_boundary(event):
-    """Give a segmented private reply one complete body to plan before sending."""
+def platform_streams_to_user(event):
+    """Whether this event's own ``send_streaming`` can deliver a core stream.
+
+    AstrBot's base ``AstrMessageEvent.send_streaming`` only records a metric and
+    discards the generator, so an adapter that inherits it loses the whole
+    reply.  Comparing the original captured by ``prepare_core_reply_event``
+    keeps the answer per event instead of relying on another platform list.
+    """
     core = event.get_extra(CORE_REPLY_CONTEXT_EXTRA)
-    state = (core.get("_reply_segmentation") if isinstance(core, dict) else None)
-    if (not state or state["prepared"].get("channel") != "private"
-            or not state["policy"].enabled):
+    original = core.get("_original_send_streaming") if isinstance(core, dict) else None
+    if not callable(original):
+        return True
+    return getattr(original, "__func__", None) is not AstrMessageEvent.send_streaming
+
+
+def prepare_core_reply_streaming_boundary(event):
+    """Keep a reply off AstrBot's stream wherever this plugin cannot deliver it.
+
+    A stream handed to a platform without a text stream of its own ends in the
+    base ``send_streaming`` no-op and the whole reply disappears, so such turns
+    are kept whole.  Segmentation state can be missing (an unreadable or
+    invalid reply setting), and then ``send_group_stream`` cannot run either.
+    """
+    core = event.get_extra(CORE_REPLY_CONTEXT_EXTRA)
+    if not isinstance(core, dict):
         return
+    prepared = core.get("prepared")
+    channel = prepared.get("channel") if isinstance(prepared, Mapping) else None
+    if channel not in {"private", "group"}:
+        return
+    segmentation = core.get("_reply_segmentation")
+    policy = segmentation.get("policy") if isinstance(segmentation, dict) else None
+    if channel == "group":
+        if uses_managed_group_stream(event) or platform_streams_to_user(event):
+            return
+    elif not platform_streams_to_user(event):
+        pass  # no stream reaches the user, whatever the segmentation policy is
+    elif policy is None or not policy.enabled:
+        return  # a stream-capable adapter delivers its own stream
     setter = getattr(event, "set_extra", None)
     if not callable(setter):
         return
@@ -260,8 +296,9 @@ def prepare_core_reply_streaming_boundary(event):
     previous = getter("enable_streaming") if callable(getter) else None
     if previous is not False:
         setter("enable_streaming", False)
-        logger.debug("[CompanionV2] 私聊分段预留完整回复 event_ref=%s previous_streaming=%s",
-                     state["prepared"].get("event_ref", "unknown"), previous)
+        event_ref = prepared.get("event_ref", "unknown") if isinstance(prepared, Mapping) else "unknown"
+        logger.debug("[CompanionV2] 预留完整回复再发送 event_ref=%s channel=%s previous_streaming=%s",
+                     event_ref, channel, previous)
 
 
 def _group_under_concurrent_pressure(event):
@@ -318,11 +355,12 @@ def uses_managed_group_stream(event):
              if isinstance(core, dict) else None)
     getter = getattr(event, "get_platform_name", None)
     platform = getter() if callable(getter) else getattr(getattr(event, "platform_meta", None), "name", None)
-    return bool(state and state["prepared"].get("channel") == "group" and platform == "aiocqhttp")
+    return bool(state and state["prepared"].get("channel") == "group"
+                and platform in MANAGED_GROUP_STREAM_PLATFORMS)
 
 
 async def send_group_stream(event, generator):
-    """QQ has no native text stream: deliver complete native MessageChains."""
+    """QQ and wechat_helper have no native text stream: send native parts."""
     core = event.get_extra(CORE_REPLY_CONTEXT_EXTRA)
     state = core["_group_segmentation"]
     policy, buffered = state["policy"], None
