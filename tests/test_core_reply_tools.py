@@ -230,6 +230,33 @@ class CoreReplyToolsTests(ExternalFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.runtime.read_one("SELECT COUNT(*) n FROM conversation_batches", ())["n"], 0)
         self.assertEqual(self.event.sent, [])
 
+    async def test_generated_images_reach_the_model_only_as_cached_paths_by_default(self):
+        from unittest import mock
+
+        async def with_image(invocation):
+            return self.response(invocation, images=(picture(),))
+
+        self.extension_behavior = with_image
+        saved = []
+
+        def save_image(data, call_id, name, index, mime):
+            saved.append(base64.b64decode(data))
+            return NS(file_path=f"/tmp/{call_id}_{index}.png")
+
+        arguments = {"query": "picture"}
+        with mock.patch("astrbot_host.core_reply_tools.IMAGE_ACTIONS", frozenset({"device.play"})), \
+                mock.patch("astrbot.core.agent.tool_image_cache.tool_image_cache.save_image", save_image):
+            result = await self.call_native("device.play", arguments)
+            self.assertEqual(saved, [picture().content])
+            self.assertEqual(result["effect"], "committed")
+            self.assertTrue(result["image_paths"][0].startswith("/tmp/companion_"))
+            with mock.patch("astrbot_host.core_reply_tools.effective_settings",
+                            return_value={"keep_generated_images_in_context": True}):
+                tool = self.request.func_tool.get_tool(native_tool_name("device.play"))
+                kept = await tool.call(self.wrapper("device.play", arguments), **arguments)
+        self.assertIsInstance(kept, CallToolResult)
+        self.assertEqual(base64.b64decode(kept.content[1].data), picture().content)
+
     async def test_executor_close_stops_only_native_worker_and_preserves_shared_generation(self):
         entered, stopped = asyncio.Event(), asyncio.Event()
 

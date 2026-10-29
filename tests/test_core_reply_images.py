@@ -91,11 +91,18 @@ class CoreReplyImagesTests(NativeImageFixture, HostFixture, unittest.IsolatedAsy
         self.assertIsNotNone(tool)
         return await tool.call(wrapper, **arguments)
 
+    def image_of(self, received):
+        # Default: only the cached path reaches the model; opt-in keeps the MCP image.
+        if isinstance(received, CallToolResult):
+            return json.loads(received.content[0].text), base64.b64decode(received.content[1].data)
+        result = json.loads(received)
+        with open(result["image_paths"][0], "rb") as cached:
+            return result, cached.read()
+
     def result(self, received, color):
-        self.assertIsInstance(received, CallToolResult, received)
-        result = json.loads(received.content[0].text)
+        result, data = self.image_of(received)
         self.assertEqual((result["state"], result["effect"]), ("succeeded", "committed"), result)
-        self.assertEqual(base64.b64decode(received.content[1].data), image_bytes(color))
+        self.assertEqual(data, image_bytes(color))
         return result
 
     def assert_no_reply_work(self, event):
@@ -121,7 +128,7 @@ class CoreReplyImagesTests(NativeImageFixture, HostFixture, unittest.IsolatedAsy
         self.result(generated, "red")
         self.assertEqual(gate._used(self.context, scope, self.clock.now()), 1)
         replay = await self.call(event, request, "image.generate", {"prompt": "红色"}, "quota-first")
-        self.assertEqual(replay.content, generated.content)
+        self.assertEqual(replay, generated)
         denied = await self.call(event, request, "image.generate", {"prompt": "红色"}, "quota-second")
         self.assertEqual(json.loads(denied)["code"], "image_quota_exhausted")
         self.assertEqual(len(self.image_backend.calls), 1)
@@ -244,7 +251,7 @@ class CoreReplyImagesTests(NativeImageFixture, HostFixture, unittest.IsolatedAsy
         edited = await self.call(event, request, "image.edit", {"prompt": "蓝色", "artifact_id": artifact}, "edit")
         self.result(edited, "blue")
         replay = await self.call(event, request, "image.generate", {"prompt": "红色"}, "generate")
-        self.assertEqual(replay.content, generation.content)
+        self.assertEqual(replay, generation)
         self.assertEqual(len(self.image_backend.calls), 2)
         self.assertEqual(len(self.image_backend.calls[1][1]), 1)
         album = self.app.messages.generated_images
@@ -284,9 +291,9 @@ class CoreReplyImagesTests(NativeImageFixture, HostFixture, unittest.IsolatedAsy
         event, request = self.prepare("native-mask-input", (image_bytes("red"), mask_bytes.getvalue()))
         received = await self.call(event, request, "image.mask_edit", {
             "prompt": "蓝色", "source_index": 0, "mask_index": 1}, "mask-input")
-        self.assertIsInstance(received, CallToolResult, received)
-        self.assertEqual(json.loads(received.content[0].text)["state"], "succeeded")
-        with PILImage.open(io.BytesIO(base64.b64decode(received.content[1].data))) as final:
+        result, data = self.image_of(received)
+        self.assertEqual(result["state"], "succeeded")
+        with PILImage.open(io.BytesIO(data)) as final:
             self.assertEqual(final.getpixel((0, 0)), (0, 0, 255))
             self.assertEqual(final.getpixel((1, 0)), (255, 0, 0))
         references = self.image_backend.calls[0][1]

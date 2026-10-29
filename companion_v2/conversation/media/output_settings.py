@@ -91,6 +91,8 @@ DEFAULTS = {
     "selfie_negative_prompt": "inconsistent facial features",
     "edit_negative_prompt": "unrequested redesign, identity change",
     "scene_presets_json": json.dumps(DEFAULT_SCENE_PRESETS, ensure_ascii=False, separators=(",", ":")),
+    # 生成的原图默认不回灌给对话模型：核心会把它整张 base64 存进对话历史，几轮就撑爆请求体。
+    "keep_generated_images_in_context": False,
 }
 
 

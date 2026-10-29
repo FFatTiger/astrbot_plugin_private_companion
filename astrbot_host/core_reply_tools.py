@@ -18,6 +18,8 @@ from companion_v2.agenda.models import AgendaTarget, MemoCursor
 from companion_v2.conversation.agenda_tools import AgendaRoleSession
 from companion_v2.conversation.tool_loop import READ_ACTIONS
 from companion_v2.conversation.native_tool_media import native_image_data
+from companion_v2.conversation.media.generated import IMAGE_ACTIONS
+from companion_v2.conversation.media.output_settings import effective_settings
 from companion_v2.execution.models import TaskContext, TaskError, digest, encode, require
 from companion_v2.foundation.outcome import Outcome
 from companion_v2.foundation.refs import OperationRef, ScopeKind, VersionRef
@@ -436,6 +438,16 @@ class CoreReplyToolSession:
                 result = self._read(offered.owner, action, arguments)
             await self.authorize(wrapper)
             images = result.pop("_images", ())
+            if images and action in IMAGE_ACTIONS and not effective_settings(
+                    self.application.runtime, self.context)["keep_generated_images_in_context"]:
+                # Only the cached path reaches the model, so the core neither shows it the
+                # picture nor stores the full base64 in conversation history.
+                from astrbot.core.agent.tool_image_cache import tool_image_cache
+                paths = [tool_image_cache.save_image(native_image_data(image), "companion_" + image.descriptor.content_hash[:32],
+                                                     native_tool_name(action), index, image.descriptor.mime_type).file_path
+                         for index, image in enumerate(images)]
+                return encode({**result, "image_paths": paths,
+                               "image_note": "图片未放进你的上下文，看不到画面；用 send_message_to_user 按 image_paths 原路径投递。"})
             if images:
                 return CallToolResult(content=[TextContent(type="text", text=encode(result)),
                     *(ImageContent(type="image", data=native_image_data(image), mimeType=image.descriptor.mime_type)
