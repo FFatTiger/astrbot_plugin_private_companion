@@ -1,7 +1,7 @@
 import {card, saveBar, setSaveState, link} from "../ui.js";
 import {ensureStyles, contactGroups, contactFields, contactPurposeNames, contactSpec, contactChoices, safeGet, safePost, op, formRows, fieldControl, detailsCard, readonlyRows, pageStack, notice, actions, lifeButton, confirm, scopeNote, esc, valueOf, bindForm, applyDependencies, bindNavigation} from "./life-shared.js";
 
-const purposeLabels = {affection:"想念与亲近",care:"情绪关怀",play:"轻松互动",repair:"关系修复",chat:"日常话题",greeting:"问候与纪念",followup:"接回旧话题",invitation:"共同活动邀请",reminder:"约定与提醒",meal:"饭点话题",life:"分享自己的生活",creation:"作品与阅读",news:"外部资讯",environment:"环境与状态变化",screen:"已授权屏幕观察",mobile_location:"手机地点主动消息",reaction_image:"带图主动消息"};
+const purposeLabels = {affection:"想念与亲近",care:"情绪关怀",play:"轻松互动",repair:"关系修复",chat:"日常话题",greeting:"问候与纪念",followup:"接回旧话题",invitation:"共同活动邀请",reminder:"约定与提醒",meal:"饭点话题",life:"分享自己的生活",creation:"作品与阅读",news:"外部资讯",environment:"环境与状态变化",screen:"已授权屏幕观察"};
 const purposeFields = contactPurposeNames.flatMap(name => [
   {name:`purpose.${name}.enabled`, label:`${purposeLabels[name]} · 启用`, type:"bool", default:true},
   {name:`purpose.${name}.weight`, label:`${purposeLabels[name]} · 相对权重`, type:"number", step:.01, default:1},
@@ -32,8 +32,9 @@ function renderGroups(settings, readonly = false, readonlyNames = new Set()) {
   }).join("");
 }
 function diagnosticCard() {
-  const tests = [...contactPurposeNames, "mobile_location", "reaction_image"];
-  return `<details class="console-card life-details"><summary class="card-title"><span>消息测试</span><small>17 项</small></summary><div class="card-body"><p class="life-card-note">选择测试目的后确认真实投递。</p><div class="life-diagnostic-grid">${tests.map(name => lifeButton(purposeLabels[name], `diagnostic:${name}`, {secondary:true})).join("")}</div></div></details>`;
+  // 诊断目的必须是后端 PURPOSES 注册表的子集（companion_v2/proactive/configuration.PURPOSES）。
+  const tests = [...contactPurposeNames];
+  return `<details class="console-card life-details"><summary class="card-title"><span>消息测试</span><small>${tests.length} 项</small></summary><div class="card-body"><p class="life-card-note">选择测试目的后确认真实投递。</p><div class="life-diagnostic-grid">${tests.map(name => lifeButton(purposeLabels[name], `diagnostic:${name}`, {secondary:true})).join("")}</div></div></details>`;
 }
 
 const page = {
