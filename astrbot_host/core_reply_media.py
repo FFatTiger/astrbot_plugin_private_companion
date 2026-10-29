@@ -23,6 +23,9 @@ from .media import load_native_image
 
 
 QUOTED_IMAGE_OWNER = "conversation.native_quoted_attachments"
+# A host without a history channel can only authenticate its own messages. A
+# quoted author it never identified keeps this explicit marker, never a guess.
+HOST_QUOTE_UNKNOWN_SENDER = "host-quote-unknown"
 
 
 def _identifier(value):
@@ -43,8 +46,15 @@ class _QuotedImages:
     client: object = field(repr=False, compare=False)
 
     @property
+    def host_reads_history(self):
+        """Only a host with an OneBot action channel can re-read the original."""
+        return self.client._call_action is not None
+
+    @property
     def needs_lookup(self):
-        return not self.images or self.sender_id is None
+        # A host that cannot read history supplied the quote itself, so its
+        # Reply chain is the original; only a missing attachment needs a read.
+        return not self.images or self.sender_id is None and self.host_reads_history
 
 
 def frozen_image_locators(event):
@@ -84,7 +94,19 @@ async def _quoted_images(quote, context, check):
 
 async def _resolve_quoted_images(quote, context, check):
     sender, sent_at, images = quote.sender_id, quote.sent_at, quote.images
-    if quote.needs_lookup:
+    if not quote.host_reads_history:
+        # This host cannot read a message back: the admitted Reply is the only
+        # original there is, so a quote without its attachment stays unavailable
+        # instead of guessing at one.
+        if not images:
+            raise TaskError("host_quote_unavailable",
+                            "the host delivered this quote without its original attachment")
+        if sender is None:
+            # The host only marks its own messages. In a private exchange the
+            # remaining author can only be the peer; elsewhere it stays unknown.
+            sender = (context.scope.native_scope_id if context.scope.kind is ScopeKind.PRIVATE
+                      else HOST_QUOTE_UNKNOWN_SENDER)
+    elif quote.needs_lookup:
         await check()
         if OneBotClient._resolve_call_action(quote.event) != quote.client._call_action:
             raise TaskError("host_quote_account_changed", "the original quote connection changed")
