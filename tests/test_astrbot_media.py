@@ -42,6 +42,28 @@ class StaticImageLoaderTests(unittest.IsolatedAsyncioTestCase):
                 session.assert_not_called()
         self.assertEqual(public_url("https://public.example/image?download=1"), "https://public.example/image?download=1")
 
+    async def test_only_core_preprocessed_temp_copies_are_read_from_disk(self):
+        import os
+        import tempfile
+        data = image_bytes()
+        with tempfile.TemporaryDirectory() as root:
+            temp, outside = os.path.join(root, "temp"), os.path.join(root, "secret")
+            os.makedirs(os.path.join(temp, "nested"))
+            os.makedirs(outside)
+            for directory in (temp, os.path.join(temp, "nested"), outside):
+                with open(os.path.join(directory, "image.png"), "wb") as handle:
+                    handle.write(data)
+            os.symlink(os.path.join(outside, "image.png"), os.path.join(temp, "link.png"))
+            with patch("astrbot.core.utils.astrbot_path.get_astrbot_temp_path", return_value=temp):
+                captured = await load_native_image(NativeImageLocator(2, os.path.join(temp, "image.png")))
+                self.assertEqual((captured.descriptor.position, captured.content), (2, data))
+                for path in (os.path.join(outside, "image.png"), os.path.join(temp, "nested", "image.png"),
+                             os.path.join(temp, "link.png"), os.path.join(temp, "..", "secret", "image.png")):
+                    with self.subTest(path=path), patch("astrbot_host.media.aiohttp.ClientSession") as session:
+                        with self.assertRaises(TaskError):
+                            await load_native_image(NativeImageLocator(0, path))
+                        session.assert_not_called()
+
     async def test_dns_result_used_by_connector_rejects_private_or_mixed_addresses(self):
         resolver = PublicImageResolver()
         self.addAsyncCleanup(resolver.close)

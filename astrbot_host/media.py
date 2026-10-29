@@ -5,6 +5,7 @@ import base64
 import hashlib
 import io
 import ipaddress
+import os
 from urllib.parse import urljoin
 import warnings
 
@@ -115,6 +116,30 @@ def inspect_image(content, position):
         raise TaskError("host_image_invalid", "image bytes could not be verified") from None
 
 
+def core_temp_image(value):
+    """A copy AstrBot's preprocess stage wrote into its own temp directory, or None.
+
+    Preprocessing replaces every inbound and quoted image with such a copy, so a
+    platform without public image URLs (wechat_helper sends base64) reaches the
+    plugin as a local path. Only files directly inside that directory are trusted.
+    """
+    from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
+
+    if type(value) is not str or not os.path.isabs(value):
+        return None
+    path = os.path.realpath(value)
+    if os.path.dirname(path) != os.path.realpath(get_astrbot_temp_path()) or not os.path.isfile(path):
+        return None
+    return path
+
+
+def _read_core_temp_image(path):
+    if os.path.getsize(path) > MAX_IMAGE_BYTES:
+        raise TaskError("host_image_limit", "image exceeds the intake byte budget")
+    with open(path, "rb") as handle:
+        return handle.read(MAX_IMAGE_BYTES + 1)
+
+
 async def load_native_image(locator):
     if not isinstance(locator, NativeImageLocator):
         raise TaskError("host_image_location_invalid", "image intake needs a frozen host component")
@@ -125,6 +150,8 @@ async def load_native_image(locator):
             if len(encoded) > (MAX_IMAGE_BYTES + 2) // 3 * 4:
                 raise TaskError("host_image_limit", "image exceeds the intake byte budget")
             content = base64.b64decode(encoded, validate=True)
+        elif (path := core_temp_image(value)) is not None:
+            content = await asyncio.to_thread(_read_core_temp_image, path)
         else:
             # Do not interpret a network message's file/path field as local disk authority.
             content = await fetch_image(value)
