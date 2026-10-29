@@ -49,7 +49,7 @@ GROUP_CONTINUATION_DEFAULTS = {"group_conversation_followup_enabled": True,
                                "group_conversation_followup_seconds": 120,
                                "group_conversation_followup_max_turns": 3}
 GROUP_CONTINUATION_LIMITS = {"group_conversation_followup_seconds": (15, 1800),
-                             "group_conversation_followup_max_turns": (1, 12)}
+                             "group_conversation_followup_max_turns": (1, 999)}
 GROUP_WAKEUP_LEGACY_FIELDS = frozenset(("group_wakeup_enabled", "group_wakeup_direct_words",
                                         "group_wakeup_context_words", "group_wakeup_interest_keywords",
                                         "group_wakeup_question_enabled"))
