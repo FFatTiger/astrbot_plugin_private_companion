@@ -124,6 +124,12 @@ class CoreReplyRoleStateTests(unittest.IsolatedAsyncioTestCase):
                 prompt = build_core_reply_prompt(application, context, native_input, at=AT)
 
                 self.assertIn("role_state", prompt.sections)
+                self.assertNotIn("role_place", prompt.sections)
+                placed = build_core_reply_prompt(application, context, native_input, at=AT,
+                                                 role_place={"role_location": "深圳福田", "condition": "晴"})
+                self.assertIn("role_place", placed.sections)
+                self.assertIn("【角色所在地】", placed.context_instruction)
+                self.assertIn("深圳福田", placed.context_instruction)
                 self.assertIn("角色当前状态", prompt.context_instruction)
                 self.assertIn("精力很低", prompt.context_instruction)
                 self.assertIn("可感知的状态色彩", prompt.context_instruction)

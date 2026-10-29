@@ -200,6 +200,21 @@ class RoleToolLoopTests(ToolLoopFixture, unittest.IsolatedAsyncioTestCase):
         group = SimpleNamespace(scope=SimpleNamespace(kind=ScopeKind.GROUP))
         self.assertEqual({tool.action for tool in self.tools.weather.catalog_for(group)}, {"weather.current"})
 
+    async def test_reply_reading_carries_the_role_city_and_weather_or_just_the_city(self):
+        weather = self.tools.weather
+        self.assertIsNone(await weather.reading(self.context, observed_at=self.clock.now()))
+        self.weather_settings.enabled = True
+        self.weather_settings.location = json.dumps({"name": "深圳福田", "latitude": 22.5, "longitude": 114.1},
+                                                   ensure_ascii=False)
+        place = await weather.reading(self.context, observed_at=self.clock.now())
+        self.assertEqual((place["role_location"], place["condition"], place["temperature_c"]), ("深圳福田", "晴", 22.5))
+
+        async def slow(_location):
+            await asyncio.sleep(1)
+        self.weather_port.fetch = slow
+        place = await weather.reading(self.context, observed_at=self.clock.now(), timeout=0.01)
+        self.assertEqual(place, {"role_location": "深圳福田"})
+
     async def test_create_read_continue_keeps_original_role_configuration_and_accounting(self):
         async def respond(envelope):
             if not envelope.tool_history:

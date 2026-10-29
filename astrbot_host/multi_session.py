@@ -973,8 +973,17 @@ class MultiHostSession:
                             except Exception as error:
                                 logger.warning("[CompanionV2] 关键词材料未注入 error_type=%s",
                                                type(error).__name__)
+                        role_place = None
+                        weather = getattr(self.application.tools, "weather", None)
+                        if weather is not None:
+                            try:
+                                role_place = await weather.reading(context, observed_at=self.now())
+                            except Exception as error:
+                                logger.warning("[CompanionV2] 角色所在地未注入 error_type=%s",
+                                               type(error).__name__)
                         prompt = build_core_reply_prompt(self.application, context, captured, at=self.now(),
-                                                         keyword_materials=keyword_entries)
+                                                         keyword_materials=keyword_entries,
+                                                         role_place=role_place)
                         prompt_instruction = getattr(prompt, "context_instruction", prompt.instruction)
                         stable_prompt_instruction = getattr(prompt, "stable_instruction", "")
                         context_sections = prompt.sections

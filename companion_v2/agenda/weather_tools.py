@@ -52,6 +52,27 @@ class WeatherTools:
             return ()
         return self.catalog
 
+    async def reading(self, context, *, observed_at, timeout=2):
+        """The role's city and, when the source answers in time, its current weather.
+
+        Read before every reply; returns None when weather is not configured. A slow
+        source only drops the weather fields: the cached port keeps fetching in the
+        background, so the next turn usually hits its cache.
+        """
+        try:
+            _values, location, max_age = self._configuration(context)
+        except (TaskError, ConfigurationError):
+            return None
+        place = {"role_location": location.name}
+        if self.port is None:
+            return place
+        try:
+            snapshot = await asyncio.wait_for(self.port.fetch(location), timeout=timeout)
+        except Exception:
+            return place
+        material = planning_weather_material(snapshot, location, observed_at, max_age=max_age)
+        return material if self._valid_material(material) else place
+
     async def execute(self, run, context, arguments, *, observed_at):
         if type(arguments) is not dict or arguments:
             return {"state": "failed", "code": "invalid_tool_arguments", "effect": "none"}

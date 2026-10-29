@@ -45,6 +45,10 @@ CURRENT_TIME_INSTRUCTION = """current_local_time 是系统时钟按当前窗口�
 感知本轮 current_local_time 与最近历史消息时间戳的跨度：同一对话流内直接自然接话；隔了半天、隔夜或隔了几天再聊时，自然体现重逢或时隔感，不把几天前的话头当成上一秒刚说完直接硬接。
 时间只在相关时使用，不主动报时。用户说“还早”等话时结合玩笑、夸张或时区差异理解；只有对方问几点，或会影响实际安排时，才简短说明或确认，不据此推断对方已经睡着、刚起床或正在等待。
 用户问日期、星期、几点或“今天是什么日子”这类直接问题时，给出答案就够：不为了接话把别的话题、旧话头或对方没说过的半句话缀在后面。"""
+ROLE_PLACE_INSTRUCTION = (
+    "role_location 是你自己常住的城市，不是聊天对象的位置；带天气字段时是当地实况，按 observed_at 理解时效。"
+    "被问到住哪、那边天气或出门合不合适时据此回答，不必每轮主动提起或报天气。"
+)
 SENT_CONTINUATION_INSTRUCTION = (
     SENT_MESSAGE_INSTRUCTION +
     "这些是你自己在当前窗口已经发出的消息，可能尚未出现在 AstrBot 的普通会话历史中。"
@@ -223,7 +227,7 @@ def _input_received_at(native_input, fallback):
     return getattr(native_input, "at", None) or getattr(native_input, "received_at", None) or fallback
 
 
-def build_core_reply_prompt(application, context, native_input, *, at, keyword_materials=()):
+def build_core_reply_prompt(application, context, native_input, *, at, keyword_materials=(), role_place=None):
     """Build optional background independently; no failed section blocks reply."""
     blocks, stable_blocks, sections, expression_signal_ids = [], [], [], []
     measured, started = [], time.monotonic()
@@ -485,6 +489,9 @@ def build_core_reply_prompt(application, context, native_input, *, at, keyword_m
 
         optional("group_memory", group_memory)
         optional("role_state", role_state)
+    # Read asynchronously by the caller (WeatherTools.reading); same for private and group.
+    if role_place:
+        optional("role_place", lambda: "\n\n【角色所在地】\n" + ROLE_PLACE_INSTRUCTION + "\n" + json.dumps(role_place, ensure_ascii=False))
 
     def expression_style():
         from companion_v2.expression.configuration import read_settings
