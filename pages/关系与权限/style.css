@@ -615,6 +615,7 @@ select:focus-visible, textarea:focus-visible { outline: 3px solid color-mix(in s
 .member-field input:disabled, .member-field textarea:disabled { opacity: .6; }
 .member-remark-body { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 14px; align-items: end; }
 .member-remark-body .secondary { min-height: 40px; font-size: 12px; }
+.member-remark-actions { display: flex; gap: 8px; }
 /* ── 身份阶梯 ──────────────────────────────────────────────────────
    不是三个并排卡片，而是一把逐级收窄的阶梯：核心 100% → 重要 90% → 普通 80%，
    核心在最上。选中那一级整条填成等级色，"权限抬升"这件事有了形状。 */

@@ -1293,6 +1293,7 @@
     window.CompanionPrivateMembers.mount(panel, selected, {
       bridge, groupLabel: id => groupLabel(groupById(id)),
       openGroup: id => navigateToGroup(id),
+      reload: () => load({preserveNotice: true}),
       onChanged(person, patch, {identity = false} = {}) {
         if (!data) return;
         memberChangeSequence++;
@@ -1304,7 +1305,9 @@
           const selectedRoute = routeIdentity(person);
           updated.display_routes = item.display_routes.map(route => routeIdentity(route) === selectedRoute
             ? {...route, ...patch} : route);
-          if (patch.revision !== undefined) {
+          // 没有受管私聊窗口的群友没有归属快照，修订号就是成员记录自己的；
+          // 只有存在归属快照时才需要从它们里面取最大值。
+          if (patch.revision !== undefined && updated.display_routes.length) {
             updated.revision = Math.max(0, ...updated.display_routes.map(route => number(route.revision)));
           }
           return updated;

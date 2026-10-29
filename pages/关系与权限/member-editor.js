@@ -593,19 +593,31 @@
     return pane;
   }
   function directoryRemark(state, person) {
-    const remark = block("目录备注", "");
+    const remark = block("目录备注", "管理员备注只影响这位成员在页面与提示词里的称呼，没有私聊窗口也能设置。");
     const label = element("label", undefined, "member-field");
     label.append(element("span", "目录显示名称"));
+    const saved = person.admin_nickname || "";
     const input = element("input"); input.type = "text"; input.maxLength = 64; input.value = state.nickname;
     input.setAttribute("aria-label", "目录显示名称"); input.placeholder = "留空使用平台名称";
-    input.disabled = state.busy || !person.revision;
-    input.addEventListener("input", () => { state.nickname = input.value; });
+    label.append(input, element("small", saved ? `已保存：${saved}（${nameBasisLabels[nameBasisOf(person)] || "管理员备注"}）`
+      : "已保存：未设置，留空时使用平台名称"));
+    const actions = element("div", undefined, "member-remark-actions");
     const button = element("button", "保存备注", "secondary"); button.type = "button";
-    button.disabled = state.busy || !person.revision;
+    const clear = element("button", "清空备注", "secondary"); clear.type = "button";
+    // 输入框改动只更新草稿；按钮可用性要跟着当前草稿走，否则输入后按钮仍是禁用的。
+    const sync = () => {
+      const locked = Boolean(state.busy || state.loading || !person.revision);
+      input.disabled = locked;
+      button.disabled = locked || state.nickname === saved;
+      clear.disabled = locked || !saved;
+    };
+    input.addEventListener("input", () => { state.nickname = input.value; sync(); });
     button.addEventListener("click", () => saveNickname(person, state));
-    label.append(input);
+    clear.addEventListener("click", () => { state.nickname = ""; void saveNickname(person, state); });
+    actions.append(button, clear);
     remark.body.className += " member-remark-body";
-    remark.body.append(label, button);
+    remark.body.append(label, actions);
+    sync();
     return remark.root;
   }
   function permissionRow(state, person, item) {
@@ -1250,11 +1262,20 @@
     body.setAttribute("role", "tabpanel"); body.setAttribute("aria-labelledby", "member-tab-" + state.pane);
     const canConfigure = Boolean(current.route && current.route.private_target === true
       && current.route.settings_available === true);
+    // 目录备注只挂在成员记录上，没有受管私聊窗口的群友也应该能改称呼。
+    const remarkOnly = !canConfigure && routes.length <= 1 && Boolean(person.revision && person.platform
+      && person.bot_id && person.account_id && person.role_id);
     if (state.pane === "history") body.append(historyPane(current.person, services));
-    else if (!current.route) body.append(element("p", routes.length > 1
-      ? "此成员对应多个内部归属。选择一个后，页面会读取该归属的资料与权限。"
-      : "此成员尚未建立当前账号与人格下可管理的 V2 私聊窗口，资料和权限暂时只读。", "member-unavailable"));
-    else if (!canConfigure) body.append(element("p", "此成员尚未建立当前账号与人格下可管理的 V2 私聊窗口，资料和权限暂时只读。", "member-unavailable"));
+    else if (!current.route) {
+      body.append(element("p", routes.length > 1
+        ? "此成员对应多个内部归属。选择一个后，页面会读取该归属的资料与权限。"
+        : "此成员尚未建立当前账号与人格下可管理的 V2 私聊窗口，资料和权限暂时只读。", "member-unavailable"));
+      if (remarkOnly) body.append(directoryRemark(state, person));
+    }
+    else if (!canConfigure) {
+      body.append(element("p", "此成员尚未建立当前账号与人格下可管理的 V2 私聊窗口，资料和权限暂时只读。", "member-unavailable"));
+      if (remarkOnly) body.append(directoryRemark(state, person));
+    }
     else if (state.pane === "access") body.append(accessPane(state, person));
     else if (state.pane === "relationship") {
       if (state.settingsError) body.append(retry(state, person, state.settingsError));
@@ -1421,19 +1442,33 @@
     }
     state.busy = false; redraw(state);
   }
+  function remarkRoute(person) {
+    // 备注挂在一条成员记录上：有受管私聊窗口时用选中的归属，没有时用成员自己的记录。
+    const route = current?.route || person;
+    return ["platform", "bot_id", "account_id", "role_id"].every(key => route?.[key]) ? routeOf(route) : null;
+  }
   async function saveNickname(person, state) {
-    if (state.busy) return;
+    const route = remarkRoute(person);
+    if (state.busy || !route) return;
     const services = current.services, nickname = state.nickname;
     if (state.pendingNickname?.value !== nickname) state.pendingNickname = {value: nickname, key: operation()};
     state.busy = true; redraw(state);
     try {
       const result = unwrap(await services.bridge.apiPost(ROOT + "/admin-name", {subject_id: person.subject_id,
-        ...routeOf(person), native_account_id: person.native_account_id, admin_nickname: nickname,
-        expected_revision: person.revision, operation_key: state.pendingNickname.key}));
+        ...route, native_account_id: person.native_account_id, admin_nickname: nickname,
+        expected_revision: (current?.route || person).revision, operation_key: state.pendingNickname.key}));
       state.pendingNickname = null;
+      state.nickname = result.admin_nickname || "";
       services.onChanged?.(person, result);
       notify(state, "面板备注已保存。");
-    } catch (error) {notify(state, errorText(error), true);}
+    } catch (error) {
+      if (error.code === "person_nickname_revision_conflict") {
+        state.pendingNickname = null;
+        try { await services.reload?.(); } catch (_) { /* 重新读取失败时保留当前草稿 */ }
+        state.nickname = activePerson()?.admin_nickname || "";
+      }
+      notify(state, errorText(error), true);
+    }
     state.busy = false; redraw(state);
   }
   function mount(panel, person, services) {
