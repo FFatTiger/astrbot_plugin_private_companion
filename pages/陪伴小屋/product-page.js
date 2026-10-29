@@ -364,8 +364,10 @@ window.CompanionProduct = (() => {
     item.display_name ? 1 : 0,
   ];
   const prefersTarget = (candidate, current) => {
+    // Lexicographic: a private window outranks a named group window.
     const left = targetPreference(candidate), right = targetPreference(current);
-    return left.some((value, index) => value !== right[index] && value > right[index]);
+    const index = left.findIndex((value, position) => value !== right[position]);
+    return index >= 0 && left[index] > right[index];
   };
   const roleChoices = () => {
     const choices = new Map();
