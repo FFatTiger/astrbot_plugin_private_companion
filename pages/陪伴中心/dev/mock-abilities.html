@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>陪伴中心 · 能力 Mock</title>
+<link rel="icon" href="../favicon.svg"><link rel="stylesheet" href="../tokens.css"><link rel="stylesheet" href="../shell.css">
+</head>
+<body>
+<script src="./mock-data.js"></script>
+<script>
+(() => {
+  const token = "m".repeat(64);
+  const targetType = new URLSearchParams(location.search).get("target") || "wechat";
+  const targets = window.CompanionMockLive.targets();
+  const semantic = {settings:{enabled:true,memory_enabled:true,slang_enabled:true,slang_learning:true,slang_web_search_enabled:true,slang_web_search_candidates:3,slang_web_search_results:2,learning_interval_seconds:3600,embedding_provider:"embed",rerank_provider:"rerank",analysis_provider:"vision",timeout_seconds:8,batch_size:24,reactions_enabled:true,reactions_private_enabled:true,reactions_group_enabled:true,reactions_proactive_enabled:false,reactions_collection_private_enabled:true,reactions_collection_group_enabled:true,reactions_collection_private_probability:.5,reactions_collection_group_probability:.3,reactions_collection_mode:"confirm",reactions_trigger_probability:.2,reactions_cooldown_seconds:180,reactions_delivery_mode:"separate_after",reactions_image_format:"image",vision_review:true},revision:2,providers:{embedding:[{id:"embed",name:"Embedding Demo"}],rerank:[{id:"rerank",name:"Rerank Demo"}],analysis:[{id:"vision",name:"Vision Demo"}]},selection_ready:true,items:[{id:"meme-1",name:"开心",kind:"reaction",thumbnail_url:"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Crect width='120' height='120' fill='%23f3c969'/%3E%3Ctext x='60' y='68' text-anchor='middle' font-size='42'%3E:%29%3C/text%3E%3C/svg%3E"},{id:"meme-2",name:"拍拍",kind:"reaction"}]};
+  const reaction = {settings:{low_latency_enabled:false,embedding_backfill_enabled:true,candidate_limit:6,embedding_candidate_limit:120,embedding_backfill_batch_size:24,embedding_backfill_interval_seconds:300,embedding_weight:1,embedding_score_threshold:.42,vision_verify_mode:"embedding"},edit_token:token};
+  const output = {settings:{enabled:true,revision:3,operation_routes:{generate:["online-1"],edit:["online-1"]},endpoints:[{id:"online-1",name:"家庭生图",platform:"openai",model:"flare",base_url:"https://image.example/v1",api_key:"",timeout_seconds:180,width:1024,height:1024,size_label:"1024x1024",quality:"standard",max_reference_images:4,custom_headers:{},enabled:true}],network:{download_proxy:"",use_environment_proxy:false},legacy_options:{}},revision:3};
+  const configs = {
+    "image.output":{trigger_mode:"tool",allow_user_requests:true,group_enabled:true,request_permission:"everyone",proactive_probability:.2,proactive_max_daily:2,prompt_format:"natural",style:"realistic",style_prompt:"",negative_mode:"safe_default",negative_prompt:"",text2img_fixed_prompt:"",text2img_negative_prompt:"",selfie_fixed_prompt:"",selfie_negative_prompt:"",edit_fixed_prompt:"",edit_negative_prompt:"",scene_presets_json:"[]"},
+    image_review:{enable_group_nsfw_private_fallback:true,group_nsfw_image_review_mode:"single",group_nsfw_image_review_sensitivity:"balanced",group_nsfw_image_review_min_confidence:.7,group_nsfw_image_review_timeout_seconds:8,group_nsfw_image_review_max_dimension:2048,group_nsfw_image_review_max_images:2,group_nsfw_image_review_failure_action:"block",group_nsfw_image_review_custom_prompt:"",review_provider:"",review_dual_provider:""},
+    quota:{enabled:true,daily_limit:20,user_limit:5,window_seconds:86400},
+    "photo.reference":{enabled:true,group_enabled:false,daily_outfit_enabled:true,daily_outfit_rotation_days:14},
+    wardrobe:{enabled:true,prompt_enabled:true,prompt_max_items:6,image_max_count:4,tendency:"舒适、简洁",image_prompt:""},
+    screen:{enabled:true,recent_observation_enabled:true,max_observations:20},
+    "proactive.contact":{weather_enabled:true,news_share_enabled:true,balance_awareness_enabled:true}
+  };
+  const extensions = {
+    together:{extension_id:"together",name:"一起看与通话房间",assembled:true,desired_state:"assembled",revision:1,schema:{properties:{enabled:{type:"boolean",title:"启用房间"},max_members:{type:"integer",title:"房间人数"}}},settings:{enabled:true,max_members:4}},
+    reality:{extension_id:"reality",name:"现实触及",assembled:true,desired_state:"assembled",revision:2,settings:{gateway_url:"http://127.0.0.1:6322",bound_user_id:"wxid-user",location_enabled:true,screen_enabled:true,body_enabled:false},schema:{properties:{gateway_url:{type:"string",title:"网关地址"},bound_user_id:{type:"string",title:"绑定用户"},location_enabled:{type:"boolean",title:"允许位置"}}}},
+    game:{extension_id:"game",name:"游戏与棋桌",assembled:true,desired_state:"assembled",revision:1,settings:{enabled:true}},
+    live:{extension_id:"live",name:"直播与表演",assembled:false,desired_state:"discarded",revision:1,settings:{}},
+    screen:{extension_id:"screen",name:"屏幕陪伴",assembled:true,desired_state:"assembled",revision:1,settings:{enabled:true}},
+    image:{extension_id:"image",name:"生图",assembled:true,desired_state:"assembled",revision:1},
+    semantic:{extension_id:"semantic",name:"语义目录",assembled:true,desired_state:"assembled",revision:2}
+  };
+  const manifest = {extensions:Object.values(extensions).concat([{extension_id:"old-addon",name:"待装配扩展",category:"extension",assembled:false,desired_state:"discarded",revision:1}])};
+  const roleFor = target => ({role_id:"role-demo",role_name:"小鲸鱼",reply_api:`/astrbot_plugin_private_companion/targets/${target.target_id}/roles/role-demo/reply`,config_api:`/astrbot_plugin_private_companion/targets/${target.target_id}/roles/role-demo/config`,model_api:`/astrbot_plugin_private_companion/targets/${target.target_id}/roles/role-demo/model`,voice_api:`/astrbot_plugin_private_companion/targets/${target.target_id}/roles/role-demo/voice`,image_api:`/astrbot_plugin_private_companion/targets/${target.target_id}/roles/role-demo/model`,perception_native_api:`/astrbot_plugin_private_companion/targets/${target.target_id}/roles/role-demo/perception-native`,screen_access_api:`/astrbot_plugin_private_companion/targets/${target.target_id}/roles/role-demo/screen-access`,reality_access_api:`/astrbot_plugin_private_companion/targets/${target.target_id}/roles/role-demo/reality-access`,game_access_api:`/astrbot_plugin_private_companion/targets/${target.target_id}/roles/role-demo/game-access`,qzone_extension_api:target.platform_id === "aiocqhttp" && target.scope_kind === "private" ? `/astrbot_plugin_private_companion/targets/${target.target_id}/roles/role-demo/qzone-extension` : null,image_material_api:`/astrbot_plugin_private_companion/targets/${target.target_id}/roles/role-demo/image-materials`});
+  targets.forEach(target => {target.roles=[roleFor(target)];});
+  const routes = {balance:{settings:{url:"https://balance.example",user_id:"demo",value_divisor:100,api_key:""},edit_token:token},weather:{settings:{provider:"open_meteo",api_key:"",base_url:""},edit_token:token},poke:{settings:{enabled:true,probability:.2,daily_limit:3,cooldown_seconds:180,private_enabled:true,group_enabled:false,prompt:""},edit_token:token}};
+  const reality = {capabilities:[{id:"location",name:"定位",invokable:true,settings:{enabled:true,accuracy:"city"}},{id:"mobile",name:"手机",invokable:true,settings:{enabled:true}},{id:"camera",name:"摄像头",invokable:false,settings:{enabled:false}}]};
+  const materials = {references:[{asset_id:"ref-1",label:"蓝色鲸鱼",roles:["头像"],state:"active",thumbnail_url:"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Crect width='100' height='100' fill='%2384b8d8'/%3E%3C/svg%3E"}],wardrobe:[{item_id:"cloth-1",name:"白色卫衣",tags:["日常"],state:"active"}]};
+  const unwrap = route => String(route || "").replace(/^\//, "").replace(/^astrbot_plugin_private_companion\//, "");
+  function targetForRoute(route){return targets.find(item => route.includes(`/targets/${item.target_id}/`)) || targets[0];}
+  function configResponse(query){const sections={}; for(const name of String(query?.sections || "").split(",").filter(Boolean)) sections[name]={settings:JSON.parse(JSON.stringify(configs[name]||{})),edit_token:token,revision:1}; return {sections};}
+  function get(route, query){
+    route=unwrap(route);
+    if(route==="page/overview") {const selected=targetType==="qq"?targets.filter(item=>item.platform_id==="aiocqhttp"):targetType==="group"?targets.filter(item=>item.scope_kind==="group"):targetType==="wechat"?targets.filter(item=>item.platform_id==="wechat_helper"):targets; return {installation_id:"mock",operator_id:"mock",setup:{step:"complete",ready:true},host:{state:"running",accepting:true,failure_code:null,enabled:true},performance:{enabled:false,mode:"standard"},targets:selected.length?selected:targets,today:[]};}if(route==="page/targets") {const selected=targetType==="qq"?targets.filter(item=>item.platform_id==="aiocqhttp"):targetType==="group"?targets.filter(item=>item.scope_kind==="group"):targetType==="wechat"?targets.filter(item=>item.platform_id==="wechat_helper"):targets; return {targets:selected.length?selected:targets};}
+    if(route==="accounts") return {...window.CompanionMockLive.accounts(),discovered:{groups:[{group_id:"group-new",display_name:"未接入群",platform_id:"wechat_helper",account_id:"wxid_bot",bot_id:"bot-demo",managed:false,available_for_target:true}]}};
+    if(route==="host/capabilities") return {platform_name:"aiocqhttp",message_components:{face:true,poke:true,quote:true,mention:true},quote:true,mention:true,tasks:["conversation.image","conversation.video"]};
+    if(route==="integration/manifest") return manifest;
+    if(route==="extensions") return {extensions};
+    if(route==="host-options/balance") return routes.balance;
+    if(route==="host-options/weather") return routes.weather;
+    if(route==="host-options/poke") return routes.poke;
+    if(route==="semantic") return semantic;
+    if(route.endsWith("/reaction")) return reaction;
+    if(route.includes("/config")) return configResponse(query);
+    if(route.endsWith("/image")) return {actions:[{id:"generate",state:"ready",registered:true},{id:"edit",state:"ready",registered:true},{id:"mask_edit",state:"pending",registered:false}],settings:{generate:true,edit:true,mask_edit:false},edit_token:token};
+    if(route.endsWith("/image/output")) return output;
+    if(route.endsWith("/image-materials") || route.endsWith("/image-materials/")) return materials;
+    if(route.includes("/image-materials/album")) return {items:[{url:materials.references[0].thumbnail_url}]};
+    if(route.includes("/reality-access")) return reality;
+    if(route.includes("/screen-access")) return {state:"ready",authorized:true,last_observation:"今天 09:40"};
+    if(route.includes("/game-access")) return {state:"ready",authorized:true};
+    if(route.includes("/qzone-extension/feed")) return {items:[{id:"post-1",title:"今天的动态",created_at:"刚刚"}]};
+    if(route.includes("/qzone-extension")) return {settings:{enabled:true,read_enabled:true,write_enabled:true,auto_like_enabled:false,auto_comment_enabled:false,daily_like_limit:3,daily_comment_limit:2,comment_probability:.2,publish_enabled:true,feed_limit:20,quiet_hours:"23:00-08:00",style_prompt:""},edit_token:token,credential_state:"ready"};
+    if(route.includes("/perception-native/runtime")) return {state:"ready",news_source_kind:"rss"};
+    if(route.includes("/perception-native")) return {settings:{news_source_kind:"rss",news_source_url:"https://example.com/feed",news_source_uid:"",news_source_limit:5},edit_token:token};
+    if(route.endsWith("/recalls")) return {entries:[{id:"r1"},{id:"r2"}]};
+    if(route.includes("/model")) return {tasks:[{id:"reply"}]};
+    if(route.includes("/voice")) return {providers:[{id:"tts"}]};
+    return {};
+  }
+  async function post(route, body){
+    route=unwrap(route);
+    if(route==="semantic" && body?.action==="search") return {items:semantic.items.filter(item=>!body.query || item.name.includes(body.query))};
+    if(route==="semantic" && body?.action==="import"){semantic.items.push({id:`meme-${Date.now()}`,name:body.metadata?.name||"新素材",kind:"reaction"});return {created:true};}
+    if(route==="semantic" && body?.action==="delete"){semantic.items=semantic.items.filter(item=>item.id!==body.item_id);return {saved:true};}
+    if(route.startsWith("host-options/")) return {settings:body.changes||{},edit_token:token};
+    if(route.includes("/configure") || route.includes("/save") || route.includes("/action") || route.includes("/references") || route.includes("/wardrobe") || route.includes("/daily-outfit")) return {settings:body.changes||{},edit_token:token,saved:true};
+    return {saved:true};
+  }
+  window.CompanionMockApi={request:async(method,route,body)=>method==="GET"?get(route,body):post(route,body),apiGet:async(route,query)=>get(route,query),apiPost:async(route,body)=>post(route,body)};
+  const page = new URLSearchParams(location.search).get("page") || "能力/能力总览";
+  location.hash = `#/${page}`;
+})();
+</script>
+<script type="module" src="../shell.js"></script>
+</body>
+</html>

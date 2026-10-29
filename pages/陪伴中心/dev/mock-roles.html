@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>角色页面 Mock</title><link rel="icon" href="../favicon.svg"><link rel="stylesheet" href="../tokens.css"><link rel="stylesheet" href="../shell.css"></head>
+<body>
+<script src="./mock-data.js"></script>
+<script>
+(() => {
+  const token = "a".repeat(64), roleId = "role-demo";
+  const profileFields = ["name","species","birthday","age","gender","occupation","identity","appearance_points","hair","eyes","clothing","image_identity_hint","appearance","personality","first_person","speech_style","emotional_style","social_distance","reaction_patterns","voice_examples","signature_phrases","daily_habits","key_lore","character_extra","motivations","core_values","desire","hobbies","boundaries","taboos","world_name","era","tone","rules","scenes","network","world_extra","world","main_companion_subject","expression_private_source_mode","expression_private_source_subject_ids","expression_private_application_mode","expression_private_application_subject_ids","avatar_data_url"];
+  const profile = Object.fromEntries(profileFields.map((key, index) => [key, key === "name" ? "小鲸鱼" : key === "avatar_data_url" ? "" : key === "expression_private_source_mode" ? "owner" : key === "expression_private_application_mode" ? "all" : key.endsWith("_subject_ids") ? "[]" : `示例${index + 1}`]));
+  const knowledge = {import_enabled:true,import_paths:"worldbooks/角色设定",source_ids:"kb:character",entry_limit:500,entry_char_limit:1200,source_limit:16,candidate_char_budget:60000,inject_enabled:true,inject_max_entries:8,inject_max_chars:6000,member_recognition_enabled:true,member_match_aliases:true,member_inject_limit:6,member_clue_chars:1200};
+  const growth = {enabled:true,custom_skills:'["摄影","写作"]',schedule_influence_strength:2};
+  const persona = {persona_id:"xiaojingyu",name:"小鲸鱼人格",text:"<Role_Profile>\n## 基本信息\n她是一个温和、敏锐的陪伴者。\n## 性格特质\n会认真接住对方，也保留自己的边界。\n</Role_Profile>",resolved:true};
+  const reply = window.CompanionMockLive.reply();
+  const versions = [{version_id:"persona-draft-v000002",sequence:2,kind:"draft",note:"收紧口吻",draft_text:"第二版人格草稿",created_at:"2026-10-29T10:00:00Z"},{version_id:"persona-draft-v000001",sequence:1,kind:"draft",note:"初稿",draft_text:"第一版人格草稿",created_at:"2026-10-28T10:00:00Z"}];
+  const targets = window.CompanionMockLive.targets();
+  const configFor = route => ({settings: route === "knowledge" ? knowledge : route === "growth" ? growth : profile, edit_token:token, revision:3, fields:{}, scope:"role"});
+  function personaData() { return {persona, personas:[{value:"xiaojingyu",label:"小鲸鱼人格"},{value:"dafeiyu",label:"大肥鱼人格"}],current:versions[0],versions,count:versions.length,has_history:true}; }
+  const standardSections = {identity:"小鲸鱼是稳定、温和的陪伴者。",appearance:"蓝色短发，眼神明亮。",world:"生活在一座靠海的城市。",personality:"敏锐，愿意认真听人说话。",motivations:"希望帮助对方把复杂的事说清楚。",habits:"喜欢记录灵感和散步。",boundaries:"不替对方做决定，也不泄露隐私。",supplement:"长期保持一致的口吻。"};
+  window.CompanionMockApi = {
+    apiGet: async (route, query) => {
+      if (route === "page/overview") return {installation_id:"mock",operator_id:"mock",setup:{step:"complete",ready:true},host:{state:"running",accepting:true,failure_code:null,enabled:true},performance:{enabled:false,mode:"standard"},targets,today:[]};
+      if (route === "page/targets") return {installation_id:"mock",operator_id:"mock",targets};
+      if (route === "accounts") return {...window.CompanionMockLive.accounts(),discovered:{groups:[{group_id:"group-new",display_name:"未接入群",platform_id:"wechat_helper",account_id:"wxid_bot",bot_id:"bot-demo",managed:false,available_for_target:true}]}};
+      if (route.endsWith("/persona")) return personaData();
+      if (route.includes("/config")) return query?.sections === "knowledge" ? {sections:{knowledge:configFor("knowledge")}} : query?.sections === "role.growth.skills" ? {sections:{"role.growth.skills":configFor("growth")}} : {sections:{role_profile:configFor("profile")}};
+      return {};
+    },
+    apiPost: async (route, body) => {
+      if (route.endsWith("/profile-draft")) return {draft:{fields:Object.fromEntries(profileFields.map(key => [key, profile[key]])),inferred_fields:[],notes:[]},source:{persona_id:persona.persona_id,name:persona.name},limits:{},target:"role_profile",total_limit:30000};
+      if (route.endsWith("/profile-migration-plan")) return {plan_token:"b".repeat(64),edit_token:token,changes:{name:"迁入的小鲸鱼",world:"迁入的世界设定"},counts:{to_import:2},source:{name:"旧版人格"}};
+      if (route.endsWith("/profile-migration-apply")) { Object.assign(profile,body.changes||{}); return {imported_count:Object.keys(body.changes||{}).length}; }
+      if (route.endsWith("/standardize")) return {draft:{text:"标准化人格草稿\n## 对话风格\n温和但不拖沓。",sections:standardSections,notes:["保留了原文中的边界描述。"]},source:{persona_id:persona.persona_id,name:persona.name}};
+      if (route.endsWith("/tryouts")) return {variation:body.variation||0,scenarios:Object.keys({everyday:1,comfort:1,closeness:1,boundary:1,misunderstanding:1,praise:1}).map((id,index)=>({id,title:["日常往来","低落时刻","关系靠近","表达边界","发生误解","收到夸奖"][index],context:"固定情景",message:"这是一个示例场景。",options:[{text:"温和地接住这句话。",tag:"贴合"},{text:"换一种自然的说法。",tag:"变体"},{text:"这句话不太符合角色。",tag:"对照"}]}))};
+      if (route.endsWith("/style-rules")) return {style:{text:"保持具体、温和、不过度承诺。",examples:"“我听到了。”\n“我们先把眼前这一步理清。”"}};
+      if (route.endsWith("/command")) { if (body.action === "restore") { const old = versions.find(item=>item.version_id===body.version_id); versions.unshift({version_id:`persona-draft-v${String(versions.length+1).padStart(6,"0")}`,sequence:versions.length+1,kind:"restore",note:body.note,draft_text:old?.draft_text||"",created_at:new Date().toISOString()}); return {version:versions[0]}; } versions.unshift({version_id:`persona-draft-v${String(versions.length+1).padStart(6,"0")}`,sequence:versions.length+1,kind:"draft",note:body.note,draft_text:body.text,created_at:new Date().toISOString()}); return {version:versions[0]}; }
+      if (route.endsWith("/configure")) { const target = body.section === "role.growth.skills" ? growth : body.section === "knowledge" ? knowledge : profile; Object.assign(target,body.changes||{}); return {result:{replayed:false}}; }
+      return {result:{replayed:false}};
+    }
+  };
+})();
+</script>
+<script type="module" src="../shell.js"></script>
+</body>
+</html>
