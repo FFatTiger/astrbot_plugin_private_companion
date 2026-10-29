@@ -23,7 +23,8 @@ const displayDraft = draft => {
 };
 const itemTitle = item => item?.payload?.name || item?.payload?.term || item?.name || item?.term || "未命名素材";
 const itemImage = item => item?.thumbnail_url || item?.image_url || item?.payload?.image_url || item?.payload?.url || "";
-const providers = data => { const p = data?.providers || {}; return Object.fromEntries([...(p.embedding || []), ...(p.rerank || []), ...(p.analysis || [])].map(item => [item.id || item.name || item, item.name || item.id || item])); };
+// 每个槽位只列对应种类的模型；空值表示由后端自动选择（与旧页 semantic-page.js 一致）。
+const providers = (data, kind) => ({"": "自动选择", ...Object.fromEntries((data?.providers?.[kind] || []).map(item => [item.id || item.name || item, item.name || item.id || item]))});
 const flag = (draft, key, label) => toggle(key, Boolean(draft[key]), {label});
 
 const page = {
@@ -46,8 +47,7 @@ const page = {
     const group = ctx.target?.scope_kind === "group", qq = ctx.capabilities?.message_components?.face === true;
     let savedSemantic = splitSettings(semantic), savedReaction = {...settingsOf(reactionSection)};
     const state = {semanticDraft: {...savedSemantic.values}, reactionDraft: {...savedReaction}, reactionToken: tokenOf(reactionSection), items: catalogItems(semantic), query: "", notice: semantic.settings ? "" : "语义目录暂不可读", modal: null, busy: false};
-    const modelChoices = providers(semantic);
-    const fields = (draft, list) => fieldRows(displayDraft(draft), list.map(item => item[2] === "select" && item.length < 5 ? [...item, modelChoices] : item));
+    const fields = (draft, list) => fieldRows(displayDraft(draft), list.map(item => item[2] === "select" && item.length === 3 ? [...item, providers(semantic, item[0].replace("_provider", ""))] : item));
     const actionButton = (label, name, id, danger = false) => uiActionButton(label, name, {small:true, danger, dataKey:"data-item-action", extra:`data-item-id="${esc(id || "")}"`});
     const modalFields = draft => fieldRows(draft, [["name", "名称", "text"], ["description", "描述", "textarea"], ["visible_text", "图中文字", "textarea"], ["tags", "标签（逗号分隔）", "text"], ["emotions", "情绪（逗号分隔）", "text"], ["intents", "意图（逗号分隔）", "text"], ["enabled", "允许检索", "bool"]]);
     const draw = () => {
@@ -61,7 +61,7 @@ const page = {
       const reactionCard = card("表情表达", `<div class="ability-flag-grid">${flag(settings, "reactions_enabled", "启用表情包表达")}${flag(settings, "reactions_private_enabled", "私聊使用表情包")}${group ? flag(settings, "reactions_group_enabled", "群聊使用表情包") : ""}${flag(settings, "reactions_proactive_enabled", "主动表情")}</div>${enabled ? more(collection + fields(settings, sendFields), "收录与发送方式") : empty("表情包表达已关闭")}`);
       const mode = settings.vision_review ? reactionSettings.vision_verify_mode || "embedding" : "off";
       const visionCard = card("识图复核", `${flag(settings, "vision_review", "启用识图复核")}${settings.vision_review ? fieldRows({...reactionSettings, vision_verify_mode: mode}, [VISION_MODE]) : ""}`);
-      const boundaryCard = advancedCard("表情检索边界", `${fields(reactionSettings, BOUNDARY_FIELDS)}${fieldRows(reactionSettings, [VISION_MODE])}`);
+      const boundaryCard = advancedCard("表情检索边界", `${fields(reactionSettings, BOUNDARY_FIELDS)}`);
       const visibleItems = state.items.filter(item => !state.query || JSON.stringify(item).toLowerCase().includes(state.query.toLowerCase()));
       const catalog = visibleItems.length ? `<div class="ability-material-grid">${visibleItems.map(item => `<article class="ability-material"><div class="ability-material-image">${itemImage(item) ? `<img src="${esc(itemImage(item))}" alt="" loading="lazy">` : "<span>语义</span>"}</div><strong>${esc(itemTitle(item))}</strong><small>${esc(item.kind || "reaction")} · ${item.enabled === false ? "已停用" : "可检索"}</small><div>${actionButton("编辑", "edit", item.id)}${actionButton("补全", "analyze", item.id)}${actionButton("删除", "delete", item.id, true)}</div></article>`).join("")}</div>` : empty(state.items.length ? "没有匹配的素材" : "暂无语义素材；可从这里导入");
       const catalogCard = card("表情素材库", `<div class="ability-toolbar"><div class="ability-search"><input class="ui-input" data-catalog-query value="${esc(state.query)}" placeholder="搜索素材" aria-label="搜索素材"><button type="button" class="ability-button" data-catalog-search>检索</button></div><label class="ability-button is-primary ability-file-label">导入素材<input type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif" data-catalog-file hidden></label>${semantic.selection_ready ? '<button type="button" class="ability-button" data-reindex>重建索引</button>' : ""}</div>${catalog}`);
