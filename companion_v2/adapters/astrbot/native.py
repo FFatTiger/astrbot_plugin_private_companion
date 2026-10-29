@@ -35,7 +35,7 @@ VERIFIED_SERIES = frozenset(("4.27", "4.28", "4.29"))
 # Native routing is verified for the OneBot reverse-WS adapter and the two
 # QQ Official adapter names AstrBot exposes.  Keeping the allow-list here
 # prevents an arbitrary adapter from inheriting route privileges by accident.
-SUPPORTED_PLATFORM_NAMES = frozenset(("aiocqhttp", "qq_official", "qq_official_webhook"))
+SUPPORTED_PLATFORM_NAMES = frozenset(("aiocqhttp", "qq_official", "qq_official_webhook", "wechat_helper"))
 OFFICIAL_PLATFORM_NAMES = frozenset(("qq_official", "qq_official_webhook"))
 _REPORTED_UNVERIFIED = set()
 NATIVE_LOOKUP_TIMEOUT_SECONDS = 20
@@ -198,6 +198,12 @@ def event_account_id(event):
         return route_id(event_platform_id(event))
     if name == "aiocqhttp":
         return account_number(getattr(message, "self_id", None))
+    if name == "wechat_helper":
+        # One wechat_helper instance serves exactly one WeChat account, and the
+        # adapter reports the bound wxid as ``self_id`` on every event. The
+        # platform instance id only stands in when a host omits it.
+        self_id = getattr(message, "self_id", None)
+        return route_id(self_id if self_id else event_platform_id(event))
     raise ValueError("unsupported native event platform")
 
 
@@ -216,6 +222,8 @@ def native_user_subject_id(platform_name, sender_id):
         return "onebot-user:" + sender_id
     if official_platform_name(platform_name):
         return "qq-official-user:" + sender_id
+    if platform_name == "wechat_helper":
+        return "wechat-user:" + sender_id
     raise ValueError("unsupported native user platform")
 
 
