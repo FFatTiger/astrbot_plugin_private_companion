@@ -1,4 +1,4 @@
-import {ensureStyles, esc, card, row, toggle, textField, numberField, select, saveBar, setSaveState, settingsOf, tokenOf, postChanges, postAction, confirmAction, status, empty, buttonBar, more, advancedCard, fieldRows, actionButton as uiActionButton} from "./ability-shared.js";
+import {ensureStyles, esc, card, row, toggle, textField, numberField, select, saveBar, setSaveState, settingsOf, tokenOf, postChanges, confirmAction, status, empty, buttonBar, more, advancedCard, fieldRows, actionButton as uiActionButton} from "./ability-shared.js";
 
 const MODELS = [["embedding_provider", "向量模型", "select"], ["rerank_provider", "候选重排", "select"], ["analysis_provider", "视觉与词义分析", "select"]];
 const MODEL_MORE = [["timeout_seconds", "模型超时", "number", "秒"], ["batch_size", "索引批次", "number", "条"]];
@@ -7,6 +7,8 @@ const SEND_FIELDS = [["reactions_trigger_probability", "自动发送概率", "nu
 const COLLECTION_FIELDS = [["reactions_collection_private_probability", "私聊收录概率", "number", "%", {min: 0, max: 100, step: .1}], ["reactions_collection_group_probability", "群聊收录概率", "number", "%", {min: 0, max: 100, step: .1}], ["reactions_collection_mode", "收录审核", "select", {automatic: "自动启用", confirm: "待人工确认"}]];
 const BOUNDARY_FIELDS = [["low_latency_enabled", "低延迟模式", "bool"], ["embedding_backfill_enabled", "后台补齐向量", "bool"], ["candidate_limit", "每轮候选素材数", "number", "条"], ["embedding_candidate_limit", "向量检索候选上限", "number", "条"], ["embedding_backfill_batch_size", "补齐批次大小", "number", "条"], ["embedding_backfill_interval_seconds", "补齐间隔", "number", "秒"], ["embedding_weight", "向量权重", "number", "", {step: .01}], ["embedding_score_threshold", "向量相似度门槛", "number", "", {step: .01}]];
 const VISION_MODE = ["vision_verify_mode", "视觉复核模式", "select", {off: "不复核", embedding: "仅向量命中时复核", always: "每次复核"}];
+// 与 astrbot_host/semantic_api.py FIELDS 一致；edit 只收这些字符串字段。
+const ITEM_FIELDS = ["name", "description", "visible_text", "tags", "emotions", "intents"];
 const catalogItems = data => Array.isArray(data?.items) ? data.items : Array.isArray(data?.catalog?.items) ? data.catalog.items : [];
 // 后端存 0–1 小数（companion_v2/storage/semantic.py 的 PROBABILITY_FIELDS），界面用百分数。
 const PERCENT_FIELDS = new Set(["reactions_trigger_probability", "reactions_collection_private_probability", "reactions_collection_group_probability"]);
@@ -32,11 +34,18 @@ const page = {
     // reaction 是安装级 section（multi_api.INSTALLATION_CONFIGURATION_SECTIONS 包含 proactive.contact/reaction/budget），
     // 角色的 config 路由不收它，所以直接走安装级 config 路由；不再从 reply_api 推导 /config。
     const configPath = "config";
-    try { [semantic, reaction] = await Promise.all([ctx.api.get("semantic"), ctx.api.get(configPath, {sections: "reaction"})]); } catch (_) {}
+    // semantic 接口按 target_id/role_id 定位目录（astrbot_host/semantic_api.py resolve），不收 operation_key。
+    const scope = {target_id: ctx.target?.target_id, role_id: ctx.role?.role_id};
+    const semanticGet = () => ctx.api.get("semantic", scope);
+    const semanticPost = (action, payload = {}) => ctx.api.post("semantic", {...scope, action, ...payload});
+    const readReaction = async () => { try { const data = await ctx.api.get(configPath, {sections: "reaction"}); return data?.sections?.reaction || data?.reaction || {}; } catch (_) { return {}; } };
+    const splitSettings = data => { const {revision, ...values} = data?.settings || {}; return {revision, values}; };
+    const diff = (draft, saved) => Object.fromEntries(Object.entries(draft).filter(([key, value]) => value !== saved[key]));
+    let reactionSection;
+    [semantic, reactionSection] = await Promise.all([semanticGet().catch(() => ({})), readReaction()]);
     const group = ctx.target?.scope_kind === "group", qq = ctx.capabilities?.message_components?.face === true;
-    const reactionSection = reaction?.sections?.reaction || reaction?.reaction || {};
-    const reactionSettings = settingsOf(reactionSection);
-    const state = {semanticDraft: {...settingsOf(semantic)}, reactionDraft: {...reactionSettings}, semanticToken: tokenOf(semantic), reactionToken: tokenOf(reactionSection) || tokenOf(reaction), items: catalogItems(semantic), query: "", notice: "", modal: null, busy: false};
+    let savedSemantic = splitSettings(semantic), savedReaction = {...settingsOf(reactionSection)};
+    const state = {semanticDraft: {...savedSemantic.values}, reactionDraft: {...savedReaction}, reactionToken: tokenOf(reactionSection), items: catalogItems(semantic), query: "", notice: semantic.settings ? "" : "语义目录暂不可读", modal: null, busy: false};
     const modelChoices = providers(semantic);
     const fields = (draft, list) => fieldRows(displayDraft(draft), list.map(item => item[2] === "select" && item.length < 5 ? [...item, modelChoices] : item));
     const actionButton = (label, name, id, danger = false) => uiActionButton(label, name, {small:true, danger, dataKey:"data-item-action", extra:`data-item-id="${esc(id || "")}"`});
@@ -55,7 +64,7 @@ const page = {
       const boundaryCard = advancedCard("表情检索边界", `${fields(reactionSettings, BOUNDARY_FIELDS)}${fieldRows(reactionSettings, [VISION_MODE])}`);
       const visibleItems = state.items.filter(item => !state.query || JSON.stringify(item).toLowerCase().includes(state.query.toLowerCase()));
       const catalog = visibleItems.length ? `<div class="ability-material-grid">${visibleItems.map(item => `<article class="ability-material"><div class="ability-material-image">${itemImage(item) ? `<img src="${esc(itemImage(item))}" alt="" loading="lazy">` : "<span>语义</span>"}</div><strong>${esc(itemTitle(item))}</strong><small>${esc(item.kind || "reaction")} · ${item.enabled === false ? "已停用" : "可检索"}</small><div>${actionButton("编辑", "edit", item.id)}${actionButton("补全", "analyze", item.id)}${actionButton("删除", "delete", item.id, true)}</div></article>`).join("")}</div>` : empty(state.items.length ? "没有匹配的素材" : "暂无语义素材；可从这里导入");
-      const catalogCard = card("表情素材库", `<div class="ability-toolbar"><div class="ability-search"><input class="ui-input" data-catalog-query value="${esc(state.query)}" placeholder="搜索素材" aria-label="搜索素材"><button type="button" class="ability-button" data-catalog-search>检索</button></div><label class="ability-button is-primary ability-file-label">导入素材<input type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif" data-catalog-file hidden></label>${state.semanticDraft.selection_ready !== false ? '<button type="button" class="ability-button" data-reindex>重建索引</button>' : ""}</div>${catalog}`);
+      const catalogCard = card("表情素材库", `<div class="ability-toolbar"><div class="ability-search"><input class="ui-input" data-catalog-query value="${esc(state.query)}" placeholder="搜索素材" aria-label="搜索素材"><button type="button" class="ability-button" data-catalog-search>检索</button></div><label class="ability-button is-primary ability-file-label">导入素材<input type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif" data-catalog-file hidden></label>${semantic.selection_ready ? '<button type="button" class="ability-button" data-reindex>重建索引</button>' : ""}</div>${catalog}`);
       const modal = state.modal ? `<div class="ability-modal-backdrop" data-modal-close><section class="ability-modal" role="dialog" aria-modal="true"><header><h2>编辑语义素材</h2><button type="button" class="ability-icon-button" data-modal-close>×</button></header><div class="ability-modal-body">${modalFields(state.modal)}</div><footer>${buttonBar('<button type="button" class="ability-button" data-modal-close>取消</button><button type="button" class="ability-button is-primary" data-item-save>保存</button>')}</footer></section></div>` : "";
       root.innerHTML = `<div class="page-stack">${state.notice ? `<div class="ability-notice">${esc(state.notice)}</div>` : ""}${semanticCard}${modelCard}${slangCard}${reactionCard}${visionCard}${boundaryCard}${catalogCard}${modal}${saveBar("semantic", {disabled: state.busy})}</div>`;
     };
@@ -69,22 +78,21 @@ const page = {
       if (save) {
         const name = "semantic"; state.busy = true; setSaveState(root, name, "保存中");
         try {
-          let result;
-          result = await postAction(ctx, "semantic", {action: "configure", changes: state.semanticDraft, revision: semantic.revision}, "semantic-configure");
-          state.semanticToken = tokenOf(result) || state.semanticToken;
-          const savedReaction = await postChanges(ctx, configPath, state.reactionDraft, state.reactionToken, "reaction");
-          state.reactionToken = tokenOf(savedReaction) || state.reactionToken; setSaveState(root, name, "已保存", "ok"); state.notice = "配置已保存";
-        } catch (_) { setSaveState(root, name, "保存失败", "error"); }
+          const semanticChanges = diff(state.semanticDraft, savedSemantic.values), reactionChanges = diff(state.reactionDraft, savedReaction);
+          if (Object.keys(semanticChanges).length) { const result = await semanticPost("configure", {changes: semanticChanges, revision: savedSemantic.revision}); savedSemantic = splitSettings(result); state.semanticDraft = {...savedSemantic.values}; }
+          if (Object.keys(reactionChanges).length) { await postChanges(ctx, `${configPath}/configure`, reactionChanges, state.reactionToken, "reaction"); const section = await readReaction(); savedReaction = {...settingsOf(section)}; state.reactionDraft = {...savedReaction}; state.reactionToken = tokenOf(section); }
+          setSaveState(root, name, "已保存", "ok"); state.notice = "配置已保存";
+        } catch (error) { setSaveState(root, name, "保存失败", "error"); state.notice = `保存失败：${error?.message || error?.code || "未知原因"}`; }
         state.busy = false; draw(); return;
       }
-      if (event.target.closest("[data-reindex]")) { state.busy = true; try { await postAction(ctx, "semantic", {action: "reindex"}, "semantic-reindex"); state.notice = "已安排重建索引"; } catch (_) { state.notice = "重建索引未完成"; } state.busy = false; draw(); return; }
-      if (event.target.closest("[data-catalog-search]")) { try { state.items = catalogItems(await postAction(ctx, "semantic", {action: "search", query: state.query, limit: 50}, "semantic-search")); state.notice = "检索完成"; } catch (_) { state.notice = "检索失败"; } draw(); return; }
+      if (event.target.closest("[data-reindex]")) { state.busy = true; try { await semanticPost("reindex"); state.notice = "已安排重建索引"; } catch (_) { state.notice = "重建索引未完成"; } state.busy = false; draw(); return; }
+      if (event.target.closest("[data-catalog-search]")) { try { state.items = catalogItems(await semanticPost("search", {kind: "reaction", query: state.query})); state.notice = "检索完成"; } catch (_) { state.notice = "检索失败"; } draw(); return; }
       const itemButton = event.target.closest("[data-item-action]");
-      if (itemButton) { const item = state.items.find(value => String(value.id) === String(itemButton.dataset.itemId)); if (!item) return; const operation = itemButton.dataset.itemAction; if (operation === "edit") { state.modal = {...(item.payload || item), id: item.id, revision: item.revision}; draw(); return; } if (operation === "delete" && !await confirmAction(`删除「${itemTitle(item)}」？`)) return; try { await postAction(ctx, "semantic", {action: operation, item_id: item.id, revision: item.revision}, `semantic-${operation}`); semantic = await ctx.api.get("semantic"); state.items = catalogItems(semantic); state.notice = operation === "delete" ? "素材已删除" : "素材已补全"; } catch (_) { state.notice = "操作未完成"; } draw(); return; }
-      if (event.target.closest("[data-item-save]") && state.modal) { try { await postAction(ctx, "semantic", {action: "edit", item_id: state.modal.id, revision: state.modal.revision, updates: state.modal}, "semantic-edit"); state.modal = null; semantic = await ctx.api.get("semantic"); state.items = catalogItems(semantic); state.notice = "素材已保存"; } catch (_) { state.notice = "保存失败"; } draw(); }
+      if (itemButton) { const item = state.items.find(value => String(value.id) === String(itemButton.dataset.itemId)); if (!item) return; const operation = itemButton.dataset.itemAction; if (operation === "edit") { state.modal = {...item.payload, id: item.id, revision: item.revision, enabled: item.enabled !== false}; draw(); return; } if (operation === "delete" && !await confirmAction(`删除「${itemTitle(item)}」？`)) return; try { await semanticPost(operation, operation === "delete" ? {kind: "reaction", id: item.id, revision: item.revision} : {id: item.id}); semantic = await semanticGet(); state.items = catalogItems(semantic); state.notice = operation === "delete" ? "素材已删除" : "素材已补全"; } catch (_) { state.notice = "操作未完成"; } draw(); return; }
+      if (event.target.closest("[data-item-save]") && state.modal) { try { await semanticPost("edit", {kind: "reaction", id: state.modal.id, revision: state.modal.revision, values: Object.fromEntries(ITEM_FIELDS.map(key => [key, [state.modal[key] ?? ""].flat().join(",")])), enabled: state.modal.enabled !== false}); state.modal = null; semantic = await semanticGet(); state.items = catalogItems(semantic); state.notice = "素材已保存"; } catch (_) { state.notice = "保存失败"; } draw(); }
     });
     root.addEventListener("input", event => { const field = event.target.closest("[data-ui-field]"); if (field) { const key = field.dataset.uiField, value = read(field); if (state.modal) state.modal[key] = value; else if (PERCENT_FIELDS.has(key)) state.semanticDraft[key] = FRACTION_OF(value); else if (key === MINUTES_FIELD) state.semanticDraft[key] = Math.round(Math.min(1440, Math.max(1, Number(value) || 1)) * 60); else if (BOUNDARY_FIELDS.some(item => item[0] === key) || key === "vision_verify_mode") state.reactionDraft[key] = value; else state.semanticDraft[key] = value; } if (event.target.matches("[data-catalog-query]")) state.query = event.target.value; });
-    root.addEventListener("change", async event => { const input = event.target.closest("[data-catalog-file]"); if (!input?.files?.length) return; for (const file of [...input.files].slice(0, 20)) { const data = await new Promise(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(",")[1] || ""); reader.readAsDataURL(file); }); try { await postAction(ctx, "semantic", {action: "import", data, mime_type: file.type, metadata: {name: file.name}}, "semantic-import"); } catch (_) { state.notice = "部分素材导入失败"; } } semantic = await ctx.api.get("semantic"); state.items = catalogItems(semantic); draw(); });
+    root.addEventListener("change", async event => { const input = event.target.closest("[data-catalog-file]"); if (!input?.files?.length) return; for (const file of [...input.files].slice(0, 20)) { const data = await new Promise(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(",")[1] || ""); reader.readAsDataURL(file); }); try { await semanticPost("import", {content: data, metadata: {name: file.name}}); } catch (_) { state.notice = "部分素材导入失败"; } } semantic = await semanticGet(); state.items = catalogItems(semantic); draw(); });
   }
 };
 export default page;
