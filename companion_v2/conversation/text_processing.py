@@ -18,6 +18,8 @@ MAX_STYLE_PROMPT = 4000
 REGEX_SECONDS = 0.05
 _PROTOCOL_LT = VOICE_PROTOCOL_LT
 _PROTOCOL_GT = VOICE_PROTOCOL_GT
+# A complete opener, as opposed to a bare escape prefix such as "&" or "&l".
+_PROTOCOL_OPENER = re.compile(rf"(?i)^{_PROTOCOL_LT}")
 REACTION_EXPRESSION_TAG_NAME = r"p[\s._-]*c{1,2}[\s._-]*reaction[\s._-]*expression"
 _LITERALS = re.compile(
     r"(?P<url>(?:https?://|www\.)[^\s<>。！？，]+)"
@@ -497,12 +499,23 @@ class InternalExpressionProtocolFilter:
         return "".join(visible)
 
     def finish(self):
-        """End the stream, preserving only sentinels trapped in a broken tail."""
+        """End the stream without losing prose that only looked like a tag start.
+
+        A trailing character such as ``&`` matches the opening protocol as a
+        partial prefix, so ``feed`` holds it back.  The stream can end there,
+        and that character is ordinary text: dropping it silently truncated a
+        native reply (2026-10-28: ``&&happy&&`` reached the group as
+        ``&&happy&``).  Only a real unfinished block is discarded.
+        """
         pending = self._pending
         self._pending = ""
-        self._inside_block = False
+        inside_block, self._inside_block = self._inside_block, False
         if not pending:
             return ""
+        if not inside_block:
+            # An escape prefix alone ("&", "&l", "&lt") never became a tag: it
+            # is the text the model wrote.  A started tag fragment is not prose.
+            return "" if _PROTOCOL_OPENER.match(pending) else pending
         match = re.search(_CONTROL_SENTINEL_START, pending)
         return pending[match.start():] if match is not None else ""
 
