@@ -40,8 +40,8 @@ const page={id:"system-diagnostics",section:"系统",title:"高级与诊断",asy
   else if(action==="test-storage")await api.post(`${role.model_api}/test/storage`,{check:"sqlite"});
   else if(action==="proactive-diagnostic")await api.post("setup/proactive-diagnostic",{purpose:root.querySelector('[data-ui-field="diagnostic-purpose"]')?.value,confirm_delivery:true});
   else if(action==="memory-sample"){if(sampling)return;sampling=true;samples=[];node.disabled=false;const statusNode=root.querySelector("[data-memory-status]"),output=root.querySelector("[data-memory-samples]");for(let i=0;i<19&&sampling;i+=1){const result=await api.get(`${role.model_api}/memory`);samples.push(result);if(statusNode)statusNode.textContent=`已采集 ${samples.length}/19`;if(output)output.textContent=JSON.stringify(samples,null,2);if(i<18)await new Promise(resolve=>setTimeout(resolve,10000));}sampling=false;return;}
-  else if(action==="read-preview")root.querySelector("[data-preview-output]").textContent=JSON.stringify(await api.get(`host/preview?target_id=${encodeURIComponent(ctx.target?.target_id||"")}&batch_id=${encodeURIComponent(root.querySelector('[data-ui-field="batch-id"]')?.value||"")}`),null,2);
-  else if(action==="read-batches")root.querySelector("[data-preview-output]").textContent=JSON.stringify(await api.get(`host/batches?target_id=${encodeURIComponent(ctx.target?.target_id||"")}`),null,2);
+  else if(action==="read-preview")root.querySelector("[data-preview-output]").textContent=JSON.stringify(await api.get("accounts/preview",{target_id:ctx.target?.target_id||"",batch_id:root.querySelector('[data-ui-field="batch-id"]')?.value||""}),null,2);
+  else if(action==="read-batches")root.querySelector("[data-preview-output]").textContent=JSON.stringify(await api.get("accounts/batches",{target_id:ctx.target?.target_id||""}),null,2);
   else if(action==="read-catalog")root.querySelector("[data-catalog-output]").textContent=JSON.stringify(await api.get(`${role.model_api}/catalog`),null,2);
   message("已完成");node.disabled=false;
  }catch(error){fail(error);}});
