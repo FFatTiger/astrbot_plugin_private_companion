@@ -1,4 +1,4 @@
-"""On-demand, private-conversation reads of the configured role's weather."""
+"""On-demand reads of the configured role's weather, in private and group replies."""
 
 import asyncio
 from datetime import datetime
@@ -6,7 +6,6 @@ import math
 
 from companion_v2.configuration.models import ConfigurationError
 from companion_v2.execution.models import TaskError, encode
-from companion_v2.foundation.refs import ScopeKind
 from companion_v2.model_gateway.models import ToolSpec
 from companion_v2.agenda.planning_config import (
     configured_weather_location,
@@ -36,8 +35,6 @@ class WeatherTools:
         })),)
 
     def _configuration(self, context):
-        if context.scope.kind is not ScopeKind.PRIVATE:
-            raise TaskError("weather_private_required", "weather reads are available in private conversations only")
         if self.role_state is None:
             raise TaskError("weather_settings_unavailable", "weather settings are unavailable")
         values, _token = self.role_state.settings(context)

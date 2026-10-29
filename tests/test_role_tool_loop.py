@@ -162,7 +162,7 @@ class RoleToolLoopTests(ToolLoopFixture, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(continued.event, original.event)
         self.assertEqual(continued.role_binding, original.role_binding)
 
-    async def test_current_weather_is_a_private_on_demand_read_of_the_configured_role_location(self):
+    async def test_current_weather_is_an_on_demand_read_of_the_configured_role_location(self):
         self.weather_settings.enabled = True
         self.weather_settings.location = json.dumps({"name": "苏州", "latitude": 31.3, "longitude": 120.6},
                                                    ensure_ascii=False)
@@ -192,9 +192,13 @@ class RoleToolLoopTests(ToolLoopFixture, unittest.IsolatedAsyncioTestCase):
         self.weather_settings.enabled = True
         self.weather_settings.location = ""
         self.assertNotIn("weather.current", {tool.action for tool in self.tools.catalog_for(self.context)})
-        group = SimpleNamespace(scope=SimpleNamespace(kind=ScopeKind.GROUP))
-        self.assertEqual(self.tools.weather.catalog_for(group), ())
         self.assertEqual(self.weather_port.locations, [])
+
+    async def test_current_weather_tool_is_offered_in_group_replies(self):
+        self.weather_settings.enabled = True
+        self.weather_settings.location = json.dumps({"name": "苏州", "latitude": 31.3, "longitude": 120.6})
+        group = SimpleNamespace(scope=SimpleNamespace(kind=ScopeKind.GROUP))
+        self.assertEqual({tool.action for tool in self.tools.weather.catalog_for(group)}, {"weather.current"})
 
     async def test_create_read_continue_keeps_original_role_configuration_and_accounting(self):
         async def respond(envelope):
