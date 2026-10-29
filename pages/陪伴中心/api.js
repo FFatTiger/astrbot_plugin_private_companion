@@ -66,16 +66,20 @@ export const api = {
     if (!target?.target_id || !role?.role_id) return {};
     try { return await request("GET", "host/capabilities", {target_id: target.target_id, role_id: role.role_id}); } catch (_) { return {}; }
   },
-  async readRole(role, scope = "role") {
+  async readRole(role, scope = "role", configRole = null) {
     const reply = role?.reply_api;
     if (!reply) return {reply: {}, config: {}, participation: {}};
     const result = {reply: {}, config: {}, participation: {}};
     try { result.reply = await request("GET", reply); } catch (_) {}
-    const configPath = role.config_api || reply.replace(/\/reply$/, "/config");
-    try {
-      const config = await request("GET", configPath, {sections: "group_participation"});
-      result.config = config?.sections?.group_participation || config;
-    } catch (_) {}
+    // 群角色没有 config_api，不能把 reply_api 改写成 /config：后端没有这个路由。
+    // 群配置归「角色默认」，由调用方传入同样 role_id 但带 config_api 的私聊角色。
+    const configPath = configRole?.config_api || role.config_api;
+    if (configPath) {
+      try {
+        const config = await request("GET", configPath, {sections: "group_participation"});
+        result.config = config?.sections?.group_participation || config;
+      } catch (_) {}
+    }
     if (scope === "group") {
       try { result.participation = await request("GET", `${reply}/participation`); } catch (_) {}
     }
@@ -84,8 +88,9 @@ export const api = {
   async saveReply(role, changes, editToken) {
     return request("POST", `${role.reply_api}/configure`, {operation_key: api.operationKey("reply"), edit_token: editToken, changes});
   },
-  async saveConfig(role, changes, editToken, section = "group_participation") {
-    const path = role.config_api || role.reply_api.replace(/\/reply$/, "/config");
+  async saveConfig(role, changes, editToken, section = "group_participation", configRole = null) {
+    const path = configRole?.config_api || role.config_api;
+    if (!path) throw problem("config_unavailable", "当前对象没有配置接口");
     return request("POST", `${path}/configure`, {section, operation_key: api.operationKey("config"), edit_token: editToken, changes});
   },
   async saveGroupParticipation(role, changes, editToken) {

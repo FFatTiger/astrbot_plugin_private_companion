@@ -58,6 +58,7 @@
 .ui-save-state { color: var(--muted); font-size: 12px; }
 .ui-save-state.is-ok { color: #81704d; }
 .ui-save-state.is-error { color: var(--muted); }
+.ui-hint { margin: 0 0 8px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .ui-link { color: var(--amber); text-decoration: none; font-weight: 650; }
 details[data-more] > summary { list-style: none; cursor: pointer; user-select: none; }
 details[data-more] > summary::-webkit-details-marker { display: none; }

@@ -57,6 +57,14 @@ const targetName = target => {
 };
 const targetLabel = target => `${target?.scope_kind === "group" ? "群" : "私聊"} · ${targetName(target)}`;
 const roleFor = target => target?.roles?.[0] || null;
+// 群角色的 config_api 为 null：群配置统一归「角色默认」，所以去同 role_id 的
+// 私聊目标上找带 config_api 的那个角色。找不到就是不可用，不做任何路径推导。
+const roleWithConfig = (role = state.role) => {
+  if (!role?.role_id) return null;
+  if (role.config_api) return role;
+  const owner = (state.directory?.targets || []).find(target => target.scope_kind !== "group" && (target.roles || []).some(item => String(item.role_id) === String(role.role_id) && item.config_api));
+  return owner?.roles?.find(item => String(item.role_id) === String(role.role_id) && item.config_api) || null;
+};
 const targetScopes = target => {
   const scopes = [];
   if (target?.roles?.some(role => role?.reply_api || role?.config_api || role?.state_api || role?.life_api)) scopes.push(["role", "角色默认"]);
@@ -95,7 +103,7 @@ async function render() {
   document.body.innerHTML = `<div class="console-shell${state.navOpen ? " nav-open" : ""}"><button class="mobile-menu" type="button" data-mobile-menu aria-label="打开导航">☰</button><aside class="console-sidebar">${navMarkup()}</aside><main class="console-main"><header class="console-topbar">${topMarkup(page)}</header><section class="console-content"><div id="page-root"></div></section></main></div>`;
   const root = $("#page-root");
   if (state.loading) { root.innerHTML = `<div class="page-loading">正在读取</div>`; return; }
-  const ctx = {api, target: state.target, role: state.role, scope: state.scope, capabilities: state.capabilities, ui, navigate: (route) => { const [s, p] = route.replace(/^#\/?/, "").split("/"); setHash(decodeURIComponent(s), decodeURIComponent(p)); }};
+  const ctx = {api, target: state.target, role: state.role, scope: state.scope, capabilities: state.capabilities, ui, roleWithConfig: (role = state.role) => roleWithConfig(role), navigate: (route) => { const [s, p] = route.replace(/^#\/?/, "").split("/"); setHash(decodeURIComponent(s), decodeURIComponent(p)); }};
   try { await page.render(root, ctx); } catch (_) { root.innerHTML = `<div class="page-empty">读取失败</div>`; }
 }
 

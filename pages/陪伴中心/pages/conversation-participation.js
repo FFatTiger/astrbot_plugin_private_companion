@@ -1,5 +1,5 @@
 import {api} from "../api.js";
-import {card, row, toggle, textField, numberField, tagInput, saveBar, setSaveState, readTags, normalizeListValue, listValueMeta, restoreListValue} from "../ui.js";
+import {card, row, toggle, textField, numberField, tagInput, saveBar, setSaveState, readTags, normalizeListValue, listValueMeta, restoreListValue, esc} from "../ui.js";
 
 const REPLY_FIELDS = [
   "group_wakeup_bot_name", "group_wakeup_direct_words", "group_wakeup_context_words",
@@ -99,6 +99,9 @@ const PRIVATE_REPLY = MORE_REPLY.filter(name => name.startsWith("private_"));
 const GROUP_REPLY = MORE_REPLY.filter(name => !name.startsWith("private_"));
 
 const valueOf = (state, name) => state.draft[name] ?? DEFAULTS[name];
+// 后端 private_debounce_max_ms 是毫秒，范围见 companion_v2/conversation/private_debounce.LIMITS（10–120000）。
+const DEBOUNCE_MAX_SECONDS = {min: 0.01, max: 120, step: 0.01};
+const DEBOUNCE_MAX_HINT = "请填写 0.01–120 秒之间的数字";
 function displayValue(name, value) { return name === "private_debounce_max_ms" ? Number(value || 0) / 1000 : value; }
 function writeValue(name, value) { return name === "private_debounce_max_ms" ? Math.round(Number(value || 0) * 1000) : value; }
 function maxTurnsControl(state, disabled) {
@@ -110,7 +113,10 @@ function fieldControl(state, name, disabled = false) {
   if (name === "group_conversation_followup_max_turns") return maxTurnsControl(state, disabled);
   if (BOOL_FIELDS.has(name)) return toggle(name, Boolean(value), {disabled, label});
   if (TAG_FIELDS.has(name)) return tagInput(name, normalizeListValue(value), {disabled, label});
-  if (NUMBER_FIELDS.has(name)) return numberField(name, displayValue(name, value), UNIT[name] || "", {disabled, step: String(value).includes(".") ? .01 : 1, label});
+  if (NUMBER_FIELDS.has(name)) {
+    const range = name === "private_debounce_max_ms" ? DEBOUNCE_MAX_SECONDS : null;
+    return numberField(name, displayValue(name, value), UNIT[name] || "", {disabled, step: range ? range.step : String(value).includes(".") ? .01 : 1, min: range?.min, max: range?.max, label});
+  }
   return name === "group_behavior_guidance" ? `<textarea class="ui-textarea" data-ui-field="${name}" aria-label="${label}"${disabled ? " disabled" : ""}>${String(value || "")}</textarea>` : textField(name, value, {disabled, label});
 }
 function renderRows(state, names, disabled = false) { return names.map(name => row(LABELS[name] || name, fieldControl(state, name, disabled || !state.available.has(name)), {name})).join(""); }
@@ -121,7 +127,8 @@ const participationPage = {
     root.innerHTML = `<div class="page-loading">正在读取</div>`;
     const target = ctx.target, role = ctx.role;
     if (!role?.reply_api) { root.innerHTML = `<div class="page-empty">当前对象不可用</div>`; return; }
-    const raw = await api.readRole(role, target.scope_kind === "group" ? "group" : "private");
+    const configRole = typeof ctx.roleWithConfig === "function" ? ctx.roleWithConfig(role) : null;
+    const raw = await api.readRole(role, target.scope_kind === "group" ? "group" : "private", configRole);
     const reply = raw.reply || {}, config = raw.config || {}, participation = raw.participation || {};
     const listFormats = {}, draft = {...DEFAULTS};
     for (const source of [reply.settings || {}, config.settings || {}, participation.settings || {}]) {
@@ -131,11 +138,15 @@ const participationPage = {
       }
     }
     const state = {
-      target, role, scope: ctx.scope, replyToken: reply.edit_token || "", configToken: config.edit_token || "", windowToken: participation.edit_token || "", listFormats,
+      target, role, scope: ctx.scope, configRole, replyToken: reply.edit_token || "", configToken: config.edit_token || "", windowToken: participation.edit_token || "", listFormats,
       draft, base: {...draft},
-      available: new Set([...Object.keys(reply.settings || {}), ...Object.keys(config.settings || {}), ...Object.keys(participation.settings || {})]), dirty: false
+      available: new Set([...Object.keys(reply.settings || {}), ...Object.keys(config.settings || {}), ...Object.keys(participation.settings || {})]), invalid: false, dirty: false
     };
     const group = target.scope_kind === "group";
+    // GROUP_FIELDS 归「角色默认」：群角色本身没有 config_api，只有 scope=角色默认
+    // 且能找到同 role_id 的私聊配置接口时才可编辑；当前群只读展示。
+    const configEditable = ctx.scope === "role" && Boolean(configRole);
+    const configNote = !group || ctx.scope === "role" ? "" : configRole ? "这些设置所有群共用，请到「角色默认」修改。" : "角色默认配置接口不可用，这里只能查看当前群自己的设置。";
     const mainReply = ["group_wakeup_bot_name", "group_wakeup_direct_words", "group_wakeup_question_enabled", "group_wakeup_cold_group_enabled"];
     const followup = ["group_conversation_followup_enabled", "group_conversation_followup_seconds", "group_conversation_followup_max_turns"];
     const privateFields = ["private_debounce_enabled", "private_debounce_max_ms"];
@@ -150,12 +161,13 @@ const participationPage = {
     if (showGroup) cards.push(card("连续对话", renderRows(state, followup)));
     if (showPrivate) cards.push(card("私聊", renderRows(state, privateFields), {meta: "当前私聊"}));
     if (showGroup) cards.push(card("群聊参与", renderRows(state, groupMain), {meta: "当前群"}));
-    cards.push(`<details class="console-card" data-more><summary class="card-title"><span class="more-title"><span>更多</span><span class="more-chevron" aria-hidden="true">⌄</span></span></summary><div class="card-body">${renderRows(state, moreReply)}${showGroup ? renderRows(state, groupMore) : ""}</div></details>`);
+    cards.push(`<details class="console-card" data-more><summary class="card-title"><span class="more-title"><span>更多</span><span class="more-chevron" aria-hidden="true">⌄</span></span></summary><div class="card-body">${renderRows(state, moreReply)}${showGroup ? `${configNote ? `<p class="ui-hint">${esc(configNote)}</p>` : ""}${renderRows(state, groupMore, !configEditable)}` : ""}</div></details>`);
     root.innerHTML = `<div class="page-stack" data-participation-root>${cards.join("")}${saveBar("participation", {disabled: true})}</div>`;
     const markDirty = () => {
       state.dirty = Object.keys(state.draft).some(name => JSON.stringify(state.draft[name]) !== JSON.stringify(state.base[name]));
-      const button = root.querySelector("[data-ui-save=participation]"); if (button) button.disabled = !state.dirty;
-      if (state.dirty) setSaveState(root, "participation", "");
+      const button = root.querySelector("[data-ui-save=participation]"); if (button) button.disabled = !state.dirty || state.invalid;
+      if (state.invalid) setSaveState(root, "participation", DEBOUNCE_MAX_HINT, "error");
+      else if (state.dirty) setSaveState(root, "participation", "");
     };
     const update = (name, value) => { state.draft[name] = value; markDirty(); };
     root.addEventListener("click", async event => {
@@ -177,28 +189,38 @@ const participationPage = {
       state.saving = true; save.disabled = true; setSaveState(root, "participation", "保存中");
       const replyChanges = {}, configChanges = {}, windowChanges = {};
       for (const name of REPLY_FIELDS) if (JSON.stringify(state.draft[name]) !== JSON.stringify(state.base[name]) && state.available.has(name)) replyChanges[name] = state.listFormats[name] ? restoreListValue(state.listFormats[name], state.draft[name]) : state.draft[name];
-      for (const name of GROUP_FIELDS) if (JSON.stringify(state.draft[name]) !== JSON.stringify(state.base[name]) && state.available.has(name)) configChanges[name] = state.listFormats[name] ? restoreListValue(state.listFormats[name], state.draft[name]) : state.draft[name];
+      for (const name of GROUP_FIELDS) if (configRole && JSON.stringify(state.draft[name]) !== JSON.stringify(state.base[name]) && state.available.has(name)) configChanges[name] = state.listFormats[name] ? restoreListValue(state.listFormats[name], state.draft[name]) : state.draft[name];
       for (const name of ["enable_group_interjection", "enable_group_interjection_feedback", "group_interject_feedback_window_seconds", "group_interject_max_daily", "group_interject_min_interval_minutes"])
         if (JSON.stringify(state.draft[name]) !== JSON.stringify(state.base[name]) && state.available.has(name)) windowChanges[name] = state.listFormats[name] ? restoreListValue(state.listFormats[name], state.draft[name]) : state.draft[name];
       try {
         if (Object.keys(replyChanges).length) await api.saveReply(role, replyChanges, state.replyToken);
-        if (Object.keys(configChanges).length) await api.saveConfig(role, configChanges, state.configToken);
+        if (Object.keys(configChanges).length) await api.saveConfig(role, configChanges, state.configToken, "group_participation", configRole);
         const onlyWindow = Object.keys(windowChanges).filter(name => !Object.hasOwn(configChanges, name));
         if (group && onlyWindow.length) await api.saveGroupParticipation(role, Object.fromEntries(onlyWindow.map(name => [name, state.draft[name]])), state.windowToken);
         state.base = {...state.draft}; state.dirty = false; setSaveState(root, "participation", "已保存", "ok");
       } catch (error) { setSaveState(root, "participation", "保存失败", "error"); save.disabled = false; }
       state.saving = false;
     });
+    const readNumber = (field, name) => {
+      const raw = field.value.trim();
+      if (name !== "private_debounce_max_ms") { const value = Number(raw); return Number.isFinite(value) ? writeValue(name, value) : writeValue(name, Number(raw) || 0); }
+      // 空值或越界一律不写回，保留原值并阻止保存，避免后端收到 0 毫秒。
+      const seconds = Number(raw);
+      if (!raw || !Number.isFinite(seconds) || seconds < DEBOUNCE_MAX_SECONDS.min || seconds > DEBOUNCE_MAX_SECONDS.max) { state.invalid = true; markDirty(); return undefined; }
+      state.invalid = false;
+      return writeValue(name, seconds);
+    };
     root.addEventListener("input", event => {
       const field = event.target.closest("[data-ui-field]"); if (!field) return;
-      let value = field.type === "number" ? Number(field.value) : field.value;
-      if (field.type === "number" && !Number.isFinite(value)) value = 0;
-      update(field.dataset.uiField, writeValue(field.dataset.uiField, value));
+      const name = field.dataset.uiField;
+      if (field.type === "number") { const value = readNumber(field, name); if (value === undefined) return; update(name, value); return; }
+      update(name, field.value);
     });
     root.addEventListener("change", event => {
       const field = event.target.closest("[data-ui-field]"); if (!field) return;
-      let value = field.type === "number" ? Number(field.value) : field.value;
-      update(field.dataset.uiField, writeValue(field.dataset.uiField, value));
+      const name = field.dataset.uiField;
+      if (field.type === "number") { const value = readNumber(field, name); if (value === undefined) return; update(name, value); return; }
+      update(name, field.value);
     });
     root.addEventListener("keydown", event => {
       const input = event.target.closest("[data-ui-tags] input"); if (!input || event.key !== "Enter") return;
