@@ -11,7 +11,7 @@ const WEATHER_FIELDS = [["provider", "数据源", "select", {qweather: "和风�
 const NATIVE_FIELDS = [["news_source_kind", "资讯源类型", "select", {host: "默认服务", disabled: "关闭", bilibili: "B 站", rss: "资讯订阅", json: "结构化数据"}], ["news_source_url", "资讯源地址", "text"], ["news_source_uid", "B 站账号编号", "text"], ["news_source_limit", "每次条数", "number", "条"]];
 const SCREEN_FIELDS = [["enabled", "启用屏幕观察", "bool"], ["recent_observation_enabled", "保存最近观测", "bool"], ["max_observations", "最近观测上限", "number", "条"]];
 const safeGet = async (ctx, path, query) => { if (!path) return {}; try { return await ctx.api.get(path, query); } catch (_) { return {}; } };
-const settingData = (data, section = "") => section ? (data?.sections?.[section] || data?.[section] || {}) : settingsOf(data);
+const settingData = (data, section = "") => settingsOf(section ? (data?.sections?.[section] || data?.[section] || {}) : data);
 // 能力目录只认后端实际返回的清单；读不到就空，不按平台名猜一份“可调用”的能力。
 const capabilityItems = data => Array.isArray(data?.capabilities) ? data.capabilities : data?.capabilities && typeof data.capabilities === "object" ? Object.entries(data.capabilities).map(([id, value]) => ({id, ...value})) : [];
 const channelText = (key, data) => {
@@ -40,11 +40,12 @@ const page = {
       reality: role.reality_access_api, recalls: role.reply_api ? pathJoin(role.reply_api, "recalls") : "",
       extensions: "integration/manifest", balance: "host-options/balance", weather: "host-options/weather", semantic: "semantic"
     };
-    const reads = await Promise.all(Object.entries(paths).map(async ([key, path]) => [key, await safeGet(ctx, path, key === "recalls" ? {limit: 5} : undefined)]));
+    const reads = await Promise.all(Object.entries(paths).map(async ([key, path]) => [key, await safeGet(ctx, path, key === "recalls" ? {limit: 5} : key === "semantic" ? {target_id: ctx.target?.target_id, role_id: role.role_id} : undefined)]));
     const data = Object.fromEntries(reads);
-    const config = await safeGet(ctx, configPath, {sections: "screen,proactive.contact"});
+    // proactive.contact 是安装级 section，只能从安装级 config 读；screen 在角色 config 上。
+    const [config, installation] = await Promise.all([safeGet(ctx, configPath, {sections: "screen"}), safeGet(ctx, "config", {sections: "proactive.contact"})]);
     const screenSettings = settingData(config, "screen");
-    const proactive = settingData(config, "proactive.contact");
+    const proactive = settingData(installation, "proactive.contact");
     const state = {balance: settingData(data.balance), weather: settingData(data.weather), native: settingData(data.native), screen: {...screenSettings}, tokens: {balance: tokenOf(data.balance), weather: tokenOf(data.weather), native: tokenOf(data.native), screen: tokenOf(config?.sections?.screen || config?.screen || config)}, drafts: {}, notice: "", busy: false};
     state.drafts = {balance: {...state.balance}, weather: {...state.weather}, native: {...state.native}, screen: {...state.screen}};
     const platformId = String(ctx.target?.platform_id || "");
@@ -86,7 +87,7 @@ const page = {
       const save = event.target.closest("[data-ui-save]");
       if (save) {
         const kind = "perception"; state.busy = true; setSaveState(root, kind, "保存中");
-        try { const entries = [["balance","host-options/balance",""],["weather","host-options/weather",""],["native",pathJoin(paths.native,"configure"),""],["screen",ctx.configEditable ? configPath : "","screen"]]; for (const [name,path,section] of entries) { if (!path || !state.drafts[name]) continue; const result = await postChanges(ctx,path,state.drafts[name],state.tokens[name],section); state.tokens[name] = tokenOf(result) || state.tokens[name]; } state.notice = "配置已保存"; setSaveState(root, kind, "已保存", "ok"); }
+        try { const entries = [["balance","host-options/balance",""],["weather","host-options/weather",""],["native",pathJoin(paths.native,"configure"),""],["screen",ctx.configEditable && configPath ? pathJoin(configPath, "configure") : "","screen"]]; for (const [name,path,section] of entries) { if (!path || !state.drafts[name]) continue; const result = await postChanges(ctx,path,state.drafts[name],state.tokens[name],section); state.tokens[name] = tokenOf(result) || state.tokens[name]; } state.notice = "配置已保存"; setSaveState(root, kind, "已保存", "ok"); }
         catch (_) { setSaveState(root, kind, "保存失败", "error"); }
         state.busy = false; draw(); return;
       }

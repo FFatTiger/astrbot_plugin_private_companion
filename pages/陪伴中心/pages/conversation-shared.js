@@ -54,7 +54,7 @@ export const valueOf = (draft, name) => draft[name] ?? defaults[name] ?? "";
 export const pathFor = (ctx, role = ctx?.role) => ctx?.roleWithConfig?.(role)?.config_api || "";
 export async function readConfig(ctx, role, section) { const path = pathFor(ctx, role); if (!path) return {}; const value = await api.get(path, {sections: section}); return value?.sections?.[section] || value?.settings || value || {}; }
 export async function saveConfig(ctx, role, section, changes, editToken) { const path = pathFor(ctx, role); if (!path) throw new Error("当前对象没有可用的角色配置接口"); return api.post(`${path}/configure`, {section, operation_key: api.operationKey(section), edit_token: editToken, changes}); }
-export async function readReply(role) { return api.readRole(role, "group"); }
+export async function readReply(role) { return api.readRole(role); }
 export function settingsOf(value) { return value?.settings || value || {}; }
 export function providersOf(reply, ctx) { return reply?.tts?.providers || reply?.status?.tts?.providers || reply?.settings?.status?.tts?.providers || ctx.capabilities?.tts?.providers || ctx.capabilities?.providers || []; }
 export function hasCapability(ctx, task) { const tasks = ctx.capabilities?.tasks || ctx.capabilities?.model_tasks; if (tasks == null) return false; return Array.isArray(tasks) ? tasks.some(item => typeof item === "string" ? item === task : item?.kind === task || item?.id === task || item?.capability_id === task) : tasks?.[task] === true; }

@@ -8,9 +8,11 @@ const getLocal=(key,fallback)=>{try{return localStorage.getItem(key)||fallback;}
 const setLocal=(key,value)=>{try{localStorage.setItem(key,value);}catch(_){}};
 const page={id:"system-data",section:"系统",title:"资料与外观",async render(root,ctx){
  style();root.innerHTML=`<div class="page-loading">正在读取</div>`;const api=ctx.api;let storage={},backup={},legacy={};
+ // 多目标模式下旧版迁移路由挂在角色上（astrbot_host/role_paths.py）：私聊 legacy_api，群 legacy_group_data_api。
+ const L=ctx.role?.legacy_api||"",LG=ctx.role?.legacy_group_data_api||"";
  try{storage=unwrap(await api.get("storage"));}catch(error){storage={error:error.message};}
  try{backup=unwrap(await api.get("backup"));}catch(_){backup={snapshots:[]};}
- try{legacy=unwrap(await api.get("legacy"));}catch(_){legacy={};}
+ try{legacy=L?unwrap(await api.get(L)):{};}catch(_){legacy={};}
  const snapshots=Array.isArray(backup.snapshots)?backup.snapshots:Array.isArray(backup.items)?backup.items:[];const pending=backup.pending||null;
  const snapRows=snapshots.length?snapshots.map((item,index)=>`<li class="system-list-item"><div><strong>${esc(item.note||item.snapshot_id||`快照 ${index+1}`)}</strong><small>${esc(item.created_at||"")} · ${fmtBytes(item.size_bytes||item.size)}</small></div><div class="system-inline">${item.content_hash?`<span class="system-badge" title="${esc(item.content_hash)}">摘要 ${esc(String(item.content_hash).slice(0,10))}…</span>`:""}${button("校验",`inspect-${index}`)}${button("还原预览",`preview-${index}`)}</div></li>`).join(""):"<li class=\"system-empty\">暂无备份快照</li>";
  const legacyPresent=legacy.present||legacy.available||legacy.plan||legacy.upgrade_present;const local={theme:getLocal("companion-v2-theme","courtyard"),density:getLocal("companion-v2-density","standard"),radius:getLocal("companion-v2-radius","standard"),typeScale:getLocal("companion-v2-type-scale","m"),motion:getLocal("companion-v2-motion","full"),large:getLocal("companion-v2-largeText","false")==="true"};
@@ -31,11 +33,11 @@ const page={id:"system-data",section:"系统",title:"资料与外观",async rend
    if(action==="create-backup")await api.post("backup/create",{operation_key:api.operationKey("backup-create"),note:"控制台创建"});
    else if(action==="reload-backup")return page.render(root,ctx);
    else if(action==="cleanup-storage")await api.post("storage/cleanup",{operation_key:api.operationKey("storage-cleanup"),confirm:true});
-   else if(action==="legacy-plan")await api.get("legacy/plan");
-   else if(action==="legacy-data-plan")await api.get("legacy/data-plan");
-   else if(action==="legacy-apply")await api.post("legacy/apply",{operation_key:api.operationKey("legacy-apply"),plan_token:legacy.plan_token,confirmed:true});
-   else if(action==="legacy-group-apply")await api.post("legacy-group-data/apply",{operation_key:api.operationKey("legacy-group"),plan_token:legacy.group_plan_token,confirmed:true});
-   else if(action==="legacy-auto")await api.post("legacy/auto",{operation_key:api.operationKey("legacy-auto"),confirmed:true});
+   else if(action==="legacy-plan")await api.get(L+"/plan");
+   else if(action==="legacy-data-plan")await api.get(L+"/data-plan");
+   else if(action==="legacy-apply")await api.post(L+"/apply",{operation_key:api.operationKey("legacy-apply"),plan_token:legacy.plan_token,confirmed:true});
+   else if(action==="legacy-group-apply")await api.post(LG+"/apply",{operation_key:api.operationKey("legacy-group"),plan_token:legacy.group_plan_token,confirmed:true});
+   else if(action==="legacy-auto")await api.post(L+"/auto",{operation_key:api.operationKey("legacy-auto"),confirmed:true});
    else if(action.startsWith("inspect-")||action.startsWith("preview-")){const index=Number(action.split("-").pop()),item=snapshots[index];const result=action.startsWith("inspect-")?await api.get(`backup/inspect?snapshot_id=${encodeURIComponent(item.snapshot_id)}`):await api.get(`backup/restore/preview?snapshot_id=${encodeURIComponent(item.snapshot_id)}`);const box=root.querySelector("[data-backup-preview]");if(box)box.innerHTML=`<div class="system-confirm">${esc(JSON.stringify(result,null,2))}${action.startsWith("preview-")?`<div class="system-actions">${button("确认暂存还原",`restore-${index}`," danger")}</div>`:""}</div>`;node.disabled=false;return;}
    else if(action.startsWith("restore-")){const item=snapshots[Number(action.split("-").pop())];const preview=root.querySelector("[data-backup-preview]")?.textContent||"";await api.post("backup/restore",{snapshot_id:item.snapshot_id,confirmed_hash:item.content_hash||preview.match(/[a-f0-9]{32,}/i)?.[0]||"",operation_key:api.operationKey("backup-restore")});}
    await page.render(root,ctx);

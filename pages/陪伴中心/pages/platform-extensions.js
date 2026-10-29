@@ -20,9 +20,9 @@ const page = {
   async render(root, ctx) {
     ensureStyles(); root.innerHTML = `<div class="page-loading">正在读取平台扩展</div>`;
     const qzoneApi = ctx.role?.qzone_extension_api || "", canPoke = ctx.capabilities?.message_components?.poke === true;
-    const [manifest, extensionData, poke, qzone, feed, screen, reality, game] = await Promise.all([safeGet(ctx, "integration/manifest"), safeGet(ctx, "extensions"), safeGet(ctx, "host-options/poke"), safeGet(qzoneApi ? pathJoin(qzoneApi, "status") : ""), safeGet(qzoneApi ? pathJoin(qzoneApi, "feed") : ""), safeGet(ctx.role?.screen_access_api || ""), safeGet(ctx.role?.reality_access_api || ""), safeGet(ctx.role?.game_access_api || "")]);
+    const [manifest, extensionData, poke, qzone, feed, screen, reality, game] = await Promise.all([safeGet(ctx, "integration/manifest"), safeGet(ctx, "extensions"), safeGet(ctx, "host-options"), safeGet(ctx, qzoneApi ? pathJoin(qzoneApi, "status") : ""), safeGet(ctx, qzoneApi ? pathJoin(qzoneApi, "feed") : ""), safeGet(ctx, ctx.role?.screen_access_api || ""), safeGet(ctx, ctx.role?.reality_access_api || ""), safeGet(ctx, ctx.role?.game_access_api || "")]);
     const manifestItems = normalize(manifest), extensions = normalize(extensionData);
-    const state = {manifestItems, extensions, poke: settingsOf(poke), qzone: settingsOf(qzone), feed, screen, reality, game, mobile: {}, tokens: {poke: tokenOf(poke), qzone: tokenOf(qzone), screen: tokenOf(screen), reality: tokenOf(reality), game: tokenOf(game)}, modal: null, notice: "", busy: false};
+    const state = {manifestItems, extensions, poke: {...(poke.poke || {})}, qzone: settingsOf(qzone), feed, screen, reality, game, mobile: {}, tokens: {poke: poke.edit_tokens?.poke || "", qzone: tokenOf(qzone), screen: tokenOf(screen), reality: tokenOf(reality), game: tokenOf(game)}, modal: null, notice: "", busy: false};
     const findExtension = id => state.extensions.find(item => extensionId(item) === id) || state.manifestItems.find(item => extensionId(item) === id) || {};
     state.mobile = settingsOf(findExtension("reality.mobile"));
     const accessCard = (label, key, data, route) => {
