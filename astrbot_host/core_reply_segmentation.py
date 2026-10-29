@@ -384,6 +384,10 @@ async def send_group_stream(event, generator):
         return None
     text = TextSegmentStream(policy)
     text_sequence = 0
+    # A separate-after attachment is placed only after the last text part, and
+    # the intent is usually known only once generation ends.  Hold it until
+    # then instead of hoping one of the published parts is the last one.
+    core["_reaction_stream_open"] = True
 
     async def publish(parts):
         nonlocal text_sequence
@@ -414,3 +418,16 @@ async def send_group_stream(event, generator):
                 text = TextSegmentStream(policy)
                 await _send_part(event, state, MessageChain(chain=[component]))
     await publish(text.finish())
+    if core.pop("_reaction_stream_open", None):
+        await _send_deferred_reaction(event, state)
+
+
+async def _send_deferred_reaction(event, state):
+    """Send a separate attachment after a streamed reply, if one was intended."""
+    core = event.get_extra(CORE_REPLY_CONTEXT_EXTRA)
+    reaction = core.get("_reaction_reply") if isinstance(core, dict) else None
+    if not isinstance(reaction, dict) or not reaction.get("enabled") or not reaction.get("intent"):
+        return None
+    # An empty body keeps the image a separate message; ``guarded_send`` drops
+    # it when retrieval finds nothing, so no empty chain reaches the platform.
+    return await _send_part(event, state, MessageChain(chain=[]))

@@ -99,6 +99,10 @@ async def prepare_core_reaction_message(event, message, *, authorize, segment_in
         return message
     if reaction.get("attempted") or core.get("_reaction_media", {}).get("offers"):
         return message
+    if core.get("_reaction_stream_open"):
+        # The reply is still streaming; a separate-after attachment belongs to
+        # the end of it, where ``send_group_stream`` sends it as its own message.
+        return message
     semantic, context, turn_id = reaction["semantic"], reaction["context"], reaction["turn_id"]
     try:
         settings = semantic.store.settings()
