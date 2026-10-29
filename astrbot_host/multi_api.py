@@ -20,6 +20,7 @@ from .group_memory_api import GroupMemoryWebAPI
 from .group_model_api import GroupModelWebAPI
 from .group_reply_api import GroupReplyWebAPI
 from .page_api import PageWebAPI
+from .capabilities_api import HostCapabilitiesWebAPI
 from .acquaintance_api import AcquaintanceWebAPI
 from .integration_api import IntegrationWebAPI
 from .semantic_api import SemanticWebAPI
@@ -262,6 +263,7 @@ class MultiHostWebAPI:
         routes = [
             (PREFIX + "/status", self.api_status, ["GET"], "Companion V2 multi-target status"),
             (PREFIX + "/performance", self.api_performance, ["GET"], "Companion V2 page performance mode"),
+            *HostCapabilitiesWebAPI(self.controller).routes(),
         ]
         lite_mode = performance_enabled(getattr(self.controller, "config", {}))
         self.controller._performance_mode_enabled = lite_mode

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>陪伴中心 Mock</title><link rel="icon" href="../favicon.svg"><link rel="stylesheet" href="../tokens.css"><link rel="stylesheet" href="../shell.css">
+</head>
+<body>
+<script src="./mock-data.js"></script>
+<script>
+(() => {
+  const token = "a".repeat(64);
+  const reply = {
+    group_wakeup_bot_name: "小鲸鱼", group_wakeup_direct_words: ["小鲸鱼", "大肥鱼"], group_wakeup_context_words: ["陪伴"], group_wakeup_question_enabled: true,
+    group_wakeup_question_threshold: 65, group_wakeup_interest_keywords: ["设计", "电影"], group_wakeup_interest_probability: .18, group_wakeup_image_enabled: false, group_wakeup_image_weight: .2,
+    group_wakeup_bot_name_enabled: true, group_wakeup_primary_member_ids: ["10001"], group_wakeup_owner_direct_words: ["小鲸鱼"], group_wakeup_cold_group_enabled: true,
+    group_wakeup_cold_group_threshold: 65, group_wakeup_cold_group_idle_minutes: 25, group_wakeup_short_text_wait_ms: 15000, group_wakeup_fatigue_limit: 5,
+    group_wakeup_fatigue_decay_minutes: 90, group_wakeup_cooldown_seconds: 90, group_wakeup_generated_keyword_limit: 24, group_wakeup_topic_interest_max_boost: 45,
+    group_wakeup_debounce_pending_penalty: 65, group_wakeup_log_limit: 80, group_conversation_followup_enabled: true, group_conversation_followup_seconds: 120,
+    group_conversation_followup_max_turns: 3, private_debounce_enabled: true, private_debounce_min_ms: 1500, private_debounce_max_ms: 4000, private_debounce_total_ms: 8000,
+    private_closing_guard_enabled: true, private_closing_guard_window_seconds: 1800, private_closing_guard_prompt_enabled: true, group_air_guard_enabled: true, group_high_intensity_enabled: false,
+    group_air_guard_window_seconds: 60, group_air_guard_max_bot_replies: 3, group_air_guard_cooldown_seconds: 150, group_air_guard_polite_loop_limit: 2,
+    enable_group_injection_guard: true, enable_group_privacy_guard: true, enable_group_reality_promise_guard: true
+  };
+  Object.assign(reply, window.CompanionMockLive.reply());
+  const group = {enable_group_behavior_feedback:true, enable_group_behavior_imitation:true, enable_group_behavior_learning:true, enable_group_interjection:false,
+    enable_group_interjection_feedback:true, enable_group_joke_guard:false, enable_group_moment_portrait:false, enable_group_moments:false, enable_group_mood_detection:false,
+    enable_group_persona_denoise:true, enable_group_repeat_follow:true, enable_group_roleplay_strength:false, enable_group_social_context:true, enable_group_topic_threads:true,
+    group_behavior_guidance:"", group_context_max_age_hours:12, group_interject_feedback_window_seconds:600, group_interject_max_daily:2, group_interject_min_interval_minutes:180,
+    group_repeat_count_distinct_users_only:false, group_repeat_follow_probability:.18, group_repeat_interrupt_image_path:"", group_repeat_interrupt_probability:.1,
+    group_repeat_interrupt_probability_step:.12, group_repeat_interrupt_text:"禁止复读", group_repeat_trigger_threshold:4, group_repeat_window_seconds:120, group_topic_thread_max:12};
+  const targets = window.CompanionMockLive.targets();
+  function readReply() { return {settings: JSON.parse(JSON.stringify(reply)), edit_token: token, fields:{}, scope:"role"}; }
+  function readConfig() { return {settings: JSON.parse(JSON.stringify(group)), edit_token: token, fields:Object.fromEntries(Object.keys(group).map(key => [key, {kind: typeof group[key] === "boolean" ? "bool" : typeof group[key] === "number" ? "int" : "text"}]))}; }
+  function readParticipation() { return {settings:{enable_group_interjection:group.enable_group_interjection,enable_group_interjection_feedback:group.enable_group_interjection_feedback,group_interject_feedback_window_seconds:group.group_interject_feedback_window_seconds,group_interject_max_daily:group.group_interject_max_daily,group_interject_min_interval_minutes:group.group_interject_min_interval_minutes},edit_token:token,fields:{}}; }
+  window.CompanionMockApi = {
+    apiGet: async route => {
+      if (route === "page/overview") return {installation_id:"mock",operator_id:"mock",setup:{step:"complete",ready:true},host:{state:"running",accepting:true,failure_code:null,enabled:true},performance:{enabled:false,mode:"standard"},targets,today:[]};
+      if (route === "page/targets") return {installation_id:"mock",operator_id:"mock",targets};
+      if (route === "accounts") return {...window.CompanionMockLive.accounts(),discovered:{groups:[{group_id:"group-demo",display_name:"HCUUTEST",platform_id:"wechat_helper",account_id:"wxid_bot",bot_id:"bot-demo",managed:false,available_for_target:true}]}};
+      if (route === "host/capabilities") return {target_id:"private-demo",role_id:"role-demo",platform_name:"wechat_helper",message_components:{face:null,poke:null,quote:null,mention:null},presence:null,screen:null,reality:null,voice:null,semantic:null,model:null,search_consumers:null};
+      if (route.endsWith("/reply")) return readReply();
+      if (route.endsWith("/participation")) return readParticipation();
+      if (route.includes("/config")) return readConfig();
+      return {};
+    },
+    apiPost: async (route, body) => {
+      if (route.endsWith("/reply/configure")) { Object.assign(reply, body.changes || {}); return {status:"ok", data:{status:"ok",settings:reply,edit_token:token}}; }
+      if (route.endsWith("/participation/configure")) { Object.assign(group, body.changes || {}); return {status:"ok", data:{status:"ok"}}; }
+      if (route.endsWith("/config/configure")) { Object.assign(group, body.changes || {}); return {status:"ok", data:{status:"ok"}}; }
+      return {status:"ok",data:{}};
+    }
+  };
+})();
+</script>
+<script type="module" src="../shell.js"></script>
+</body>
+</html>

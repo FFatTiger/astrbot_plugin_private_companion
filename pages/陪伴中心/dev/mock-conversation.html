@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>陪伴中心 · 对话 Mock</title>
+<link rel="icon" href="../favicon.svg"><link rel="stylesheet" href="../tokens.css"><link rel="stylesheet" href="../shell.css"><link rel="stylesheet" href="../pages/conversation.css">
+</head>
+<body>
+<script src="./mock-data.js"></script>
+<script>
+(() => {
+  const token = "m".repeat(64);
+  const reply = {
+    enabled:true,streaming:true,streaming_mode:"buffered",rule_mode:"words",split_words:["。","！","？"],match_width_variants:true,rule_regex:"",threshold:120,min_segment_chars:8,max_segments:4,prompt:"",part_gap_mode:"fixed",part_gap_ms:800,part_gap_min_ms:400,part_gap_max_ms:1400,part_gap_log_base:2.1,prompt_style_mode:"free",style_prompt:"",enable_humanized_expression:true,humanized_expression_prompt:"保持自然、简短。",content_cleanup_enabled:true,content_cleanup_mode:"words",content_cleanup_scope:"middle",content_cleanup_rule:"",content_cleanup_words:["&&"],content_replacement_enabled:false,content_replacements:[],framework_error_guard_enabled:true,enable_forbidden_word_recall:false,recall_forbidden_words:["内部标记"],recall_forbidden_scope:"bot_and_group",recall_forbidden_word_case_sensitive:false,reply_diagnostic_limit:30,component_order:["text","image","voice"],image_position:"after_text",reply_quote_enabled:true,reply_quote_group_enabled:true,reply_quote_first_part_only:true,reply_quote_skip_chars:8,reply_mention_speaker_enabled:true,voice_enabled:true,voice_trigger_mode:"request",voice_generation_mode:"plain",voice_conversion_scope:"full",voice_segment_mode:"whole",voice_delivery_mode:"voice_and_text",voice_language:"zh",voice_foreign_text_mode:"bilingual",voice_position:"after_text",voice_provider_id:"tts-main",voice_zh_provider_id:"tts-zh",voice_ja_provider_id:"",voice_en_provider_id:"",voice_private_zh_provider_id:"",voice_private_ja_provider_id:"",voice_private_en_provider_id:"",voice_group_zh_provider_id:"",voice_group_ja_provider_id:"",voice_group_en_provider_id:"",voice_trigger_keywords:["读一下","语音"],voice_extra_prompt:"语气柔和",voice_primary_mention_keywords:["大哥"],voice_primary_mention_probability:.75,voice_primary_mention_prompt:"优先回应核心用户的语音要求",enable_context_image_captioning:true,context_image_caption_max_items:3,enable_private_image_self_recognition:true,enable_private_image_vision_cache:true,private_image_vision_cache_max_items:20,private_image_self_recognition_hint:"蓝色鲸鱼头像",private_image_vision_custom_prompt:"关注图片中的文字和主体。",private_image_vision_max_chars:800,private_image_vision_wait_seconds:8,private_image_provider_failure_cooldown_seconds:60,video_understanding_enabled:true,video_understanding_max_chars:1200,video_understanding_wait_seconds:10,video_understanding_private_enabled:true,video_understanding_group_enabled:true,video_self_recognition_hint:"",video_understanding_prompt:"",documents:{".txt":true,".pdf":true,".docx":false},recent:[{state:"complete",response_type:"text_or_mixed",turn_type:"conversation.reply",current_inputs:2,parts:["好呀"],created_at:"2026-10-29T08:00:00Z"}],tts:{providers:[{id:"tts-main",model:"通用语音",voice:"默认"},{id:"tts-zh",model:"中文语音",voice:"温柔"}]}}
+  Object.assign(reply, window.CompanionMockLive.reply(), {split_words:"[\"。\", \"！\", \"？\"]", content_cleanup_words:"[\"&&\"]", content_replacements:"[]"});
+  const config = {
+    "busy_gate":{busy_reply_gate_enabled:true,busy_reply_min_delay_seconds:10,busy_reply_max_delay_seconds:60,busy_reply_proactive_resume_buffer_minutes:30,busy_activity_keywords:["开会","工作"],busy_exclude_keywords:["下班"],busy_urgent_keywords:["急事"]},
+    "life":{enable_rest_reply_simulation:true,rest_reply_mode:"probability",rest_reply_probability:60,rest_reply_llm_threshold:60,rest_reply_active_windows:"23:00-08:00",rest_reply_awake_grace_minutes:30,enable_rest_backlog_reply:true,rest_backlog_max_messages:20},
+    "expression.learning":{main_companion_subject:"wxid_user",expression_private_source_mode:"owner",expression_private_source_subject_ids:[],expression_private_application_mode:"owner",expression_private_application_subject_ids:[],learning_mode:"balanced",private_application_enabled:true,group_application_enabled:true,sample_review_enabled:true,style_review_enabled:false,window_hours:168,sample_limit:50,min_samples:12,group_min_samples:30,sample_chars:500,scan_interval_minutes:60,group_scan_interval_minutes:180,group_daily_batch_limit:2,group_new_messages:20,active_signal_limit:200,rules_per_turn:3,payload_chars:1200,rotation_candidate_limit:8,rotation_decay_hours:72},
+    "web_understanding":{enabled:true,max_links:3,max_chars:6000,timeout_seconds:8},
+    "group_participation":{enable_group_behavior_learning:true,enable_group_interjection:false,enable_group_repeat_follow:true}
+  };
+  const samples=[{handle:"sample-1",text:"今天这个设计看起来很舒服。",sender_id:"大哥",state:"pending",view_token:"view-sample-1"},{handle:"sample-2",text:"我先去忙一会儿，晚点回来。",sender_id:"群友",state:"approved",view_token:"view-sample-2"}];
+  const signals=[{signal_id:"signal-1",state:"adopted",expression:{pattern:"轻轻报个到",situation:"主动联系时",avoid:"不要连续使用"},proposal:"在低打扰时用短句表达在场感。",actions:["retire"],view_token:"view-signal-1",dimension:"sentence_rhythm"},{signal_id:"signal-2",state:"pending",expression:{pattern:"先说结论再补充",situation:"解释复杂事情时",avoid:""},proposal:"先给简短结论，再补充背景。",actions:["adopt","reject"],view_token:"view-signal-2",dimension:"formatting"}];
+  const targets=window.CompanionMockLive.targets();
+  function replyData(){return {settings:JSON.parse(JSON.stringify(reply)),edit_token:token,fields:{},scope:"role"};}
+  function configData(section){return {settings:JSON.parse(JSON.stringify(config[section]||{})),edit_token:token,fields:{}};}
+  function unwrap(route){return route.replace(/^\//,"");}
+  window.CompanionMockApi={
+    request:async(method,route,body)=>method==="GET"?window.CompanionMockApi.apiGet(route,body):window.CompanionMockApi.apiPost(route,body),
+    apiGet:async(route,query)=>{
+      route=unwrap(route);
+      if(route==="page/overview"){const wanted=new URLSearchParams(location.search).get("target");const order=wanted==="group"?[targets[1],targets[0],targets[2]]:wanted==="qq"?[targets[2],targets[0],targets[1]]:targets;return {installation_id:"mock",operator_id:"mock",setup:{step:"complete",ready:true},host:{state:"running",accepting:true,failure_code:null,enabled:true},performance:{enabled:false,mode:"standard"},targets:order,today:[]};}
+      if(route==="page/targets"){const wanted=new URLSearchParams(location.search).get("target");const order=wanted==="group"?[targets[1],targets[0],targets[2]]:wanted==="qq"?[targets[2],targets[0],targets[1]]:targets;return {installation_id:"mock",operator_id:"mock",targets:order};}
+      if(route==="accounts")return {...window.CompanionMockLive.accounts(),discovered:{groups:[{group_id:"group-new",display_name:"未接入群",platform_id:"wechat_helper",account_id:"wxid_bot",bot_id:"bot-demo",managed:false,available_for_target:true}]}};
+      if(route==="host/capabilities")return {platform_name:"aiocqhttp",message_components:{face:true,poke:true,quote:true,mention:true},tasks:["conversation.context_image_caption","conversation.image_narration","conversation.video_narration"],quote:true,mention:true,face:true,tts:{providers:reply.tts.providers}};
+      if(route==="host-options")return {voice_reply:{enabled:true,probability:.2,private_probability:.3,group_probability:.1},forward_intake:{max_forwards:8,max_nodes:80,max_depth:3,parse_nested:true},edit_tokens:{voice:token,forward_intake:token}};
+      if(route.includes("/style/samples"))return {items:samples,counts:{pending:1,approved:1,rejected:0},runtime:{running:false,learning_enabled:true,application_enabled:true,eligible_samples:2,minimum_samples:2},next_cursor:""};
+      if(route.endsWith("/style"))return {items:signals,counts:{adopted:1,pending:1,retired:0,rejected:0},capacity:{active:1,limit:200},next_cursor:""};
+      if(route.endsWith("/participation"))return {settings:{enable_group_interjection:false,enable_group_interjection_feedback:true,group_interject_feedback_window_seconds:600,group_interject_max_daily:2,group_interject_min_interval_minutes:180},edit_token:token,fields:{}};
+      if(route.endsWith("/reply"))return replyData();
+      if(route.includes("/config")){const section=query?.sections||"group_participation";return configData(section);}
+      return {};
+    },
+    apiPost:async(route,body)=>{
+      route=unwrap(route);
+      if(route.endsWith("/style/samples/command")){const item=samples.find(v=>v.handle===body.handle);if(item)item.state=body.action==="approve"?"approved":"rejected";return {saved:true};}
+      if(route.endsWith("/style/command")){const item=signals.find(v=>v.signal_id===body.signal_id);if(item)item.state={adopt:"adopted",reject:"rejected",retire:"retired",restore:"adopted",reconsider:"pending"}[body.action]||item.state;return {saved:true};}
+      if(route.endsWith("/style/learn"))return {started:true};
+      if(route.endsWith("/style/export"))return {package:{version:1,title:"Mock 表达分享",rule_groups:[{rules:signals.map(v=>({dimension:v.dimension,observation:v.expression?.situation,proposal:v.proposal,expression:v.expression}))}]},rule_count:signals.length};
+      if(route.endsWith("/style/import/preview"))return {preview_token:"preview-token",importable_rule_count:1,duplicate_rule_count:0,candidates:[]};
+      if(route.endsWith("/style/import/apply"))return {imported_count:1};
+      if(route.endsWith("/reply/preview"))return {mode:"offline_preview",parts:["我刚才整理了一下今天的安排。","有一件小事想先和你说。","剩下的我们可以慢慢聊。"]};
+      if(route.endsWith("/reply/configure")){Object.assign(reply,body.changes||{});return {settings:reply,edit_token:token};}
+      if(route.includes("/config/configure")){const section=body.section||"group_participation";Object.assign(config[section],body.changes||{});return {settings:config[section],edit_token:token};}
+      if(route.includes("/participation/configure")){Object.assign(config.group_participation,body.changes||{});return {saved:true};}
+      if(route.startsWith("host-options/"))return {settings:body.changes||{},edit_token:token};
+      return {saved:true};
+    }
+  };
+})();
+</script>
+<script type="module" src="../shell.js"></script>
+</body>
+</html>

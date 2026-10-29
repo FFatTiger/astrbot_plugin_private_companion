@@ -103,6 +103,10 @@ class SessionTopologyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({row["persona_id"] for row in groups}, {""})
         self.assertEqual(len({row["session_key"] for row in groups}), 2)
         self.assertTrue(all(not row["managed"] for row in groups))
+        discovered_groups = response["data"]["discovered"]["groups"]
+        self.assertEqual({row["group_id"] for row in discovered_groups}, {"300"})
+        self.assertTrue(all(row["managed"] is False and row["available_for_target"] is True
+                            for row in discovered_groups))
         self.assertFalse(self.controller.session_topology.path.exists())
         self.assertIsNone(self.controller.runtime)
         self.assertEqual(self.native.provider.client.state.calls, [])

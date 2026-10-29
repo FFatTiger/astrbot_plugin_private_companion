@@ -407,14 +407,21 @@ class SessionTopology:
                     rows[umo] = {"unified_msg_origin": umo, "conversation_id": cid}
         return rows, issues
 
-    async def inventory(self, *, settings=None, scope_kind=None):
-        return (await self.inventory_report(settings=settings, scope_kind=scope_kind))["targets"]
+    async def inventory(self, *, settings=None, scope_kind=None, managed_only=None):
+        return (await self.inventory_report(settings=settings, scope_kind=scope_kind,
+                                            managed_only=managed_only))["targets"]
 
-    async def inventory_report(self, *, settings=None, scope_kind=None):
+    async def inventory_report(self, *, settings=None, scope_kind=None, managed_only=None):
         accounts, configured = self.accounts(settings), self.configured(settings)
         if scope_kind is not None:
             configured = [row for row in configured if row["scope_kind"] == scope_kind]
-        if settings is not None:
+        # Passing settings used to mean "managed windows only". Callers that
+        # need the native directory, including groups not yet saved as targets,
+        # pass managed_only=False explicitly. The default keeps startup persona
+        # snapshots and group-save validation on the managed list.
+        if managed_only is None:
+            managed_only = settings is not None
+        if settings is not None and managed_only:
             routes = {(row["platform_id"], row["account_id"]) for row in configured}
             accounts = [row for row in accounts if (row["platform_id"], row["account_id"]) in routes]
         platforms = {row["platform_id"] for row in accounts}
@@ -437,7 +444,7 @@ class SessionTopology:
             async with slots:
                 try:
                     rows = await self._session_windows(umo, item, accounts, configured, mappings, observed,
-                                                       managed_only=settings is not None)
+                                                       managed_only=managed_only)
                     return rows, None
                 except TaskError as error:
                     return self._partial_windows(umo, accounts, configured, observed), error

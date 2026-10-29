@@ -11,6 +11,7 @@ from companion_v2.identity_policy.object_access import ObjectAccessPolicy
 
 from .management_identity import dashboard_operator
 from .display_names import display_names
+from .group_directory import apply_native_group_names
 from .identity_derivation import role_display_name
 from .settings import HostControlError
 
@@ -24,6 +25,8 @@ class PageWebAPI:
 
     def routes(self):
         return [(PREFIX + "/page/targets", self.targets, ["GET"], "Read authorized Companion page targets"),
+                (PREFIX + "/page/overview", self.overview, ["GET"],
+                 "Read the current installation, target and host snapshot"),
                 (PREFIX + "/page/workspace-entry", self.workspace_entry, ["GET"],
                  "Refresh the authenticated Companion workspace asset entry"),
                 (PREFIX + "/page/ownership", self.ownership, ["GET"],
@@ -173,6 +176,7 @@ class PageWebAPI:
                                      "qzone_extension", "image_material")}}
                                  for role in target["roles"]]} for target in targets]
             public = await display_names(controller).targets(public)
+            public = await apply_native_group_names(controller, public)
             async with controller._control_lock:
                 if controller.runtime is not runtime or controller.settings is not settings_snapshot:
                     raise TaskError("staging_not_initialized", "the profile changed while reading display names")
@@ -190,3 +194,76 @@ class PageWebAPI:
                     "operator_id": operator.subject.subject_id, "operator_name": username, "targets": public}))
         except (TaskError, HostControlError) as error:
             return outcome_response(Outcome.failed(error.code, str(error)))
+
+    async def overview(self):
+        """One first-screen read of data the separate status routes already return."""
+        from .performance_mode import performance_status
+        from .setup_api import SetupWebAPI
+        from .web_api import outcome_response
+
+        directory = await self.targets()
+        if directory.get("status") != "ok":
+            return directory
+        try:
+            self._dashboard_user()
+            controller = self.controller
+            setup = SetupWebAPI(controller)._status_document()
+            host = controller.status()
+            performance = performance_status(getattr(controller, "config", {}),
+                enabled=getattr(controller, "_performance_mode_enabled", None))
+            today = await self._today(controller, directory["data"]["targets"])
+            return outcome_response(Outcome.success({
+                "installation_id": directory["data"]["installation_id"],
+                "operator_id": directory["data"]["operator_id"],
+                "operator_name": directory["data"]["operator_name"],
+                "setup": {"step": setup.get("step"), "ready": setup.get("ready"),
+                          "prepared": setup.get("prepared")},
+                "host": {"state": host.get("state"), "accepting": host.get("accepting"),
+                         "failure_code": host.get("failure_code"), "enabled": host.get("enabled")},
+                "performance": {"enabled": performance.get("enabled"), "mode": performance.get("mode")},
+                "targets": directory["data"]["targets"],
+                "today": today,
+            }))
+        except (TaskError, HostControlError) as error:
+            return outcome_response(Outcome.failed(error.code, str(error)))
+
+    @staticmethod
+    def _dashboard_user():
+        username = request.username
+        if type(username) is not str or not username.strip() or username.startswith("api_key:"):
+            raise TaskError("dashboard_identity_required", "sign in to the AstrBot Dashboard")
+
+    async def _today(self, controller, targets):
+        """Reuse the role state read. A target without that API contributes nothing."""
+        session = controller.session or controller.last_session
+        authority = getattr(controller, "authority", None)
+        context_for = getattr(authority, "context", None)
+        if session is None or not callable(context_for):
+            return None
+        from companion_v2.role_work.state.management import StateManagement
+        rows = []
+        for target in targets:
+            if target.get("scope_kind") == "group":
+                continue
+            for role in target.get("roles", []):
+                if not role.get("state_api"):
+                    continue
+                try:
+                    operator = dashboard_operator(controller.runtime, request.username, at=controller.now())
+                    context = context_for(target["target_id"], role["role_id"])
+                    status = StateManagement(session.application, context).status(operator)
+                    document = status.unwrap() if status.is_success else None
+                except TaskError:
+                    document = None
+                except Exception:
+                    document = None
+                if not isinstance(document, dict):
+                    rows.append({"target_id": target.get("target_id"), "role_id": role.get("role_id"),
+                                 "state": None, "occurrences": None})
+                    continue
+                state = document.get("state") if isinstance(document.get("state"), dict) else None
+                rows.append({"target_id": target.get("target_id"), "role_id": role.get("role_id"),
+                             "state": None if state is None else {"state": state.get("state"),
+                                                                  "revision": state.get("revision")},
+                             "occurrences": document.get("occurrences")})
+        return rows

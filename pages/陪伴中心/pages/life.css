@@ -1,0 +1,90 @@
+.life-page { gap: 18px; }
+.life-page .console-card { box-shadow: 0 8px 24px rgba(35,29,18,.035); }
+.life-details > summary { list-style: none; cursor: pointer; }
+.life-details > summary::-webkit-details-marker { display: none; }
+.life-more { margin: 8px -20px 0; border-top: 1px solid var(--line); }
+.life-more > summary { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px 7px; color: var(--muted); cursor: pointer; list-style: none; font-size: 13px; }
+.life-more > summary::-webkit-details-marker { display: none; }
+.life-more[open] > summary span:last-child { transform: rotate(180deg); }
+.life-more > div { padding: 0 0 1px; }
+.life-details > summary::after { content: "⌄"; color: var(--muted); font-weight: 400; transition: transform .16s ease; }
+.life-details[open] > summary::after { transform: rotate(180deg); }
+.life-card-heading, .life-toolbar, .life-growth-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.life-scope, .life-pill { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px; color: #8b6514; background: var(--amber-soft); font-size: 12px; font-weight: 650; }
+.life-scope.muted, .life-muted { color: var(--muted); }
+.life-inline-note, .life-card-note, .life-readonly-footer { color: var(--muted); font-size: 13px; }
+.life-notice { min-height: 22px; color: var(--muted); font-size: 13px; }
+.life-notice.is-error { color: #a45a4a; }
+.life-notice:empty { min-height: 0; }
+.life-empty { display: grid; gap: 5px; padding: 28px 0; color: var(--muted); text-align: center; }
+.life-empty strong { color: var(--text); font-size: 15px; }
+.life-empty span { font-size: 13px; }
+.life-readonly { width: min(100%, 420px); padding: 8px 10px; color: var(--muted); text-align: right; }
+.life-readonly-grid, .life-overview-grid, .life-environment-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--line); }
+.life-readonly-grid span, .life-overview-grid span, .life-environment-grid span { display: grid; gap: 2px; padding: 12px; background: var(--surface-raised); color: var(--muted); font-size: 13px; }
+.life-readonly-grid b, .life-overview-grid b, .life-environment-grid b { color: var(--text); font-size: 12px; }
+.life-purpose-grid { display: grid; gap: 6px; padding: 8px 0 14px; }
+.life-purpose-head, .life-purpose-row { display: grid; grid-template-columns: minmax(150px, 1.6fr) repeat(3, minmax(90px, 1fr)); align-items: center; gap: 10px; }
+.life-purpose-head { padding: 0 10px 2px; color: var(--muted); font-size: 12px; }
+.life-purpose-row { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); font-size: 12px; }
+.life-purpose-row .ui-input, .life-purpose-row .ui-unit { width: 100%; }
+.life-purpose-control { min-width: 0; }
+.life-curve { display: grid; grid-template-columns: repeat(12, minmax(34px, 1fr)); gap: 8px; padding: 16px 0 12px; }
+.life-curve label { display: grid; gap: 4px; color: var(--muted); text-align: center; font-size: 10px; }
+.life-curve input { width: 100%; min-width: 0; height: 30px; padding: 0 3px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--text); background: var(--surface-raised); text-align: center; font-size: 12px; }
+.life-hidden-field { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+.life-diagnostic-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.life-materials { display: grid; grid-template-columns: minmax(180px, 1fr) auto; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.life-material-grid { display: flex; grid-column: 1 / -1; flex-wrap: wrap; gap: 8px; }
+.life-materials span { padding: 4px 8px; border-radius: 999px; background: var(--amber-wash); }
+.life-button { min-height: 33px; padding: 0 11px; border: 1px solid transparent; border-radius: 8px; color: #fff; background: var(--amber); font-size: 13px; font-weight: 700; }
+.life-button.secondary { color: var(--text); border-color: var(--line-strong); background: var(--surface-raised); }
+.life-button.danger { color: #8b5549; border-color: #e6c9c1; background: #fff8f5; }
+.life-button:disabled { opacity: .45; cursor: not-allowed; }
+.life-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.life-two-pane { display: grid; grid-template-columns: minmax(180px, .72fr) minmax(0, 1.28fr); gap: 16px; padding: 0 20px 18px; }
+.life-two-pane > div { min-width: 0; }
+.life-two-pane > div > .console-card { box-shadow: none; }
+.life-two-pane .console-card { margin-top: 0; }
+.life-record-list { display: grid; gap: 7px; max-height: 620px; overflow: auto; }
+.life-record { display: grid; gap: 3px; width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 9px; color: var(--text); background: var(--surface-raised); text-align: left; }
+.life-record:hover, .life-record.is-selected { border-color: #e1b55b; background: var(--amber-wash); }
+.life-record strong { display: flex; justify-content: space-between; gap: 7px; font-size: 13px; }
+.life-record small { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.life-detail { padding: 2px 0 10px; }
+.life-detail h2 { margin: 4px 0 9px; font-size: 20px; }
+.life-eyebrow { color: var(--muted-light); font-size: 12px; }
+.life-prose { min-height: 100px; margin: 0; white-space: pre-wrap; }
+.life-afterglow, .life-progress-note { margin: 12px 0 0; padding: 10px 12px; border-left: 3px solid var(--amber); color: var(--muted); background: var(--amber-wash); font-size: 13px; }
+.life-meta-line, .life-status-updated { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 13px; color: var(--muted); font-size: 12px; }
+.life-records { display: grid; gap: 8px; }
+.life-receipts > div, .life-review-list article, .life-calendar-list article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+.life-receipts > div:first-child, .life-review-list article:first-child, .life-calendar-list article:first-child { border-top: 0; }
+.life-receipts b { color: var(--text); }
+.life-review-list article > div, .life-calendar-list article > div { min-width: 0; }
+.life-review-list p { margin: 3px 0 0; color: var(--muted); }
+.life-growth-list { display: grid; gap: 10px; padding-top: 12px; }
+.life-growth-card { padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-raised); }
+.life-growth-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.life-growth-card h3 { display: inline; margin: 0 8px 0 0; font-size: 15px; }
+.life-growth-card header small { color: var(--muted); font-size: 11px; }
+.life-growth-card p { margin: 8px 0 0; color: var(--muted); }
+.life-growth-meta { display: flex; gap: 12px; margin-top: 10px; color: var(--muted-light); font-size: 12px; }
+.life-maintenance-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.life-subresult { min-height: 22px; margin-top: 12px; color: var(--muted); font-size: 13px; }
+.life-query { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 0 14px; }
+.life-query .ui-input { flex: 1 1 240px; }
+.life-calendar-list article > div:first-child { display: grid; gap: 2px; }
+.life-calendar-list article span { color: var(--muted); font-size: 12px; }
+.life-dialog { width: min(560px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 14px; color: var(--text); background: var(--surface); box-shadow: 0 18px 55px rgba(35,29,18,.18); }
+.life-dialog::backdrop { background: rgba(30,25,17,.28); }
+.life-dialog form { margin: 0; }
+.life-dialog header, .life-dialog footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 18px; border-bottom: 1px solid var(--line); }
+.life-dialog header h2 { margin: 0; font-size: 16px; }
+.life-dialog header button { border: 0; color: var(--muted); background: transparent; font-size: 22px; }
+.life-dialog-body { display: grid; gap: 13px; padding: 18px; }
+.life-dialog-body > p { margin: 0; color: var(--muted); }
+.life-dialog-field { display: grid; gap: 5px; color: var(--text); font-size: 13px; }
+.life-dialog-field .ui-input, .life-dialog-field .ui-textarea, .life-dialog-field .ui-unit { width: 100%; }
+.life-dialog footer { justify-content: flex-end; border-top: 1px solid var(--line); border-bottom: 0; }
+@media (max-width: 720px) { .life-two-pane { grid-template-columns: 1fr; padding: 0 14px 14px; } .life-purpose-head, .life-purpose-row { grid-template-columns: minmax(110px, 1.2fr) repeat(3, minmax(58px, 1fr)); gap: 6px; } .life-diagnostic-grid { grid-template-columns: repeat(2, 1fr); } .life-curve { grid-template-columns: repeat(6, 1fr); } .life-readonly-grid, .life-overview-grid, .life-environment-grid { grid-template-columns: 1fr; } .life-receipts > div, .life-review-list article, .life-calendar-list article { align-items: flex-start; flex-direction: column; } }
