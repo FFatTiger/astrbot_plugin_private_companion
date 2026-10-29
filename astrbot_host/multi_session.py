@@ -98,6 +98,22 @@ async def _current_native_role(bridge, account, umo):
     return bridge._conversation_key(umo, cid), projection.role, instruction
 
 
+def _platform_display_name(value, native_id):
+    """Bound one platform-provided name, or None when it names no one.
+
+    WeChat and QQ copy these names from the client verbatim, so control
+    characters are dropped before they reach a stored card. A value that is the
+    account itself (``wxid_...``) is an identifier, not a display name, and an
+    administrator remark must never be shadowed by it.
+    """
+    if not isinstance(value, str):
+        return None
+    cleaned = " ".join("".join(char for char in value if char.isprintable()).split())[:64].strip()
+    if not cleaned or cleaned == native_id or cleaned.lower().startswith("wxid_"):
+        return None
+    return cleaned
+
+
 class MultiPrivateBridge(NativePrivateBridge):
     def __init__(self, *args, settings, authority, group_quote_loader=None, group_forward_loader=None,
                  group_component_reader=None, **kwargs):
@@ -1191,25 +1207,41 @@ class MultiHostSession:
                 slot="manual:" + mode + ":" + captured.event_id, manual=True, refresh=refresh)
 
     def _record_platform_names(self, event, context):
-        """Record platform display names from the already authenticated OneBot
-        event. Optional derivation: any failure only costs a name, never intake."""
+        """Record platform display names from the already authenticated event.
+
+        OneBot reports the nickname and the group card in ``raw_message.sender``.
+        A ``wechat_helper`` event has no OneBot payload: its adapter puts the
+        group card (the WeChat name in private chats) on ``message_obj.sender``,
+        so that one name is stored as the name and as the current group's card.
+        Optional derivation: any failure only costs a name, never intake.
+        """
         try:
-            raw = getattr(event.message_obj, "raw_message", None)
+            message = event.message_obj
+            raw = getattr(message, "raw_message", None)
             sender = raw.get("sender") if isinstance(raw, Mapping) else None
-            if not isinstance(sender, Mapping):
+            if isinstance(sender, Mapping):
+                nickname, card = sender.get("nickname"), sender.get("card")
+            elif self.bridge.platform_name(context.scope) == "wechat_helper":
+                nickname = card = getattr(getattr(message, "sender", None), "nickname", None)
+            else:
+                return
+            native_id = str(context.actor.principal.native_account_id or "")
+            nickname = _platform_display_name(nickname, native_id)
+            card = _platform_display_name(card, native_id)
+            if nickname is None and card is None:
                 return
             group = context.scope.kind is ScopeKind.GROUP
             if not group and context.scope.native_scope_id != context.actor.principal.native_account_id:
                 return
             self.application.messages.acquaintance.record_platform_names(
                 context, group_id=context.scope.native_scope_id if group else None,
-                nickname=sender.get("nickname"), card=sender.get("card"))
+                nickname=nickname, card=card)
             if group:
                 # Keep platform names in the same group relationship projection
                 # as the acquaintance card; both remain display clues, never
                 # identity proof.
                 self.application.messages.group_network.record_names(
-                    context, nickname=sender.get("nickname"), card=sender.get("card"), at=self.now())
+                    context, nickname=nickname, card=card, at=self.now())
         except Exception:
             pass
 
