@@ -160,7 +160,7 @@ const participationPage = {
     if (showGroup) cards.push(card("唤醒", renderRows(state, mainReply), {meta: "群聊"}));
     if (showGroup) cards.push(card("连续对话", renderRows(state, followup)));
     if (showPrivate) cards.push(card("私聊", renderRows(state, privateFields), {meta: "当前私聊"}));
-    if (showGroup) cards.push(card("群聊参与", renderRows(state, groupMain), {meta: "当前群"}));
+    if (showGroup) cards.push(card("群聊参与", `${configNote ? `<p class="ui-hint">${esc(configNote)}</p>` : ""}${renderRows(state, groupMain, !configEditable)}`, {meta: configEditable ? "所有群共用" : "只读"}));
     cards.push(`<details class="console-card" data-more><summary class="card-title"><span class="more-title"><span>更多</span><span class="more-chevron" aria-hidden="true">⌄</span></span></summary><div class="card-body">${renderRows(state, moreReply)}${showGroup ? `${configNote ? `<p class="ui-hint">${esc(configNote)}</p>` : ""}${renderRows(state, groupMore, !configEditable)}` : ""}</div></details>`);
     root.innerHTML = `<div class="page-stack" data-participation-root>${cards.join("")}${saveBar("participation", {disabled: true})}</div>`;
     const markDirty = () => {
@@ -189,7 +189,7 @@ const participationPage = {
       state.saving = true; save.disabled = true; setSaveState(root, "participation", "保存中");
       const replyChanges = {}, configChanges = {}, windowChanges = {};
       for (const name of REPLY_FIELDS) if (JSON.stringify(state.draft[name]) !== JSON.stringify(state.base[name]) && state.available.has(name)) replyChanges[name] = state.listFormats[name] ? restoreListValue(state.listFormats[name], state.draft[name]) : state.draft[name];
-      for (const name of GROUP_FIELDS) if (configRole && JSON.stringify(state.draft[name]) !== JSON.stringify(state.base[name]) && state.available.has(name)) configChanges[name] = state.listFormats[name] ? restoreListValue(state.listFormats[name], state.draft[name]) : state.draft[name];
+      for (const name of GROUP_FIELDS) if (configEditable && JSON.stringify(state.draft[name]) !== JSON.stringify(state.base[name]) && state.available.has(name)) configChanges[name] = state.listFormats[name] ? restoreListValue(state.listFormats[name], state.draft[name]) : state.draft[name];
       for (const name of ["enable_group_interjection", "enable_group_interjection_feedback", "group_interject_feedback_window_seconds", "group_interject_max_daily", "group_interject_min_interval_minutes"])
         if (JSON.stringify(state.draft[name]) !== JSON.stringify(state.base[name]) && state.available.has(name)) windowChanges[name] = state.listFormats[name] ? restoreListValue(state.listFormats[name], state.draft[name]) : state.draft[name];
       try {

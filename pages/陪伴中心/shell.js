@@ -1,4 +1,4 @@
-const BUILD_ID = window.COMPANION_BUILD_ID || "20261029-08";
+const BUILD_ID = window.COMPANION_BUILD_ID || "20261029-09";
 const versioned = path => `${path}?v=${BUILD_ID}`;
 const [apiModule, uiModule, placeholderModule] = await Promise.all([
   import(versioned("./api.js")),
